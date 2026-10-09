@@ -1,0 +1,33 @@
+digraph APP {
+ graph [label="Mac APP Build Automation｜Plugin → GMX → Jenkins", labelloc=t, fontsize=23, fontname="Noto Sans CJK SC", bgcolor="white", ranksep=.35, nodesep=.45, pad=.25, splines=polyline];
+ node [shape=box, style="rounded,filled", color="#C7D2E1", fillcolor="#F5F7FB", fontname="Noto Sans CJK SC", fontsize=12, margin="0.18,0.11"];
+ edge [color="#657A94", arrowsize=.7, fontname="Noto Sans CJK SC", fontsize=10];
+ start [label="输入：源分支、Plugin 主次版本、国家、项目名\nGithub URL 使用默认值或覆盖", fillcolor="#E8F2FF"];
+ pre [label="环境检查：Token / Git / 浏览器登录\nSQLite 任务分配、独立目录、统一时间戳"];
+ subgraph cluster_plugin {label="阶段 A：Plugin"; fontsize=16; fontname="Noto Sans CJK SC"; color="#9CC5F7"; style="rounded";
+ pbranch [label="从 Plugin 源分支创建\nrelease/<主次版本>.<时间戳>"];
+ pedit [label="精确修改两个 .xcconfig\nBUNDLE_VERSION_SHORT = <主次版本>.<时间戳>"];
+ ppush [label="检查 Diff / Commit / Push\n验证远端 Commit SHA"];
+ pjob [label="等待新 Jenkins Job 出现\nrelease_1_3_<时间戳>"];
+ pinit [label="按页面状态初始化\n必要时首次普通 Build"];
+ pbuild [label="Build with Parameters\n保持默认值、跟踪本次 Build"];
+ part [label="SUCCESS 后遍历本次 Build/Callback Artifacts\n解析两份 tar.gz 的相同完整版本", fillcolor="#E5F3FF"];
+ }
+ subgraph cluster_gmx {label="阶段 B：GMX";fontsize=16;fontname="Noto Sans CJK SC";color="#A7D9BC";style="rounded";
+ gbranch [label="从 GMX 源分支创建\nupload/auto<同一时间戳>"];
+ gedit [label="mobile-ci.json 两项 Plugin 依赖\n使用完整 Artifact 版本（不转换）"];
+ bootstrap [label="GMX 根目录执行 ./bootstrap.sh\n自动更新 mobile-ci.lock 的 SHA256"];
+ gpush [label="验证两项依赖版本 + SHA\n只提交 json/lock，Commit + Push"];
+ gjob [label="等待新 Jenkins Job\nupload%2Fauto<时间戳>"];
+ ginit [label="按页面状态初始化\n必要时首次普通 Build"];
+ gparams [label="Build with Parameters\nENTITIES=国家，SYNC_UPLOAD=true\nCUSTOM_FOLDER=0_A_<国家>_<项目>"];
+ gbuild [label="监控本次 GMX Jenkins Build\n可配置上传成功日志模式"];
+ }
+ done [label="SUCCESS：Build 成功\n独立上传验证状态另行标注\n生成 result.json", fillcolor="#DDF6E8", color="#63BA86"];
+ hold [label="NEEDS_ATTENTION / FAILED / TIMEOUT\n保留日志、状态、截图；可安全恢复", fillcolor="#FFF1E5", color="#DFA15D"];
+ start->pre->pbranch->pedit->ppush->pjob->pinit->pbuild->part->gbranch->gedit->bootstrap->gpush->gjob->ginit->gparams->gbuild->done;
+ pre->hold [style=dashed,label="凭据/环境不满足",constraint=false];
+ part->hold [style=dashed,label="产物不匹配",constraint=false];
+ bootstrap->hold [style=dashed,label="解析失败/额外变更",constraint=false];
+ gbuild->hold [style=dashed,label="Build 不成功",constraint=false];
+}

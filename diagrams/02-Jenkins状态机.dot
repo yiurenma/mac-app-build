@@ -1,0 +1,27 @@
+digraph Jenkins {
+ graph [label="Jenkins Job 页面自动化状态机（Plugin 与 GMX 通用）",labelloc=t,fontsize=22,fontname="Noto Sans CJK SC",pad=.3,ranksep=.5,nodesep=.5,bgcolor="white"];
+ node [fontname="Noto Sans CJK SC",fontsize=12,shape=box,style="rounded,filled",fillcolor="#F5F7FB",color="#B6C5D6",margin="0.18,0.12"];
+ edge [fontname="Noto Sans CJK SC",fontsize=10,arrowsize=.7,color="#6F8097"];
+ start [label="确定本次分支 Job URL"]; find [label="轮询等待新 Job\n校验 HTTP/SSO"];
+ mode [label="当前页面入口？",shape=diamond,fillcolor="#E8F2FF"];
+ boot [label="首次 Build（初始化）\n点击前保存已有编号"];
+ boot_result [label="等待首次 Build 结束\n可能是 FAILURE"];
+ param [label="Build with Parameters 已出现\n不得随意更改默认值"];
+ fill [label="Plugin：所有参数默认\nGMX：仅填写 ENTITIES/SYNC_UPLOAD/CUSTOM_FOLDER"];
+ trigger [label="点击 Build；跟踪本次 Number\n触发前持久化 baseline"];
+ wait [label="轮询本次编号页面 / Console" ];
+ success [label="SUCCESS",shape=diamond,fillcolor="#DDF6E8"];
+ artifact [label="Plugin：查本次产物与关联 Callback\nGMX：检查上传验证策略",fillcolor="#E6F6E9"];
+ attention [label="NEEDS_ATTENTION\n多编号/控件不明/SSO/恢复歧义",fillcolor="#FFF2E4"];
+ failed [label="FAILED / TIMEOUT\n保留现场、允许人工检查",fillcolor="#FFEAEA"];
+ start->find->mode;
+ mode->boot [label="只有普通 Build"];
+ boot->boot_result->param [label="出现参数入口"];
+ mode->param [label="已是参数化入口"];
+ mode->attention [label="都没有"];
+ boot_result->attention [label="未出现参数入口"];
+ param->fill->trigger->wait->success;
+ success->artifact [label="是"];
+ success->failed [label="否"];
+ trigger->attention [style=dashed,label="触发不确定",constraint=false];
+}

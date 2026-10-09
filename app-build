@@ -1,0 +1,8 @@
+#!/bin/sh
+set -eu
+HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+cd "$HERE"
+if [ -x ".venv/bin/python" ]; then
+  exec .venv/bin/python -m appbuilder "$@"
+fi
+exec python3 -m appbuilder "$@"

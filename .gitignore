@@ -1,0 +1,5 @@
+.venv/
+.appbuilder/
+__pycache__/
+*.pyc
+.DS_Store

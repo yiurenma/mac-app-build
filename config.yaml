@@ -1,0 +1,28 @@
+# 企业内网地址；末尾的 /job/.../job/ 代表“新分支 Job 的父级”。
+github:
+  plugin_url: "https://alm-github.systems.uk.hsbc/mobile/paybybank-ios-plugin"
+  gmx_url: "https://alm-github.systems.uk.hsbc/mobile/mobilebanking-global-ios"
+  token_env: "GITHUB_TOKEN"
+
+jenkins:
+  # 公司环境推荐 chrome（由 IT 安装）；或 chromium（需内部下载镜像）
+  browser_channel: "chrome"
+  plugin_parent: "https://mobile-premier01-jenkins.build-mobile.iwpb.euw2.prod.aws.cloud.hsbc/job/IWPB_Transaction_Banking/job/Domestic_Payment_and_Transfer_Mobile_Global_12824743/job/Lib/job/mobile_paybybank-ios-plugin/job/release-build/job/"
+  gmx_parent: "https://mobile-platform-jenkins.build-mobile.iwpb.euw2.prod.aws.cloud.hsbc/job/mobilex-global-uploads/job/global-ios-upload/job/"
+  discover_timeout_minutes: 30
+  build_timeout_minutes: 180
+  callback_timeout_minutes: 30
+  poll_seconds: 45
+  # 自定义 Jenkins 字段选择器（只有自动定位失败时才需要填写）
+  gmx_fields:
+    ENTITIES: ""
+    SYNC_UPLOAD: ""
+    CUSTOM_FOLDER: ""
+
+build:
+  max_parallel: 2
+  timezone: "local"
+  # 202610100030: 分钟精度。并发同一分钟提交，管理器会分配不同的时间戳。
+  max_changed_lines: 100
+  # 内网 Jenkins Stage 名称、成功文案若和此处不同，以联调为准。
+  upload_success_pattern: ""

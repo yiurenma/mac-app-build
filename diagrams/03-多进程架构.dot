@@ -1,0 +1,23 @@
+digraph Multi {
+ graph [label="macOS 独立多任务架构",labelloc=t,fontsize=23,fontname="Noto Sans CJK SC",pad=.3,ranksep=.55,nodesep=.7,bgcolor="white"];
+ node [shape=box,style="rounded,filled",fontname="Noto Sans CJK SC",fontsize=13,color="#BAC9D8",fillcolor="#F3F6FA",margin="0.22,0.16"];
+ edge [arrowsize=.8,color="#76889E",fontname="Noto Sans CJK SC"];
+ cli [label="Mac CLI：./app-build run / status / resume"];
+ db [label="SQLite 任务数据库\n唯一时间戳、并发数量管理"];
+ subgraph cluster_a {label="Worker A｜独立 APP 任务";style="rounded";color="#AAC7E7";fontname="Noto Sans CJK SC";
+ wa [label="Python 进程 A\nworker.lock 防重复运行"];
+ ga [label="plugin/ + gmx/ Git 工作目录 A"];
+ ba [label="Playwright 浏览器 Context A\n独立 Jenkins Build Number"];
+ sa [label="状态 state.json / 日志 A"];
+ wa->ga; wa->ba; wa->sa;
+ }
+ subgraph cluster_b {label="Worker B｜独立 APP 任务";style="rounded";color="#A6DDC5";fontname="Noto Sans CJK SC";
+ wb [label="Python 进程 B\nworker.lock 防重复运行"];
+ gb [label="plugin/ + gmx/ Git 工作目录 B"];
+ bb [label="Playwright 浏览器 Context B\n独立 Jenkins Build Number"];
+ sb [label="状态 state.json / 日志 B"];
+ wb->gb; wb->bb; wb->sb;
+ }
+ shared [label="仅共享只读配置与登录态文件\n不共享 Git 工作目录、Build 编号或 state.json",fillcolor="#FDF2DF"];
+ cli->db; db->wa; db->wb; ba->shared [style=dashed,arrowhead=none]; bb->shared [style=dashed,arrowhead=none];
+}

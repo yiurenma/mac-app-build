@@ -1,0 +1,160 @@
+# HSBC UK PBB — Mac APP Build Automation (v0.3)
+
+在一台 Mac 上**并发运行多个独立**的 Plugin → GMX → Jenkins APP 打包任务。
+每个任务有单独的 Git 克隆、时间戳、Jenkins 编号、日志和恢复状态。**没有用 Jenkins REST API**；Jenkins 操作由 Playwright 打开浏览器页面模拟人操作。
+
+> **状态**：这是可安装、可离线测试的第一版工程。没有企业内网、GitHub Token、SSO、Jenkins Job 的环境，尚未做真实端到端联调。**不要把本工具视为已经在公司的 Jenkins 上成功运行过。** 首次真实执行建议使用非生产测试分支。浏览器如果无法准确识别内部 Jenkins 参数或产物，会报 `NEEDS_ATTENTION` 并截图；不会盲目点击。
+
+
+## 设计文档与流程图（已审查三轮）
+
+- [完整需求与验收标准](docs/01-需求规格与验收.md)
+- [代码架构与逐项映射](docs/02-设计与代码对照.md)
+- [三轮审查及 3 × 30 项自测报告](docs/03-三轮代码审查与自测报告.md)
+- [macOS 与企业 Nexus 安装手册](docs/04-Mac与Nexus操作手册.md)
+- [内网 Jenkins/SSO 联调清单](docs/05-企业内网联调清单.md)
+- 流程图：[完整流程](diagrams/01-完整流程.svg) / [Jenkins 状态机](diagrams/02-Jenkins状态机.svg) / [多进程架构](diagrams/03-多进程架构.svg)（均有 PNG 预览及可修改 `.dot` 源码）。
+
+> **本版经过三轮离线审查与回归（每轮 30 项通过），但尚未连接公司的 Nexus、SSO、Plugin/GMX Jenkins 真正执行打包。**
+
+## 0. 工作流
+
+1. 使用 Plugin 输入源分支创建 `release/<大版本>.<YYYYMMDDHHmm>`，两个 `.xcconfig` 的 `BUNDLE_VERSION_SHORT` 同步设为 `<大版本>.<时间戳>`，精确提交并 Push。
+2. 根据规则 `/` 和 `.` → `_` 定位 Plugin Jenkins 新 Job；如果初次只有 `Build`，先触发初始化构建，再等待 `Build with Parameters`。随后使用默认参数触发正式构建。
+3. 仅在本次成功 Build 及关联 Callback 的 `build-universal/` artifacts 里查找 DomainModel 和 Journey 的 `*.tar.gz`；要求两个**完整 Artifact Version 一致**。
+4. 使用 GMX 输入源分支创建 `upload/auto<同一时间戳>`。在根目录 `mobile-ci.json` 精准修改两个 `paybybank-ios-plugin` 依赖的 `version` 为**完整 Artifact Version**，不做 `1.3.0` 等转换。
+5. 在当前任务 GMX 根目录运行 `./bootstrap.sh`；读取 `mobile-ci.lock` 新 SHA256，检查版本、校验和与其他依赖未被意外修改。
+6. 只提交 `mobile-ci.json` 和 `mobile-ci.lock`，推送后根据 `upload/xxx` → `upload%2Fxxx` 定位 GMX Jenkins 新 Job。
+7. 兼容首次普通 `Build` 初始化，正式执行 `Build with Parameters`：`ENTITIES=国家`（默认 UK）、`SYNC_UPLOAD=true`、`CUSTOM_FOLDER=0_A_<国家>_<项目>`；其他保持 Jenkins 默认（如 BUILD_TYPE=Develop、SIGNING_REPO_BRANCH=master）。
+8. 等待 GMX Jenkins 本次 Build 结果（不能依赖 Last Successful）。保存 Build Number、Commit SHA、日志、结果 JSON。
+
+**Jenkins SUCCESS ≠ 一定有已验证的外部上传结果。** 默认最终结果只能证明所关联 GMX Jenkins Build 成功；若需要严格证明上传完成，在 `config.yaml` 填入你们 Console Output 中可靠的 `upload_success_pattern`，检测不到时停止为 `NEEDS_ATTENTION`。
+
+## 1. 安装（Mac / 企业 Nexus）
+
+需要 macOS、Git、Python 3.11+、公司 VPN，以及访问内部 Nexus 的权限。请按公司 IT 政策安装 Python、Git 和 Chrome；这里不自动使用公网 Homebrew、PyPI 或浏览器下载服务。
+
+**为什么要配置两类下载源？** `pip` 安装 `playwright`、`PyYAML` 以及传递依赖；Playwright 浏览器下载则是独立的二进制包，**不会自动使用 pip 的 Nexus 地址**。另外 GMX 的 `./bootstrap.sh` 是打包时运行的公司项目脚本，所需内部制品仓库/认证需要单独联调，不能假设配置 PIP_INDEX_URL 就能解决。
+
+推荐方式：通过公司 Nexus 安装 Python 依赖，使用 IT 已安装的 Chrome。项目 `config.yaml` 默认 `jenkins.browser_channel: "chrome"`，与原版的 Playwright-managed Chromium 不同。
+
+```bash
+cd mac-app-builder
+export PIP_INDEX_URL='https://你的Nexus主机/repository/你的pypi代理或group/simple/'
+# 如需企业 CA 证书，请按 IT 指引设置：export PIP_CERT='/path/to/company-ca.pem'
+./install.sh
+./app-build doctor
+```
+
+`PIP_INDEX_URL` 也可以通过企业统一管理的 pip.conf 提供。脚本不会打印 Nexus 凭据，也不再无条件升级 pip；如果没有配置包索引，会停下来提示，避免默默走公网 PyPI。检测到额外的 `extra-index-url` 也会停止，建议公司统一使用单一 Nexus group 索引，避免依赖混淆。**Nexus URL 请向公司开发工具/DevOps 团队确认；上面只是占位符，不是实际地址。** 建议使用凭据管理器或公司允许的认证方案，不要把用户名密码写进项目文件、Shell 历史或截图。
+
+如果公司没有允许 Playwright 控制的 Chrome，但提供了 Playwright 浏览器二进制镜像，可把 `config.yaml` 的 `jenkins.browser_channel` 改为 `chromium`，然后：
+
+```bash
+export PLAYWRIGHT_DOWNLOAD_HOST='https://你的内部Playwright浏览器镜像'
+./install.sh
+```
+
+也可以用 `PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST`。如果 Chromium 已由 IT 提供到 Playwright 的标准缓存，可通过 `APP_BUILDER_SKIP_BROWSER_INSTALL=1 ./install.sh` 跳过下载；运行前需实际检查浏览器版本和启动是否可用。
+
+> 公司 Chrome 可能受到企业策略限制，无法由 Playwright 控制，或 SSO 会话不允许持久化。首次使用 `./app-build login` 联调，不能仅凭安装成功认定 Jenkins 可以自动化。
+
+## 2. 设置 GitHub Token（仅环境变量）
+
+```bash
+export GITHUB_TOKEN='你的企业GitHub PAT'
+./app-build doctor
+```
+
+如果没有 Token，工具会给出 GitHub 创建网址以及授权说明。建议通过 macOS Keychain 或公司密码管理器把 Token 加载为环境变量；**不要把 Token 写到 config.yaml、脚本、Git URL 或项目仓库里**。企业 GitHub PAT 可能需要管理员批准、SSO 授权、Contents read/write。工具在启动前检查变量存在，真正的仓库权限由后续 Git 操作验证。Mac 上 `export` 仅对当前 Shell 及其子进程生效。
+
+## 3. 首次登录 Jenkins
+
+```bash
+./app-build login --site plugin
+./app-build login --site gmx
+```
+
+会打开浏览器，请完成公司 SSO，然后**回到终端按 Enter**。保存的 cookies / storage_state 在 `.appbuilder/auth/`，权限 `0600`，**视为敏感文件**，不能上传、分享或提交到 Git。如失效需重新登录。部分 SSO 使用 sessionStorage、设备凭据等，Playwright 可能无法复用；这种情况联调时需改成公司允许的浏览器持久化认证方式。
+
+## 4. 运行多个独立 APP
+
+```bash
+# 安全预览：只打印计划，不克隆、不修改、不 Push、不触发 Jenkins
+./app-build run --plugin-branch develop --plugin-version 1.3 \
+  --gmx-branch develop --country UK --project-name PayByBank --dry-run
+
+# 后台独立进程，任务 1
+./app-build run --plugin-branch develop --plugin-version 1.3 \
+  --gmx-branch develop --country UK --project-name PayByBank
+
+# 后台独立进程，任务 2
+./app-build run --plugin-branch develop --plugin-version 1.4 \
+  --gmx-branch develop --country HK --project-name PaymentTest
+
+# 看所有任务
+./app-build status
+
+# 查看某任务日志（命令会持续跟随）
+./app-build logs <TASK_ID> --follow
+
+# 断点恢复（先解决登录/网络/参数问题）
+./app-build resume <TASK_ID>
+```
+
+也可加 `--wait` 前台执行，或加 `--plugin-url`、`--gmx-url` 覆盖默认仓库地址。
+
+- `--plugin-branch` 和 `--gmx-branch` 是**源分支**，永远不会直接修改。
+- `--plugin-version` 是**大版本**，例如 `1.3`。
+- `--country` 默认 UK；`--project-name` 必填。项目名称允许字母、数字、`_`、`-`，不允许空格或路径分隔符（避免意外路径）。
+- 每个任务只生成一次时间戳。若同一分钟内发起第二个任务，管理器分配下一个可用分钟编码，保证分支唯一（编码可能略晚于实际钟表时间）。
+- 默认最多 2 个并发任务，可在 `config.yaml` 改 `build.max_parallel`。macOS 后台任务自动通过 `caffeinate -i` 阻止空闲睡眠（合上 Mac 盖、VPN 断开仍会影响任务）。
+
+## 5. 文件与结果位置
+
+```text
+mac-app-builder/
+  app-build                    # CLI 入口
+  install.sh                   # Mac 安装脚本
+  selftest.sh                  # 三轮离线回归脚本
+  config.yaml                  # 4 个 GitHub/Jenkins 常量和监控参数
+  appbuilder/                  # Python 源码
+  tests/                       # 离线测试
+  .appbuilder/                 # 运行时自动生成，切勿上传
+    auth/                      # 可能含会话信息的敏感文件
+    tasks.sqlite              # 任务记录
+    runs/<TASK_ID>/
+      plugin/                  # 本次独立克隆
+      gmx/                     # 本次独立克隆
+      state.json               # 已完成步骤与精确 Build Number
+      run.log                  # 后台运行日志
+      bootstrap.log            # GMX 依赖更新日志
+      result.json              # 最终 SUCCESS 时生成
+      screenshots/             # 浏览器失败诊断截图，可能含内网信息
+```
+
+在公司设备上保存、分享日志和浏览器截图时应遵守公司政策。
+
+## 6. 安全与故障策略
+
+- 永不使用 `git add .` / `git push --force`；不修改输入源分支。
+- 提交 Plugin 时只允许两个 `.xcconfig`；GMX 只允许 `mobile-ci.json` 和 `mobile-ci.lock`。提交前后检查 Diff 和真实 Commit 文件；Git Hook 引起额外变化会停下。
+- 下载依赖执行 `./bootstrap.sh` 是独立任务目录，命令退出码必须成功；`mobile-ci.lock` 中两个 SHA256 必须为 64 位十六进制，其他包不得改变。
+- Jenkins 只操作本次分支 Job，锁定触发后的 Build Number，而不是“最近一次成功”。**同一 Job 出现多个新 Build 时停止，防止拿错别人的结果。**
+- 首次普通 Build 失败只有在随后出现参数化构建入口时才视为初始化情形；正式构建的失败不能忽略。
+- 如果进程在“点击 Jenkins Build 之后、记录编号之前”意外中断，恢复时先根据保存的触发前编号判断，无法唯一判断时不重复点击而提示人工处理。
+- `NEEDS_ATTENTION` 表示需要检查 Jenkins 控件/SSO/分支/产物，`FAILED` 是流程失败，`TIMEOUT` 是超时；原始状态和截图保留在任务目录。
+- 若 Jenkins 页面布局特殊，可在 `config.yaml` 配置 `jenkins.gmx_fields` 下的三个 CSS 选择器。必须分别唯一匹配实际控件；未能安全识别会停下。
+- **关于 iOS 版本限制：** 需求中 `BUNDLE_VERSION_SHORT=1.3.202610100030` 的第三段是长时间戳，可能不符合 Apple 的公开版本号发布约束；上线前应由项目负责人员确认内部构建/签名流程兼容。
+
+## 7. 离线测试
+
+```bash
+./selftest.sh       # 推荐：自动重复三遍并写 docs/verification-logs
+.venv/bin/python -m unittest discover -s tests -v
+.venv/bin/python -m compileall -q appbuilder
+./app-build run --plugin-branch develop --plugin-version 1.3 \
+  --gmx-branch develop --project-name Demo --dry-run
+```
+
+> 需要实机联调的位置：Jenkins Bootstrap 入口和构建结果 DOM、GMX 的 `ENTITIES` 实际控件类型、Plugin 下游 Callback 及 Artifact 链路、Mac 上 bootstrap 所需权限与工具。第一版已实现通用识别及明确的失败保护，但这些浏览器场景必须由公司内网 Jenkins 实测确认。
