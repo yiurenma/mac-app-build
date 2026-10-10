@@ -175,7 +175,7 @@ class TestParameterControls(unittest.TestCase):
             def select_option(self, value):
                 self.value = value
 
-            def check(self):
+            def check(self, **kwargs):
                 self.checked = True
 
             def is_checked(self):

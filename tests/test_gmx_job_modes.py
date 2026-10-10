@@ -24,8 +24,8 @@ class FakeField:
         return [{'value':t, 'text':t} for t in self.options]
     def select_option(self, value): self.value = value
     def fill(self, value): self.value = value
-    def check(self): self.checked = True
-    def uncheck(self): self.checked = False
+    def check(self, **kwargs): self.checked = True
+    def uncheck(self, **kwargs): self.checked = False
     def is_checked(self): return self.checked
     def input_value(self): return self.value
 

@@ -397,6 +397,48 @@ class JenkinsBrowser:
                     return controls.first
         raise NeedsAttention(f'{field} 有多个或没有可识别控件，请配置 jenkins.gmx_fields.{field}')
 
+    @staticmethod
+    def _set_checkbox(control, selected, field):
+        """Use Jenkins' own visible label when its checkbox is covered/hidden."""
+        if control.get_attribute('type') != 'checkbox' or type(selected) is not bool:
+            raise NeedsAttention(f'{field} 不是有效的布尔复选框')
+        if control.is_checked() == selected:
+            return
+        try:
+            if selected:
+                control.check(timeout=2000)
+            else:
+                control.uncheck(timeout=2000)
+        except PlaywrightTimeout:
+            # Do not force-click through arbitrary overlays. Only click a label
+            # associated with this exact input, including Jenkins attach-previous.
+            if not control.is_enabled():
+                raise NeedsAttention(f'{field} 已禁用，禁止继续提交')
+            if control.is_checked() == selected:
+                return
+            handle = control.evaluate_handle('''el => {
+                const labels = Array.from(el.labels || []);
+                const next = el.nextElementSibling;
+                if (next && next.tagName === 'LABEL' &&
+                    next.classList.contains('attach-previous') &&
+                    (!next.htmlFor || next.htmlFor === el.id)) labels.push(next);
+                const visible = [...new Set(labels)].filter(label => {
+                    const s = getComputedStyle(label);
+                    return label.getClientRects().length && s.visibility !== 'hidden' && s.display !== 'none';
+                });
+                return visible.length === 1 ? visible[0] : null;
+            }''')
+            try:
+                label = handle.as_element()
+                if label is None:
+                    raise NeedsAttention(f'{field} 被遮挡且找不到唯一关联标签，禁止继续提交')
+                action('FORM', f'{field} 使用该复选框的关联标签设置勾选状态')
+                label.click(timeout=3000)
+            finally:
+                handle.dispose()
+        if control.is_checked() != selected:
+            raise NeedsAttention(f'{field} 参数回读校验失败，禁止继续提交')
+
     def fill_gmx_parameters(self, country, project, settings=None):
         settings = settings or {}
         selectors = self.conf.get('gmx_fields', {})
@@ -422,10 +464,7 @@ class JenkinsBrowser:
         if not isinstance(should_sync, bool):
             raise NeedsAttention('SYNC_UPLOAD 必须是布尔值')
         operation('PW', f'SYNC_UPLOAD.{"check" if should_sync else "uncheck"}()')
-        if should_sync:
-            sync.check()
-        else:
-            sync.uncheck()
+        JenkinsBrowser._set_checkbox(sync, should_sync, 'SYNC_UPLOAD')
         target = settings.get('CUSTOM_FOLDER') or folder(country, project)
         custom = self._find_control('CUSTOM_FOLDER', selectors.get('CUSTOM_FOLDER', ''))
         if custom.evaluate('(el) => el.tagName.toLowerCase()') not in ('input', 'textarea'):
@@ -444,10 +483,7 @@ class JenkinsBrowser:
             if control.get_attribute('type') != 'checkbox':
                 raise NeedsAttention(f'{field} 不是复选框，拒绝提交 GMX Build')
             operation('PW', f'{field}.{"check" if selected else "uncheck"}()')
-            if selected:
-                control.check()
-            else:
-                control.uncheck()
+            JenkinsBrowser._set_checkbox(control, selected, field)
             if control.is_checked() != selected:
                 raise NeedsAttention(f'{field} 参数回读校验失败')
         # CLI tasks that supply no advanced options keep remaining Jenkins defaults.

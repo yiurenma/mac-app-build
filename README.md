@@ -1,4 +1,10 @@
-# HSBC UK PBB — Mac APP Build Automation (v0.7.1)
+# HSBC UK PBB — Mac APP Build Automation (v0.7.2)
+
+## v0.7.2 — GMX 复选框标签遮挡修复
+
+当 Jenkins 的 `label.attach-previous` 覆盖复选框时，先尝试正常勾选；点击超时后仅使用该输入唯一关联的可见标签，再回读确认状态。覆盖 `SYNC_UPLOAD`、`SKIP_TEST`、`FORCE`、`KEEP_ALIVE`；已符合输入的状态不重复切换。禁用控件、无唯一标签或回读不一致时停止，不点击 Build。
+
+保留 v0.7.1 的完整 Artifact 版本输入、Bootstrap 隔离测试，以及 GMX 正式 Build 创建编号后结束测试的边界。Bootstrap 中公司 `ci-script` 依赖安装返回 202 / 脚本退出 71 的问题尚需完整现场日志，本次未更改依赖安装逻辑。
 
 ## v0.7.1 — GMX 现场测试精准停在指定步骤
 
