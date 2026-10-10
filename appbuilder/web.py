@@ -20,6 +20,7 @@ from urllib.parse import parse_qs, urlsplit
 from types import SimpleNamespace
 
 from .config import DATA, ROOT, load_config, token_or_error
+from . import __version__
 from .store import task, task_list, create_task, active_count, update_task, update_task_params, task_folder
 from .telemetry import safe_text
 from .versions import validate_args
@@ -31,6 +32,36 @@ IMAGE_FILE = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,100}\.png$')
 MAX_REQUEST_BYTES = 16_384
 MAX_LOG_BYTES = 96_000
 FINISHED = {'SUCCESS', 'FAILED', 'TIMEOUT', 'NEEDS_ATTENTION', 'INTERRUPTED'}
+
+
+def _jenkins_links(row, params):
+    """Safe clickable Jenkins links, including Trigger -> Callback when known.
+
+    No request to Jenkins is made here: metadata comes from the local task
+    state. Refuse embedded credentials, fragments, queries and non-HTTPS URLs.
+    """
+    from .store import read_state
+    result = []
+    try:
+        runtime = read_state(row['id']).get('runtime', {})
+    except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError):
+        runtime = {}
+    for key, label, name in [('plugin_job', 'Plugin Job', 'plugin'),
+                             ('gmx_job', 'GMX Job', 'gmx')]:
+        raw = str(params.get(key, ''))
+        parsed = urlsplit(raw)
+        if parsed.scheme != 'https' or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment:
+            continue
+        root = raw.rstrip('/') + '/'
+        result.append({'label': label, 'url': root})
+        # Jenkins link numbers are taken only from persisted build metadata.
+        for runtime_key, build_label in [(name + '_formal_number', 'Build'),
+                                         ('plugin_callback_number', 'Callback')] if name == 'plugin' else [(name + '_formal_number', 'Build')]:
+            number = runtime.get(runtime_key)
+            if isinstance(number, int) and not isinstance(number, bool) and 0 < number < 1000000:
+                result.append({'label': f'{name.upper() if name == "gmx" else name.title()} {build_label} #{number}',
+                               'url': root + str(number) + '/'})
+    return result
 
 
 def public_task(row):
@@ -51,6 +82,7 @@ def public_task(row):
         'gmx_branch': params.get('gmx_branch', ''),
         'visible': bool(params.get('visible')),
         'verbose': bool(params.get('verbose')),
+        'jenkins_links': _jenkins_links(row, params),
     }
 
 
@@ -174,7 +206,7 @@ def get_screenshots(task_id):
 
 def make_handler(csrf_token):
     class Handler(BaseHTTPRequestHandler):
-        server_version = 'MacAppBuilder/0.6'
+        server_version = 'MacAppBuilder/' + __version__
 
         def log_message(self, fmt, *args):
             # Keep credentials out of request logging; no query strings printed.
@@ -218,6 +250,8 @@ def make_handler(csrf_token):
                     return self._asset('index.html')
                 if p in ('/app.css', '/app.js'):
                     return self._asset(p[1:])
+                if p == '/api/health':
+                    return self._send({'app': 'mac-app-builder', 'service': 'web-console', 'version': __version__})
                 if p == '/api/bootstrap':
                     config = load_config()
                     return self._send({'csrf': csrf_token,
@@ -293,7 +327,7 @@ def serve(port=8765, *, open_browser=True, server_factory=ThreadingHTTPServer):
     token = secrets.token_urlsafe(32)
     with server_factory((HOST, port), make_handler(token)) as httpd:
         url = f'http://{HOST}:{httpd.server_port}'
-        print(f'[WEB] Mac APP Builder v0.6 | 本地管理页面 {url}', flush=True)
+        print(f'[WEB] Mac APP Builder v{__version__} | 本地管理页面 {url}', flush=True)
         print('[WEB] 按 Ctrl+C 关闭页面服务；已经启动的后台构建不会停止。', flush=True)
         if open_browser:
             # Avoid opening a browser before server exists.

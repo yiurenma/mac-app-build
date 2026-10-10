@@ -16,6 +16,17 @@
 ---
 
 在一台 Mac 上**并发运行多个独立**的 Plugin → GMX → Jenkins APP 打包任务。
+
+### v0.6.1 — 一键启动稳定性增强
+
+- 双击 `Start APP Builder.command` 时，若本地 Web Console 已运行，会**直接打开现有页面**，不会重复占用端口。
+- GitHub 暂时不可访问或 `config.yaml` 存在本地未提交的修改时，**跳过更新但继续启动 Web Console**；只有对 `run/resume --update` 的显式更新仍遵循原有严格停止策略。
+- Web 页面自动显示当前访问的主机和端口，不再固定显示 8765。
+- 点击已有任务后，可直接打开 **Plugin Trigger #1、关联 Callback #2、GMX Build** 对应 Jenkins 页面（仅基于本地状态；不访问 Jenkins API）。
+- 修复长期刷新任务列表时 SQLite 连接未关闭的问题。
+- 上述功能通过离线测试验证；公司 Mac/SSO/Jenkins 的端到端联调仍需在企业网络内进行。
+
+
 每个任务有单独的 Git 克隆、时间戳、Jenkins 编号、日志和恢复状态。**没有用 Jenkins REST API**；Jenkins 操作由 Playwright 打开浏览器页面模拟人操作。
 
 > **状态**：这是可安装、可离线测试的第一版工程。没有企业内网、GitHub Token、SSO、Jenkins Job 的环境，尚未做真实端到端联调。**不要把本工具视为已经在公司的 Jenkins 上成功运行过。** 首次真实执行建议使用非生产测试分支。浏览器如果无法准确识别内部 Jenkins 参数或产物，会报 `NEEDS_ATTENTION` 并截图；不会盲目点击。

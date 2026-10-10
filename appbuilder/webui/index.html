@@ -22,7 +22,7 @@
         <strong>localhost:8765</strong>
         <p>运行在本机 · 无外部服务</p>
       </div>
-      <div class="sidebar-foot">v0.6.0 <span>·</span> Made for macOS</div>
+      <div class="sidebar-foot">v0.6.1 <span>·</span> Made for macOS</div>
     </aside>
     <main class="main">
       <header class="topbar">
@@ -67,6 +67,7 @@
           <article class="panel activity-panel" id="activity">
             <div class="panel-head"><div><span class="section-tag">REAL-TIME MONITOR</span><h2>Live activity</h2><p id="selected-subtitle">从任务列表选择一个构建。</p></div><div class="live-indicator"><span class="pulse"></span> LIVE</div></div>
             <div class="active-summary" id="active-summary"><div class="icon-circle">⌁</div><div><strong>No build selected</strong><small>选择任务查看完整构建过程</small></div></div>
+            <div class="jenkins-links" id="jenkins-links" aria-label="关联 Jenkins Job 和 Build"></div>
             <div class="stage-strip" id="stage-strip"><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div></div>
             <div class="log-heading"><span>TERMINAL OUTPUT</span><div><span id="log-line-count">0 bytes</span><button class="subtle-btn" id="clear-log" type="button">↺ Refresh</button></div></div>
             <div class="terminal" id="terminal"><div class="terminal-empty">$ Waiting for build activity<span class="cursor">▌</span></div></div>

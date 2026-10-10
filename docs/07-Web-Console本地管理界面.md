@@ -1,16 +1,17 @@
-# v0.6 本地 Web Console（macOS）
+# v0.6.1 本地 Web Console（macOS）
 
 ## 目标与使用方式
 
 安装后，**双击项目根目录 `Start APP Builder.command`** 即可启动本地管理页面，或通过终端运行 `./app-build web`。页面固定仅监听 `127.0.0.1:8765`；浏览器打开同一地址。关闭终端里的 Web 服务**不会结束**已经启动的独立 Worker；Worker 仍采用原项目独立目录和 SQLite 锁保护。
 
-若以 Git clone 形式安装，双击入口会先尝试 `git pull --ff-only`，且仅在工作区干净时更新；ZIP 方式跳过更新。`app-build` 按需调用 `install.sh`，并在 Web 服务启动时执行非阻塞 doctor；Web 页面将展示环境问题，在正式创建/恢复任务前执行严格 doctor。缺少包时仅使用已配置的企业 Nexus，不修改 pip / CA 配置。
+若 Console 已经启动，再次双击入口将复用现有页面，不重复启动服务。若以 Git clone 形式安装，首次启动会尝试 `git pull --ff-only`；网络离线或工作区存在本地修改时跳过更新，保留现有文件并继续启动（仅 Web 模式采用此宽容回退，CLI `run/resume --update` 仍严格停止）。ZIP 方式跳过更新。`app-build` 按需调用 `install.sh`，并在 Web 服务启动时执行非阻塞 doctor；Web 页面将展示环境问题，在正式创建/恢复任务前执行严格 doctor。缺少包时仅使用已配置的企业 Nexus，不修改 pip / CA 配置。
 
 ## 页面能力
 
 - **New build**：Plugin 源分支、GMX 源分支、Plugin 版本、国家、项目名；可选择可见 Chrome、完整动作日志。
 - **Credentials**：GitHub PAT、Jenkins 用户名/密码首次可在页面输入，存储在当前 Mac 用户 Keychain；后续无需输入。用户密码与 Token 不保存到 SQLite、构建任务参数、配置文件，也不会返回给网页。已设置的环境变量 `GITHUB_TOKEN` 优先于 Keychain PAT。
 - **Live activity**：显示原 Worker 产生的真实日志和阶段，3 秒一次增量刷新，含历史记录和等待心跳。它不是对 Jenkins 调用频率的调整；新 Job 仍按 `discover_poll_seconds: 10` 检查，Build 状态仍按 `poll_seconds: 45` 检查。
+- **Jenkins links**：可从任务详情一键打开 Plugin Job、已记录的 Plugin Trigger/Callback 编号及 GMX 构建编号。
 - **Recent builds**：显示历史、运行、成功、失败/需要关注数；点击查看每个任务的日志，失败时点击截图链接。
 - **Resume task**：原 Worker 停止且任务未成功时才允许恢复。沿用原任务 ID、时间戳、已有 Push/Build Number 和 Callback 检查，不新建任务。真正是否能恢复仍遵循现有 Jenkins 审慎策略，不能重复点击运行中的构建。
 - **并发隔离**：仍使用原 SQLite 和独立 Worker，保持 config.yaml 中 `max_parallel: 2` 的限制。
@@ -27,7 +28,7 @@
 
 - Python >=3.11、Git、IT 管理的 Chrome、pip 的公司 Nexus 配置、企业网络/VPN；GitHub 和 Jenkins 的权限。
 - macOS `security` 程序用于 Keychain，首次使用可能触发系统确认。公司 SSO 表单变化仍需联调调整。
-- 在已克隆项目上启动 `--update` 可能因为本地改动或 Git 冲突而安全停止；检查这些问题后重新启动。
+- Web Console 使用安全更新：本地未提交修改、Git 冲突或 VPN 暂不可用时不会强制覆盖，改为启动现有版本。要应用新源码需退出旧 Console、更新成功、再启动。
 - 本版本已经本地验证静态页面渲染、真实 HTTP 交互/安全校验及离线任务模拟。不能代表在公司真实 Jenkins 上已完成端到端构建，也未在用户 Mac 版本上现场验收。
 
 ## 命令

@@ -1,15 +1,20 @@
 #!/bin/bash
-# Double-click on macOS: safe update (Git checkout only), install if needed,
-# run doctor, start localhost Web Console and open the default browser.
+# Double-click macOS launcher: reuse a running Console, or safely start one.
 set -e
 cd "$(dirname "$0")"
 echo '=========================================='
-echo ' Mac APP Builder · v0.6 Web Console'
+echo ' Mac APP Builder · v0.6.1 Web Console'
 echo '=========================================='
-if git rev-parse --show-toplevel >/dev/null 2>&1 && [ -d .git ]; then
-  echo '[UPDATE] 检查 GitHub 最新版本（仅允许干净工作区安全快进）'
-  ./app-build web --update "$@"
+# Reuse an already running server instead of failing with "Address already in use".
+# This module only uses Python's standard library (no install needed).
+if python3 -m appbuilder.launcher "$@"; then
+  exit 0
 else
-  # A ZIP distribution is usable without Git metadata.
-  ./app-build web "$@"
+  rc=$?
+  if [ "$rc" -ne 1 ]; then exit "$rc"; fi
 fi
+if git rev-parse --show-toplevel >/dev/null 2>&1 && [ -d .git ]; then
+  echo '[UPDATE] 安全检查新版本；离线或本地修改时沿用当前版本继续启动。'
+  exec ./app-build web --update "$@"
+fi
+exec ./app-build web "$@"

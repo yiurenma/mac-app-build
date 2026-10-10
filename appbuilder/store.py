@@ -1,4 +1,5 @@
 from __future__ import annotations
+from contextlib import closing
 import json
 import os
 import sqlite3
@@ -28,7 +29,7 @@ def create_task(config, params):
 
     On failed filesystem initialization, roll back the reservation and clean up.
     """
-    with connect() as db:
+    with closing(connect()) as db, db:
         db.execute('BEGIN IMMEDIATE')
         running = db.execute("SELECT COUNT(*) FROM tasks WHERE status IN ('QUEUED','RUNNING')").fetchone()[0]
         if running >= int(config.get('build', {}).get('max_parallel', 2)):
@@ -56,7 +57,7 @@ def create_task(config, params):
 
 
 def task(task_id):
-    with connect() as db:
+    with closing(connect()) as db, db:
         r = db.execute('SELECT * FROM tasks WHERE id=?', (task_id,)).fetchone()
         if not r:
             raise ValueError('任务不存在: ' + task_id)
@@ -64,7 +65,7 @@ def task(task_id):
 
 
 def task_list():
-    with connect() as db:
+    with closing(connect()) as db, db:
         return [dict(r) for r in db.execute('SELECT * FROM tasks ORDER BY created DESC')]
 
 
@@ -72,14 +73,14 @@ def update_task(task_id, **values):
     allowed = {'pid', 'status', 'stage', 'note'}
     if not values.keys() <= allowed:
         raise ValueError('unknown database update')
-    with connect() as db:
+    with closing(connect()) as db, db:
         db.execute('UPDATE tasks SET ' + ', '.join(k+'=?' for k in values) + ' WHERE id=?',
                    (*values.values(), task_id))
 
 
 def update_task_params(task_id, *, visible=None, verbose=None):
     """Persist per-task observation options before resuming a stopped worker."""
-    with connect() as db:
+    with closing(connect()) as db, db:
         db.execute('BEGIN IMMEDIATE')
         r = db.execute('SELECT params FROM tasks WHERE id=?', (task_id,)).fetchone()
         if not r:

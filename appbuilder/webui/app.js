@@ -26,6 +26,12 @@ function renderTasks(){const list=state.tasks;const counts={total:list.length,ru
 function renderSelection(){const row=state.tasks.find(t=>t.id===state.selected);if(!row)return;
   $('selected-subtitle').textContent=`${row.project} · ${row.country} · ${row.id}`;
   const box=$('active-summary');box.replaceChildren();const icon=create('div','icon-circle',row.status==='SUCCESS'?'✓':'⌁');const info=create('div');info.append(create('strong','',row.stage+' · '+row.status),create('small','',row.note||'任务已创建'));box.append(icon,info);
+  const links=$('jenkins-links');links.replaceChildren();
+  for(const link of row.jenkins_links||[]){
+    try{const target=new URL(link.url);if(target.protocol!=='https:'||target.username||target.password||target.search||target.hash)continue;
+      const a=create('a','jenkins-link','↗ '+link.label);a.href=target.href;a.target='_blank';a.rel='noopener noreferrer';links.append(a);
+    }catch(e){/* invalid stored URL is never rendered */}
+  }
   const phases=['PLUGIN_CHECKOUT','PLUGIN_EDIT','PLUGIN_PUSH','PLUGIN_JENKINS','GMX_CHECKOUT','GMX_EDIT','GMX_BOOTSTRAP','GMX_PUSH','GMX_JENKINS'];const idx=phases.indexOf(row.stage);
   $('stage-strip').querySelectorAll('div').forEach((e,i)=>{e.className='';if(row.status==='SUCCESS'||(idx>=0&&i<idx))e.className='done';else if(i===idx)e.className='current';});
   $('resume-build').hidden=['SUCCESS','RUNNING','QUEUED'].includes(row.status);
@@ -50,7 +56,7 @@ async function resumeTask(){const id=state.selected;if(!id)return;if(!confirm(`�
  try{await api(`/api/tasks/${encodeURIComponent(id)}/resume`,{method:'POST',body:JSON.stringify({visible:true,verbose:true})});toast('已请求恢复任务');state.offset=0;await loadTasks();await loadLog(true);}catch(e){toast(e.message,true);}}
 async function refreshDoctor(){try{const r=await api('/api/doctor');const badge=$('doctor-badge');badge.className=r.ready?'dot-label':'dot-label bad';badge.textContent=r.ready?'● Environment ready':'● Setup required';badge.title=(r.messages||[]).join('\n');if(!r.ready)toast('环境检查：'+(r.messages||[]).slice(-1)[0],true);}catch(e){toast(e.message,true);}}
 function nav(target){document.getElementById(target).scrollIntoView({behavior:'smooth',block:'start'});document.querySelectorAll('.nav').forEach(e=>e.classList.toggle('active',e.dataset.target===target));}
-async function init(){try{const boot=await api('/api/bootstrap');state.csrf=boot.csrf;$('doctor-badge').className=boot.doctor.ready?'dot-label':'dot-label bad';$('doctor-badge').textContent=boot.doctor.ready?'● Environment ready':'● Setup required';$('doctor-badge').title=boot.doctor.messages.join('\n');await loadTasks();await loadLog(true);await loadScreens();}catch(e){toast('本地服务连接失败：'+e.message,true);} }
+async function init(){const serverAddress=document.querySelector('.connection strong');if(serverAddress)serverAddress.textContent=window.location.host;try{const boot=await api('/api/bootstrap');state.csrf=boot.csrf;$('doctor-badge').className=boot.doctor.ready?'dot-label':'dot-label bad';$('doctor-badge').textContent=boot.doctor.ready?'● Environment ready':'● Setup required';$('doctor-badge').title=boot.doctor.messages.join('\n');await loadTasks();await loadLog(true);await loadScreens();}catch(e){toast('本地服务连接失败：'+e.message,true);} }
 document.querySelectorAll('.nav').forEach(e=>e.addEventListener('click',()=>nav(e.dataset.target)));
 $('hero-start').addEventListener('click',()=>nav('new-build'));
 $('build-form').addEventListener('submit',submitBuild);

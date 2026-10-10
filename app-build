@@ -17,10 +17,34 @@ if [ "$COMMAND" = run ] || [ "$COMMAND" = resume ] || [ "$COMMAND" = web ]; then
         echo '[UPDATE] 当前目录不是 Git 工作区；无法自动更新。' >&2; exit 1
       fi
       if [ -n "$(git status --porcelain)" ]; then
+        if [ "$COMMAND" = web ]; then
+          echo '[UPDATE] 发现本地未提交的修改：跳过自动更新，继续启动当前 Web Console。'
+          break
+        fi
         echo '[UPDATE] 工作区存在未提交更改，拒绝自动更新。' >&2; exit 1
       fi
-      echo '[UPDATE] git pull --ff-only'
-      git pull --ff-only
+      echo '[UPDATE] git pull --ff-only（最多等待 30 秒）'
+      # A Mac may be temporarily off VPN, or its Git credentials may be expired.
+      # Failure to update the dashboard must not make the current version unusable.
+      if python3 - <<'PY_GIT_UPDATE'
+import os
+import subprocess
+import sys
+try:
+    result = subprocess.run(['git', 'pull', '--ff-only'], timeout=30, check=False,
+                            env={**os.environ, 'GIT_TERMINAL_PROMPT': '0'})
+    sys.exit(result.returncode)
+except subprocess.TimeoutExpired:
+    print('[UPDATE] GitHub 更新超时。')
+    sys.exit(1)
+PY_GIT_UPDATE
+      then
+        echo '[UPDATE] 更新完成。'
+      elif [ "$COMMAND" = web ]; then
+        echo '[UPDATE] 未能自动更新；继续启动当前版本（不覆盖本地修改）。'
+      else
+        echo '[UPDATE] 更新失败，已停止。' >&2; exit 1
+      fi
       break
     fi
   done
