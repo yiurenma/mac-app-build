@@ -132,3 +132,33 @@ def submit_recognized_login(page, username, password, *, log=None):
     note('点击认证表单提交')
     submit.click()
     return True
+
+GITHUB_SERVICE = 'mac-app-builder.github-token'
+
+
+def store_github_token(token: str):
+    """Store PAT in local Keychain; never in browser storage, source or task params."""
+    token = str(token or '').strip()
+    if not token or len(token) > 4096 or '\n' in token or '\r' in token:
+        raise CredentialError('GitHub PAT 不能为空、过长或包含换行')
+    if sys.platform != 'darwin':
+        raise CredentialError('保存 GitHub PAT 目前仅支持 macOS Keychain')
+    result = subprocess.run(
+        ['security', 'add-generic-password', '-U', '-s', GITHUB_SERVICE,
+         '-a', 'enterprise', '-w', token],
+        text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    if result.returncode:
+        raise CredentialError('GitHub PAT 保存到 Mac Keychain 失败')
+
+
+def read_github_token():
+    """Read locally stored PAT without printing it or copying it to task DB."""
+    if sys.platform != 'darwin':
+        return None
+    result = subprocess.run(
+        ['security', 'find-generic-password', '-s', GITHUB_SERVICE,
+         '-a', 'enterprise', '-w'],
+        text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    if result.returncode:
+        return None
+    return result.stdout.strip() or None

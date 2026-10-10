@@ -55,6 +55,10 @@ def args_parser():
     login = sub.add_parser('login', help='手动登录 Jenkins，保存本地认证状态')
     login.add_argument('--site', choices=['plugin', 'gmx'], required=True)
     sub.add_parser('doctor', help='检查本机 Python/Git/Playwright/Token')
+    web = sub.add_parser('web', help='启动 Mac 本地 Web Console (http://127.0.0.1:8765)')
+    web.add_argument('--port', type=int, default=8765, help='本地页面端口（默认 8765）')
+    web.add_argument('--no-open', action='store_true', help='只启动服务，不自动打开浏览器')
+    web.add_argument('--update', action='store_true', help='启动前由 ./app-build 安全更新源码')
     auth = sub.add_parser('auth', help='仅首次保存 Jenkins 账号密码到 Mac Keychain')
     auth.add_argument('--jenkins-user', required=True)
     auth.add_argument('--jenkins-password', required=True)
@@ -173,7 +177,8 @@ def doctor_check(config, *, strict=False):
         if not any(v.exists() for v in chrome_locations):
             issues.append('找不到 Google Chrome，请安装公司管理的 Chrome 或选择其他 browser_channel')
     token_name = config.get('github', {}).get('token_env', 'GITHUB_TOKEN')
-    if not os.environ.get(token_name):
+    from .auth import read_github_token
+    if not os.environ.get(token_name) and not read_github_token():
         issues.append(f'{token_name} 尚未设置')
     auth_cached = all(saved_auth_path(DATA, site).exists() for site in ('plugin', 'gmx'))
     keychain = read_credentials() is not None
@@ -206,6 +211,13 @@ def main(argv=None):
         a.watch = a.visible = a.verbose = True
     if a.command == 'doctor':
         doctor_check(load_config())
+        return
+    if a.command == 'web':
+        # A local dashboard can open even when Jenkins/token is not configured;
+        # preflight errors are visible in the page and builds still require strict doctor.
+        doctor_check(load_config(), strict=False)
+        from .web import serve
+        serve(port=a.port, open_browser=not a.no_open)
         return
     if a.command == 'auth':
         setup_credentials(a)

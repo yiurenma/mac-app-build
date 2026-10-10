@@ -1,0 +1,304 @@
+"""Loopback-only Web Console for the existing CLI engine (no Jenkins/Git API server).
+
+No external web framework, no telemetry endpoint, no credential persistence in the
+browser or task DB. Browser HTTP actions are CSRF-checked and same-origin only.
+"""
+from __future__ import annotations
+
+import hmac
+import json
+import mimetypes
+import os
+import re
+import secrets
+import socket
+import threading
+import webbrowser
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
+from types import SimpleNamespace
+
+from .config import DATA, ROOT, load_config, token_or_error
+from .store import task, task_list, create_task, active_count, update_task, update_task_params, task_folder
+from .telemetry import safe_text
+from .versions import validate_args
+
+STATIC = Path(__file__).parent / 'webui'
+HOST = '127.0.0.1'
+TASK_ID = re.compile(r'^\d{12}-[0-9a-f]{6}$')
+IMAGE_FILE = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,100}\.png$')
+MAX_REQUEST_BYTES = 16_384
+MAX_LOG_BYTES = 96_000
+FINISHED = {'SUCCESS', 'FAILED', 'TIMEOUT', 'NEEDS_ATTENTION', 'INTERRUPTED'}
+
+
+def public_task(row):
+    """Never send raw params/credentials to UI."""
+    params = json.loads(row['params'])
+    from .cli import alive, stage_indicator
+    status = row['status']
+    if status in ('RUNNING', 'QUEUED') and row.get('pid') and not alive(row['pid']):
+        status = 'INTERRUPTED'
+    return {
+        'id': row['id'], 'created': row['created'], 'status': status,
+        'stage': row['stage'], 'stage_display': stage_indicator(row['stage']),
+        'note': safe_text(row.get('note', '')),
+        'pid': row.get('pid'), 'project': params.get('project', ''),
+        'country': params.get('country', ''),
+        'plugin_version': params.get('plugin_version_input', ''),
+        'plugin_branch': params.get('plugin_branch', ''),
+        'gmx_branch': params.get('gmx_branch', ''),
+        'visible': bool(params.get('visible')),
+        'verbose': bool(params.get('verbose')),
+    }
+
+
+def get_doctor():
+    """Readiness without printing secrets, without auto-running/building."""
+    import contextlib
+    import io
+    from .cli import doctor_check
+    buf = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(buf):
+            ok = doctor_check(load_config(), strict=False)
+        notes = [safe_text(line) for line in buf.getvalue().splitlines()]
+    except Exception as exc:
+        ok = False
+        notes = ['环境检查失败：' + safe_text(str(exc))]
+    return {'ready': ok, 'messages': notes}
+
+
+def create_build(body):
+    """Use the same validations and persistent job engine as CLI run."""
+    from .cli import create_params, doctor_check, spawn
+    from .auth import store_credentials, store_github_token
+    config = load_config()
+    github_token = str(body.get('github_token') or '').strip()
+    if github_token:
+        store_github_token(github_token)
+    user = str(body.get('jenkins_user') or '').strip()
+    password = str(body.get('jenkins_password') or '')
+    if bool(user) != bool(password):
+        raise ValueError('Jenkins 账号和密码必须同时填写，或同时留空使用 Keychain')
+    if user:
+        if len(user) > 256 or len(password) > 4096:
+            raise ValueError('Jenkins 登录字段过长')
+        store_credentials(user, password)
+    args = SimpleNamespace(
+        plugin_branch=_field(body, 'plugin_branch', 200),
+        gmx_branch=_field(body, 'gmx_branch', 200),
+        plugin_version=_field(body, 'plugin_version', 50),
+        project_name=_field(body, 'project_name', 100),
+        country=_field(body, 'country', 30).upper(),
+        plugin_url=None, gmx_url=None,
+        visible=body.get('visible', True) is True,
+        verbose=body.get('verbose', True) is True,
+    )
+    params = create_params(args, config)
+    doctor_check(config, strict=True)
+    token_or_error(config)
+    if active_count() >= int(config.get('build', {}).get('max_parallel', 2)):
+        raise ValueError('已达到并发任务上限，请先等待或恢复已有任务')
+    created = create_task(config, params)
+    spawn(created['id'], wait=False)
+    return public_task(task(created['id']))
+
+
+def _field(body, key, maxlen):
+    value = body.get(key, '')
+    if not isinstance(value, str) or not value or len(value) > maxlen:
+        raise ValueError(f'{key} 不能为空或超过 {maxlen} 字符')
+    return value.strip()
+
+
+def resume_build(task_id, body):
+    from .cli import alive, doctor_check, spawn
+    if not TASK_ID.fullmatch(task_id):
+        raise ValueError('任务 ID 格式不合法')
+    row = task(task_id)
+    if row['status'] == 'SUCCESS':
+        raise ValueError('任务已完成，无需恢复')
+    if row['status'] in ('RUNNING', 'QUEUED') and alive(row['pid']):
+        raise ValueError('原 Worker 仍在运行，禁止重复启动')
+    cfg = load_config()
+    doctor_check(cfg, strict=True)
+    token_or_error(cfg)
+    if active_count() >= int(cfg.get('build', {}).get('max_parallel', 2)):
+        raise ValueError('并发任务已达到上限')
+    if row['status'] in ('RUNNING', 'QUEUED'):
+        update_task(task_id, status='INTERRUPTED', note='旧 Worker 不在线，从 Web Console 恢复')
+    # The UI keeps a browser visible by default while replaying trace.
+    update_task_params(task_id,
+                       visible=(True if body.get('visible', True) is True else None),
+                       verbose=(True if body.get('verbose', True) is True else None))
+    spawn(task_id, wait=False)
+    return public_task(task(task_id))
+
+
+def read_log(task_id, offset):
+    task(task_id)  # verify known ID, never accept directory traversal
+    if not TASK_ID.fullmatch(task_id):
+        raise ValueError('任务 ID 格式不合法')
+    path = task_folder(task_id) / 'run.log'
+    if not path.is_file():
+        return {'offset': 0, 'lines': '', 'size': 0}
+    size = path.stat().st_size
+    # Initial view shows recent data. Clients can incrementally tail via offset.
+    if offset is None:
+        position = max(0, size - MAX_LOG_BYTES)
+    else:
+        position = max(0, min(int(offset), size))
+        if size - position > MAX_LOG_BYTES:
+            position = size - MAX_LOG_BYTES
+    with path.open('rb') as f:
+        f.seek(position)
+        data = f.read(MAX_LOG_BYTES)
+        next_offset = f.tell()
+    # safe_text redacts generic logged tokens from old versions as defense-in-depth.
+    return {'offset': next_offset, 'lines': safe_text(data.decode('utf-8', errors='replace')),
+            'size': size}
+
+
+def get_screenshots(task_id):
+    task(task_id)
+    if not TASK_ID.fullmatch(task_id):
+        raise ValueError('任务 ID 格式不合法')
+    screen_dir = task_folder(task_id) / 'screenshots'
+    if not screen_dir.is_dir():
+        return []
+    return sorted([f.name for f in screen_dir.iterdir()
+                   if f.is_file() and not f.is_symlink() and IMAGE_FILE.fullmatch(f.name)])[:100]
+
+
+def make_handler(csrf_token):
+    class Handler(BaseHTTPRequestHandler):
+        server_version = 'MacAppBuilder/0.6'
+
+        def log_message(self, fmt, *args):
+            # Keep credentials out of request logging; no query strings printed.
+            if os.environ.get('APP_BUILDER_WEB_DEBUG') == '1':
+                print('[WEB]', safe_text(fmt % args), flush=True)
+
+        def _allowed_host(self):
+            # Strict Host validation defeats DNS rebinding against localhost.
+            return self.headers.get('Host', '') == f'{HOST}:{self.server.server_port}'
+
+        def _allowed_origin(self):
+            origin = self.headers.get('Origin', '')
+            return not origin or origin == f'http://{HOST}:{self.server.server_port}'
+
+        def _headers(self, status, content_type, length):
+            self.send_response(status)
+            self.send_header('Content-Type', content_type)
+            self.send_header('Content-Length', str(length))
+            self.send_header('Cache-Control', 'no-store')
+            self.send_header('X-Content-Type-Options', 'nosniff')
+            self.send_header('X-Frame-Options', 'DENY')
+            self.send_header('Referrer-Policy', 'no-referrer')
+            self.send_header('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+            self.end_headers()
+
+        def _send(self, data, status=200, typ='application/json; charset=utf-8'):
+            b = data if isinstance(data, bytes) else json.dumps(data, ensure_ascii=False).encode('utf-8')
+            self._headers(status, typ, len(b))
+            self.wfile.write(b)
+
+        def _failed(self, status, message):
+            self._send({'error': safe_text(message)}, status=status)
+
+        def do_GET(self):
+            if not self._allowed_host():
+                return self._failed(403, '非法 Host')
+            u = urlsplit(self.path)
+            p = u.path
+            try:
+                if p == '/':
+                    return self._asset('index.html')
+                if p in ('/app.css', '/app.js'):
+                    return self._asset(p[1:])
+                if p == '/api/bootstrap':
+                    config = load_config()
+                    return self._send({'csrf': csrf_token,
+                        'config': {'plugin_url': config['github']['plugin_url'],
+                                   'gmx_url': config['github']['gmx_url'],
+                                   'max_parallel': config.get('build', {}).get('max_parallel', 2)},
+                        'doctor': get_doctor()})
+                if p == '/api/tasks':
+                    return self._send({'tasks': [public_task(r) for r in task_list()]})
+                m = re.fullmatch(r'/api/tasks/([^/]+)/log', p)
+                if m:
+                    offset = parse_qs(u.query).get('offset', [None])[0]
+                    if offset is not None and (not offset.isascii() or not offset.isdigit()):
+                        raise ValueError('offset 必须是正整数')
+                    return self._send(read_log(m[1], None if offset is None else int(offset)))
+                m = re.fullmatch(r'/api/tasks/([^/]+)/screenshots', p)
+                if m:
+                    return self._send({'files': get_screenshots(m[1])})
+                m = re.fullmatch(r'/api/tasks/([^/]+)/screenshots/([^/]+)', p)
+                if m:
+                    files = get_screenshots(m[1])
+                    if m[2] not in files:
+                        return self._failed(404, '截图不存在')
+                    return self._send((task_folder(m[1]) / 'screenshots' / m[2]).read_bytes(),
+                                      typ='image/png')
+                if p == '/api/doctor':
+                    return self._send(get_doctor())
+                self._failed(404, '未找到该页面')
+            except (ValueError, KeyError, TypeError) as e:
+                self._failed(400, str(e))
+            except Exception as e:
+                print('[WEB] GET 操作失败：', type(e).__name__, safe_text(str(e)), flush=True)
+                self._failed(500, '读取失败，请查看启动终端')
+
+        def _asset(self, filename):
+            file = STATIC / filename
+            mime = 'text/html; charset=utf-8' if filename == 'index.html' else ('text/css; charset=utf-8' if filename.endswith('.css') else 'application/javascript; charset=utf-8')
+            return self._send(file.read_bytes(), typ=mime)
+
+        def do_POST(self):
+            if not self._allowed_host() or not self._allowed_origin():
+                return self._failed(403, '跨站请求被拒绝')
+            if not hmac.compare_digest(self.headers.get('X-CSRF-Token', ''), csrf_token):
+                return self._failed(403, 'CSRF 验证失败，请刷新页面')
+            if self.headers.get('Content-Type', '').split(';')[0].strip().lower() != 'application/json':
+                return self._failed(415, '仅支持 JSON 请求')
+            try:
+                length = int(self.headers.get('Content-Length', '-1'))
+                if length < 0 or length > MAX_REQUEST_BYTES:
+                    return self._failed(413, '请求内容过大或无长度')
+                body = json.loads(self.rfile.read(length))
+                if not isinstance(body, dict):
+                    raise ValueError('需要 JSON 对象')
+                if self.path == '/api/tasks':
+                    return self._send({'task': create_build(body)}, status=201)
+                m = re.fullmatch(r'/api/tasks/([^/?]+)/resume', self.path)
+                if m:
+                    return self._send({'task': resume_build(m[1], body)})
+                self._failed(404, '不支持该操作')
+            except (ValueError, KeyError, TypeError) as e:
+                self._failed(400, str(e))
+            except Exception as e:
+                print('[WEB] POST 操作失败：', type(e).__name__, safe_text(str(e)), flush=True)
+                self._failed(500, '操作失败，请查看终端或运行 doctor')
+
+    return Handler
+
+
+def serve(port=8765, *, open_browser=True, server_factory=ThreadingHTTPServer):
+    """Bind loopback only; no background daemon or external connectivity."""
+    if not isinstance(port, int) or not (1024 <= port <= 65535):
+        raise ValueError('Web 端口必须在 1024–65535 之间')
+    token = secrets.token_urlsafe(32)
+    with server_factory((HOST, port), make_handler(token)) as httpd:
+        url = f'http://{HOST}:{httpd.server_port}'
+        print(f'[WEB] Mac APP Builder v0.6 | 本地管理页面 {url}', flush=True)
+        print('[WEB] 按 Ctrl+C 关闭页面服务；已经启动的后台构建不会停止。', flush=True)
+        if open_browser:
+            # Avoid opening a browser before server exists.
+            threading.Timer(0.4, lambda: webbrowser.open(url)).start()
+        try:
+            httpd.serve_forever(poll_interval=0.3)
+        except KeyboardInterrupt:
+            print('\n[WEB] 页面服务已关闭；Worker 继续后台执行。', flush=True)

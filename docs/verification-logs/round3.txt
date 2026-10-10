@@ -1,5 +1,3 @@
-=== FINAL VERIFICATION ROUND 3 ===
-$ python -m unittest discover -s tests -v
 test_invalid_channel (test_browser_channel.TestBrowserChannel.test_invalid_channel) ... ok
 test_managed_chrome (test_browser_channel.TestBrowserChannel.test_managed_chrome) ... ok
 test_mirrored_chromium (test_browser_channel.TestBrowserChannel.test_mirrored_chromium) ... ok
@@ -7,13 +5,13 @@ test_configurable_token_env_reaches_askpass (test_enterprise_and_resume.TestNexu
 test_installer_no_default_public_browser_or_pip_upgrade (test_enterprise_and_resume.TestNexusAndTokenSafety.test_installer_no_default_public_browser_or_pip_upgrade) ... ok
 test_missing_configured_env_is_blocked (test_enterprise_and_resume.TestNexusAndTokenSafety.test_missing_configured_env_is_blocked) ... ok
 test_missing_token_guides_to_enterprise_github (test_enterprise_and_resume.TestNexusAndTokenSafety.test_missing_token_guides_to_enterprise_github) ... ok
-test_bootstrap_is_executed_in_its_own_gmx_directory (test_enterprise_and_resume.TestRecoveryAndIsolation.test_bootstrap_is_executed_in_its_own_gmx_directory) ... 2026-10-10 04:24:45 [SHELL] $ ./bootstrap.sh  (cwd=/tmp/tmp8asalbop/gmx)
-2026-10-10 04:24:45 [SHELL] 子进程输出保存至 /tmp/tmp8asalbop/bootstrap.log；--verbose 时同时流式显示（已尝试隐藏凭据）
-2026-10-10 04:24:45 [SHELL] ./bootstrap.sh exit=0 elapsed=0.0s
+test_bootstrap_is_executed_in_its_own_gmx_directory (test_enterprise_and_resume.TestRecoveryAndIsolation.test_bootstrap_is_executed_in_its_own_gmx_directory) ... 2026-10-10 04:46:00 [SHELL] $ ./bootstrap.sh  (cwd=/tmp/tmpazhyif27/gmx)
+2026-10-10 04:46:00 [SHELL] 子进程输出保存至 /tmp/tmpazhyif27/bootstrap.log；--verbose 时同时流式显示（已尝试隐藏凭据）
+2026-10-10 04:46:00 [SHELL] ./bootstrap.sh exit=0 elapsed=0.0s
 ok
-test_bootstrap_nonzero_exit_fails (test_enterprise_and_resume.TestRecoveryAndIsolation.test_bootstrap_nonzero_exit_fails) ... 2026-10-10 04:24:45 [SHELL] $ ./bootstrap.sh  (cwd=/tmp/tmpiji5fb4j/gmx)
-2026-10-10 04:24:45 [SHELL] 子进程输出保存至 /tmp/tmpiji5fb4j/bootstrap.log；--verbose 时同时流式显示（已尝试隐藏凭据）
-2026-10-10 04:24:45 [SHELL] ./bootstrap.sh exit=17 elapsed=0.0s
+test_bootstrap_nonzero_exit_fails (test_enterprise_and_resume.TestRecoveryAndIsolation.test_bootstrap_nonzero_exit_fails) ... 2026-10-10 04:46:00 [SHELL] $ ./bootstrap.sh  (cwd=/tmp/tmp00uqz4ez/gmx)
+2026-10-10 04:46:00 [SHELL] 子进程输出保存至 /tmp/tmp00uqz4ez/bootstrap.log；--verbose 时同时流式显示（已尝试隐藏凭据）
+2026-10-10 04:46:00 [SHELL] ./bootstrap.sh exit=17 elapsed=0.0s
 ok
 test_failed_task_state_creation_not_inserted (test_enterprise_and_resume.TestRecoveryAndIsolation.test_failed_task_state_creation_not_inserted) ... ok
 test_per_task_lease_blocks_second_worker (test_enterprise_and_resume.TestRecoveryAndIsolation.test_per_task_lease_blocks_second_worker) ... ok
@@ -21,7 +19,13 @@ test_two_distinct_workers_hold_leases_concurrently (test_enterprise_and_resume.T
 Real subprocesses, not merely two task objects in one process. ... ok
 test_bootstrap_stream_output_and_exit_code (test_full_trace.FullTraceTests.test_bootstrap_stream_output_and_exit_code) ... ok
 test_click_trace_mentions_locator_click (test_full_trace.FullTraceTests.test_click_trace_mentions_locator_click) ... ok
-test_live_flag_enables_all_three_modes (test_full_trace.FullTraceTests.test_live_flag_enables_all_three_modes) ... ok
+test_live_flag_enables_all_three_modes (test_full_trace.FullTraceTests.test_live_flag_enables_all_three_modes) ... /opt/pyvenv/lib/python3.13/site-packages/yaml/error.py:6: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7f3a61a2ae30>
+  def __init__(self, name, index, line, column, buffer, pointer):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/pyvenv/lib/python3.13/site-packages/yaml/error.py:6: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7f3a61a2ad40>
+  def __init__(self, name, index, line, column, buffer, pointer):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+ok
 test_playwright_visit_traces_navigation_without_query (test_full_trace.FullTraceTests.test_playwright_visit_traces_navigation_without_query) ... ok
 test_url_token_and_header_redaction (test_full_trace.FullTraceTests.test_url_token_and_header_redaction) ... ok
 test_blocks_hook_modifications (test_gitops.TestSafeCommit.test_blocks_hook_modifications) ... ok
@@ -31,64 +35,60 @@ test_403_stops_without_retry (test_jenkins_job_polling.TestJobDiscoveryPolling.t
 test_404_then_created_checks_every_ten_seconds (test_jenkins_job_polling.TestJobDiscoveryPolling.test_404_then_created_checks_every_ten_seconds) ... ok
 test_persistent_404_times_out_without_click (test_jenkins_job_polling.TestJobDiscoveryPolling.test_persistent_404_times_out_without_click) ... ok
 test_callback_source_relation (test_jenkins_offline.TestArtifactCrawl.test_callback_source_relation) ... ok
-test_crawl_never_follows_cross_job_links (test_jenkins_offline.TestArtifactCrawl.test_crawl_never_follows_cross_job_links) ... 2026-10-10 04:24:47 [ARTIFACT] jenkins 读取 Build #8 的产物目录
+test_crawl_never_follows_cross_job_links (test_jenkins_offline.TestArtifactCrawl.test_crawl_never_follows_cross_job_links) ... 2026-10-10 04:46:02 [ARTIFACT] jenkins 读取 Build #8 的产物目录
 ok
-test_walks_nested_artifact_directories_only_for_exact_build (test_jenkins_offline.TestArtifactCrawl.test_walks_nested_artifact_directories_only_for_exact_build) ... 2026-10-10 04:24:47 [ARTIFACT] jenkins 读取 Build #7 的产物目录
+test_walks_nested_artifact_directories_only_for_exact_build (test_jenkins_offline.TestArtifactCrawl.test_walks_nested_artifact_directories_only_for_exact_build) ... 2026-10-10 04:46:02 [ARTIFACT] jenkins 读取 Build #7 的产物目录
 ok
 test_accepts_only_last_status_line (test_jenkins_offline.TestConsoleStatus.test_accepts_only_last_status_line) ... ok
-test_failed_callback_does_not_advance_to_gmx (test_jenkins_offline.TestExistingTaskCallbackRecovery.test_failed_callback_does_not_advance_to_gmx) ... 2026-10-10 04:24:47 [JENKINS] plugin 正式构建前已有 Build: []
-2026-10-10 04:24:47 [CALLBACK] Plugin Trigger #1 → Callback #2；下一步监控 Callback
+test_failed_callback_does_not_advance_to_gmx (test_jenkins_offline.TestExistingTaskCallbackRecovery.test_failed_callback_does_not_advance_to_gmx) ... 2026-10-10 04:46:02 [JENKINS] plugin 正式构建前已有 Build: []
+2026-10-10 04:46:02 [CALLBACK] Plugin Trigger #1 → Callback #2；下一步监控 Callback
 ok
 test_resume_old_running_trigger_build_without_clicking_again (test_jenkins_offline.TestExistingTaskCallbackRecovery.test_resume_old_running_trigger_build_without_clicking_again)
-Observed on Mac: #1 trigger and #2 callback exist while worker watches #1. ... 2026-10-10 04:24:47 [CALLBACK] Plugin Trigger #1 → Callback #2；下一步监控 Callback
+Observed on Mac: #1 trigger and #2 callback exist while worker watches #1. ... 2026-10-10 04:46:02 [CALLBACK] Plugin Trigger #1 → Callback #2；下一步监控 Callback
 ok
-test_gmx_parameters_passed_once (test_jenkins_offline.TestJenkinsStateMachine.test_gmx_parameters_passed_once) ... 2026-10-10 04:24:47 [JENKINS] gmx 已具有参数化入口，跳过初始化 Build
-2026-10-10 04:24:47 [JENKINS] gmx 正式构建前已有 Build: []
+test_gmx_parameters_passed_once (test_jenkins_offline.TestJenkinsStateMachine.test_gmx_parameters_passed_once) ... 2026-10-10 04:46:02 [JENKINS] gmx 已具有参数化入口，跳过初始化 Build
+2026-10-10 04:46:02 [JENKINS] gmx 正式构建前已有 Build: []
 ok
-test_init_failure_then_formal_success_no_duplicate_on_resume (test_jenkins_offline.TestJenkinsStateMachine.test_init_failure_then_formal_success_no_duplicate_on_resume) ... 2026-10-10 04:24:47 [JENKINS] plugin 初始化前已有 Build: []
+test_init_failure_then_formal_success_no_duplicate_on_resume (test_jenkins_offline.TestJenkinsStateMachine.test_init_failure_then_formal_success_no_duplicate_on_resume) ... 2026-10-10 04:46:02 [JENKINS] plugin 初始化前已有 Build: []
 [plugin] 初始化构建 #1: FAILURE；等待参数化入口
-2026-10-10 04:24:47 [JENKINS] plugin 正式构建前已有 Build: [1]
+2026-10-10 04:46:02 [JENKINS] plugin 正式构建前已有 Build: [1]
 ok
-test_failure_status_takes_precedence_over_callback (test_jenkins_offline.TestLinkedPluginBuild.test_failure_status_takes_precedence_over_callback) ... 2026-10-10 04:24:47 [JENKINS] plugin 正在监控 Build #1: https://ci.corp/job/release/1/
-2026-10-10 04:24:47 [JENKINS] plugin Build #1 页面图标确认终态: FAILURE
+test_failure_status_takes_precedence_over_callback (test_jenkins_offline.TestLinkedPluginBuild.test_failure_status_takes_precedence_over_callback) ... 2026-10-10 04:46:02 [JENKINS] plugin 正在监控 Build #1: https://ci.corp/job/release/1/
+2026-10-10 04:46:02 [JENKINS] plugin Build #1 页面图标确认终态: FAILURE
 ok
-test_live_trigger_hands_off_to_linked_callback_and_resumes_without_click (test_jenkins_offline.TestLinkedPluginBuild.test_live_trigger_hands_off_to_linked_callback_and_resumes_without_click) ... 2026-10-10 04:24:47 [JENKINS] plugin 已具有参数化入口，跳过初始化 Build
-2026-10-10 04:24:47 [JENKINS] plugin 正式构建前已有 Build: []
-2026-10-10 04:24:47 [CALLBACK] Plugin Trigger #1 → Callback #2；下一步监控 Callback
+test_live_trigger_hands_off_to_linked_callback_and_resumes_without_click (test_jenkins_offline.TestLinkedPluginBuild.test_live_trigger_hands_off_to_linked_callback_and_resumes_without_click) ... 2026-10-10 04:46:02 [JENKINS] plugin 已具有参数化入口，跳过初始化 Build
+2026-10-10 04:46:02 [JENKINS] plugin 正式构建前已有 Build: []
+2026-10-10 04:46:02 [CALLBACK] Plugin Trigger #1 → Callback #2；下一步监控 Callback
 ok
 test_modern_jenkins_svg_header_icons_not_other_text (test_jenkins_offline.TestLinkedPluginBuild.test_modern_jenkins_svg_header_icons_not_other_text) ... ok
-test_wait_result_switches_when_related_callback_is_visible (test_jenkins_offline.TestLinkedPluginBuild.test_wait_result_switches_when_related_callback_is_visible) ... 2026-10-10 04:24:47 [JENKINS] plugin 正在监控 Build #1: https://ci.corp/job/release/1/
-2026-10-10 04:24:47 [CALLBACK] plugin Build #1 已创建关联 Callback #2；切换监控 #2
+test_wait_result_switches_when_related_callback_is_visible (test_jenkins_offline.TestLinkedPluginBuild.test_wait_result_switches_when_related_callback_is_visible) ... 2026-10-10 04:46:02 [JENKINS] plugin 正在监控 Build #1: https://ci.corp/job/release/1/
+2026-10-10 04:46:02 [CALLBACK] plugin Build #1 已创建关联 Callback #2；切换监控 #2
 ok
-test_gmx_changes_only_three_controls (test_jenkins_offline.TestParameterControls.test_gmx_changes_only_three_controls) ... <frozen os>:735: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7fbd613d97b0>
-ResourceWarning: Enable tracemalloc to get the object allocation traceback
-<frozen os>:735: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7fbd613d96c0>
-ResourceWarning: Enable tracemalloc to get the object allocation traceback
-2026-10-10 04:24:47 [FORM] GMX 参数设置 ENTITIES=UK SYNC_UPLOAD=true CUSTOM_FOLDER=0_A_UK_PayByBank
+test_gmx_changes_only_three_controls (test_jenkins_offline.TestParameterControls.test_gmx_changes_only_three_controls) ... 2026-10-10 04:46:02 [FORM] GMX 参数设置 ENTITIES=UK SYNC_UPLOAD=true CUSTOM_FOLDER=0_A_UK_PayByBank
 [Jenkins/gmx] ENTITIES=UK SYNC_UPLOAD=true CUSTOM_FOLDER=0_A_UK_PayByBank
 ok
-test_nonactionable_text_does_not_authorize_build (test_jenkins_offline.TestParameterControls.test_nonactionable_text_does_not_authorize_build) ... 2026-10-10 04:24:47 [JENKINS] jenkins 页面入口：unknown（https://ci.corp/job/example/）
+test_nonactionable_text_does_not_authorize_build (test_jenkins_offline.TestParameterControls.test_nonactionable_text_does_not_authorize_build) ... 2026-10-10 04:46:02 [JENKINS] jenkins 页面入口：unknown（https://ci.corp/job/example/）
 ok
 test_cli_accepts_live_flags (test_live_observation.LiveFlags.test_cli_accepts_live_flags) ... ok
 test_git_debug_prints_command_without_token (test_live_observation.LiveFlags.test_git_debug_prints_command_without_token) ... ok
 test_resume_option_parse (test_live_observation.LiveFlags.test_resume_option_parse) ... ok
 test_sanitize_token_url_credentials_and_query (test_live_observation.LiveFlags.test_sanitize_token_url_credentials_and_query) ... ok
 test_stored_resume_flags_persist (test_live_observation.LiveFlags.test_stored_resume_flags_persist) ... ok
-test_visible_launch_uses_chrome_not_headless (test_live_observation.LiveFlags.test_visible_launch_uses_chrome_not_headless) ... 2026-10-10 04:24:47 [BROWSER] plugin Chrome 已启动（可见窗口）
-/usr/lib/python3.13/unittest/mock.py:2247: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7fbd613da200>
-  def __init__(self, name, parent):
+test_visible_launch_uses_chrome_not_headless (test_live_observation.LiveFlags.test_visible_launch_uses_chrome_not_headless) ... 2026-10-10 04:46:02 [BROWSER] plugin Chrome 已启动（可见窗口）
+/usr/lib/python3.13/unittest/mock.py:458: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7f3a61a2b6a0>
+  new = type(cls.__name__, bases, {'__doc__': cls.__doc__})
 ResourceWarning: Enable tracemalloc to get the object allocation traceback
-/usr/lib/python3.13/unittest/mock.py:2247: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7fbd613d9d50>
-  def __init__(self, name, parent):
+/usr/lib/python3.13/unittest/mock.py:458: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7f3a61a2b880>
+  new = type(cls.__name__, bases, {'__doc__': cls.__doc__})
 ResourceWarning: Enable tracemalloc to get the object allocation traceback
-/usr/lib/python3.13/unittest/mock.py:2247: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7fbd613d9c60>
-  def __init__(self, name, parent):
+/usr/lib/python3.13/unittest/mock.py:458: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7f3a61a2b5b0>
+  new = type(cls.__name__, bases, {'__doc__': cls.__doc__})
 ResourceWarning: Enable tracemalloc to get the object allocation traceback
-/usr/lib/python3.13/unittest/mock.py:2247: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7fbd613d9a80>
-  def __init__(self, name, parent):
+/usr/lib/python3.13/unittest/mock.py:458: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7f3a61a2ae30>
+  new = type(cls.__name__, bases, {'__doc__': cls.__doc__})
 ResourceWarning: Enable tracemalloc to get the object allocation traceback
-/usr/lib/python3.13/unittest/mock.py:2247: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7fbd613d9b70>
-  def __init__(self, name, parent):
+/usr/lib/python3.13/unittest/mock.py:458: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7f3a61a2ad40>
+  new = type(cls.__name__, bases, {'__doc__': cls.__doc__})
 ResourceWarning: Enable tracemalloc to get the object allocation traceback
 ok
 test_watch_does_not_spawn_or_call_jenkins (test_live_observation.LiveFlags.test_watch_does_not_spawn_or_call_jenkins) ... ok
@@ -109,9 +109,24 @@ test_no_index_option_rejected (test_pip_sources.PipSourceTests.test_no_index_opt
 test_non_https_index_blocked (test_pip_sources.PipSourceTests.test_non_https_index_blocked) ... ok
 test_two_corporate_nexus_indexes_allowed (test_pip_sources.PipSourceTests.test_two_corporate_nexus_indexes_allowed) ... ok
 test_browser_reuses_valid_login_without_keychain_form_submission (test_startup_and_auth.AuthAndStartupTests.test_browser_reuses_valid_login_without_keychain_form_submission) ... ok
-test_browser_submits_login_and_refreshes_cached_state (test_startup_and_auth.AuthAndStartupTests.test_browser_submits_login_and_refreshes_cached_state) ... 2026-10-10 04:24:47 [AUTH] plugin 检测到登录页面，尝试自动填写账号密码
+test_browser_submits_login_and_refreshes_cached_state (test_startup_and_auth.AuthAndStartupTests.test_browser_submits_login_and_refreshes_cached_state) ... 2026-10-10 04:46:02 [AUTH] plugin 检测到登录页面，尝试自动填写账号密码
 ok
-test_cached_state_not_required_when_keychain_exists (test_startup_and_auth.AuthAndStartupTests.test_cached_state_not_required_when_keychain_exists) ... 2026-10-10 04:24:47 [BROWSER] plugin Chrome 已启动（后台模式）
+test_cached_state_not_required_when_keychain_exists (test_startup_and_auth.AuthAndStartupTests.test_cached_state_not_required_when_keychain_exists) ... 2026-10-10 04:46:02 [BROWSER] plugin Chrome 已启动（后台模式）
+/usr/lib/python3.13/unittest/mock.py:493: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7f3a61a2ad40>
+  __dict__['_mock_call_args_list'] = _CallList()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/usr/lib/python3.13/unittest/mock.py:493: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7f3a61a2ae30>
+  __dict__['_mock_call_args_list'] = _CallList()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/usr/lib/python3.13/unittest/mock.py:493: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7f3a61a2b5b0>
+  __dict__['_mock_call_args_list'] = _CallList()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/usr/lib/python3.13/unittest/mock.py:493: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7f3a61a2b880>
+  __dict__['_mock_call_args_list'] = _CallList()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/usr/lib/python3.13/unittest/mock.py:493: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7f3a61a2b6a0>
+  __dict__['_mock_call_args_list'] = _CallList()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
 ok
 test_cli_accepts_once_only_login_and_update (test_startup_and_auth.AuthAndStartupTests.test_cli_accepts_once_only_login_and_update) ... ok
 test_doctor_with_mocked_dependencies (test_startup_and_auth.AuthAndStartupTests.test_doctor_with_mocked_dependencies) ... ok
@@ -128,33 +143,36 @@ test_two_xcconfigs_only (test_versions_and_edits.TestEdits.test_two_xcconfigs_on
 test_arguments (test_versions_and_edits.TestVersions.test_arguments) ... ok
 test_artifacts (test_versions_and_edits.TestVersions.test_artifacts) ... ok
 test_job_name_conventions (test_versions_and_edits.TestVersions.test_job_name_conventions) ... ok
+test_bootstrap_exposes_csrf_and_nonsecret_defaults (test_web_console.WebHTTPTests.test_bootstrap_exposes_csrf_and_nonsecret_defaults) ... ok
+test_diagnosis_does_not_disclose_token (test_web_console.WebHTTPTests.test_diagnosis_does_not_disclose_token) ... ok
+test_get_endpoints_and_missing_route (test_web_console.WebHTTPTests.test_get_endpoints_and_missing_route) ... ok
+test_invalid_offset_rejected (test_web_console.WebHTTPTests.test_invalid_offset_rejected) ... ok
+test_long_content_body_rejected (test_web_console.WebHTTPTests.test_long_content_body_rejected) ... ok
+test_missing_csrf_rejected (test_web_console.WebHTTPTests.test_missing_csrf_rejected) ... ok
+test_nonlocal_origin_rejected_even_with_csrf (test_web_console.WebHTTPTests.test_nonlocal_origin_rejected_even_with_csrf) ... ok
+test_page_assets_and_security_headers (test_web_console.WebHTTPTests.test_page_assets_and_security_headers) ... ok
+test_resume_route_dispatch (test_web_console.WebHTTPTests.test_resume_route_dispatch) ... ok
+test_valid_csrf_and_origin_create_task (test_web_console.WebHTTPTests.test_valid_csrf_and_origin_create_task) ... ok
+test_wrong_host_rejected (test_web_console.WebHTTPTests.test_wrong_host_rejected) ... ok
+test_build_creates_task_and_uses_existing_keychain (test_web_console.WebLogicTests.test_build_creates_task_and_uses_existing_keychain) ... ok
+test_invalid_inputs_cannot_spawn_build (test_web_console.WebLogicTests.test_invalid_inputs_cannot_spawn_build) ... ok
+test_log_tail_and_no_path_traversal (test_web_console.WebLogicTests.test_log_tail_and_no_path_traversal) ... ok
+test_port_and_localhost_only (test_web_console.WebLogicTests.test_port_and_localhost_only) ... ok
+test_public_task_does_not_send_password_or_repo_token (test_web_console.WebLogicTests.test_public_task_does_not_send_password_or_repo_token) ... ok
+test_resume_does_not_create_another_task (test_web_console.WebLogicTests.test_resume_does_not_create_another_task) ... ok
+test_resume_refuses_active_worker (test_web_console.WebLogicTests.test_resume_refuses_active_worker) ... ok
+test_screen_listing_only_regular_png (test_web_console.WebLogicTests.test_screen_listing_only_regular_png) ... ok
+test_static_js_no_remote_analytics_or_inline_password (test_web_console.WebLogicTests.test_static_js_no_remote_analytics_or_inline_password) ... ok
+test_web_cli_flags (test_web_console.WebLogicTests.test_web_cli_flags) ... ok
+test_config_token_prefers_env_then_keychain (test_web_github_keychain.WebPATTests.test_config_token_prefers_env_then_keychain) ... ok
+test_git_worker_reads_keychain_token (test_web_github_keychain.WebPATTests.test_git_worker_reads_keychain_token) ... ok
+test_invalid_token_rejected_before_keychain (test_web_github_keychain.WebPATTests.test_invalid_token_rejected_before_keychain) ... ok
+test_read_token_keychain_macos (test_web_github_keychain.WebPATTests.test_read_token_keychain_macos) ... ok
+test_token_stored_with_keychain_no_file (test_web_github_keychain.WebPATTests.test_token_stored_with_keychain_no_file) ... ok
+test_web_accepts_pat_not_saved_in_task_payload (test_web_github_keychain.WebPATTests.test_web_accepts_pat_not_saved_in_task_payload) ... ok
+test_web_password_input_in_browser_form (test_web_github_keychain.WebPATTests.test_web_password_input_in_browser_form) ... ok
 
 ----------------------------------------------------------------------
-Ran 78 tests in 2.150s
+Ran 106 tests in 2.094s
 
 OK
-exit=0
-$ python -m compileall -q appbuilder
-exit=0
-$ sh -n install.sh app-build selftest.sh
-exit=0
-$ python -m appbuilder run --plugin-version 1.3 --plugin-branch develop --gmx-branch develop --country uk --project-name PayByBank --dry-run
-{
-  "plugin_source": "develop",
-  "gmx_source": "develop",
-  "plugin_version_input": "1.3",
-  "country": "UK",
-  "project": "PayByBank",
-  "plugin_url": "https://alm-github.systems.uk.hsbc/mobile/paybybank-ios-plugin",
-  "gmx_url": "https://alm-github.systems.uk.hsbc/mobile/mobilebanking-global-ios",
-  "visible": false,
-  "verbose": false,
-  "plugin_version": "1.3.202610100424",
-  "plugin_branch": "release/1.3.202610100424",
-  "gmx_branch": "upload/auto202610100424",
-  "plugin_job": "https://mobile-premier01-jenkins.build-mobile.iwpb.euw2.prod.aws.cloud.hsbc/job/IWPB_Transaction_Banking/job/Domestic_Payment_and_Transfer_Mobile_Global_12824743/job/Lib/job/mobile_paybybank-ios-plugin/job/release-build/job/release_1_3_202610100424/",
-  "gmx_job": "https://mobile-platform-jenkins.build-mobile.iwpb.euw2.prod.aws.cloud.hsbc/job/mobilex-global-uploads/job/global-ios-upload/job/upload%2Fauto202610100424/",
-  "folder": "0_A_UK_PayByBank",
-  "note": "预览而已：没有 Git、Jenkins、文件写入操作。正式任务时间戳由并发管理器分配。"
-}
-exit=0

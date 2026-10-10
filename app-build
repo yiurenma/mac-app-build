@@ -5,7 +5,7 @@ HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 cd "$HERE"
 COMMAND=${1:-}
 # Explicit opt-in: update this tool only if its tracked worktree is clean.
-if [ "$COMMAND" = run ] || [ "$COMMAND" = resume ]; then
+if [ "$COMMAND" = run ] || [ "$COMMAND" = resume ] || [ "$COMMAND" = web ]; then
   DRY_RUN=0
   for arg in "$@"; do
     if [ "$arg" = --dry-run ]; then DRY_RUN=1; fi

@@ -25,6 +25,9 @@ esac
         env = os.environ.copy()
         token = os.environ.get(token_env, '').strip()
         if not token:
+            from .auth import read_github_token
+            token = (read_github_token() or '').strip()
+        if not token:
             raise RuntimeError(f'未设置 {token_env}; 无法 Git 认证')
         env['APP_BUILDER_GIT_TOKEN'] = token
         env['GIT_ASKPASS'] = str(script)

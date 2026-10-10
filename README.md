@@ -1,4 +1,19 @@
-# HSBC UK PBB — Mac APP Build Automation (v0.5.0)
+# HSBC UK PBB — Mac APP Build Automation (v0.6.0)
+
+
+## 首选：Web Console（v0.6）
+
+**不需要输入很长的命令**：在 macOS 双击 **`Start APP Builder.command`**，会安全检查新版本（仅 Git checkout 且工作区干净时）、自动安装缺失的 Python 依赖、运行 doctor、启动本地服务并打开浏览器。
+
+- 本地页面：**http://127.0.0.1:8765**（只监听你的 Mac `127.0.0.1`，不部署服务器）。
+- 页面填写 Plugin/GMX 源分支、Plugin Version、Country、Project Name，点击 **Start build**。
+- 首次还可以在页面填写 **GitHub PAT + Jenkins 用户名/密码**，保存到 **macOS Keychain**。以后表单可留空，后台从 Keychain 读取。环境变量 `GITHUB_TOKEN` 仍可用且优先。
+- 页面实时显示 **任务列表、进度阶段、Git/Playwright/Jenkins/Shell 日志、错误截图和恢复操作**；多个任务继续以原有隔离 Worker 并发运行。
+- 如果希望从终端启动：`./app-build web`。若同时安全更新：`./app-build web --update`。关闭 Web 页或按 Ctrl+C 不会停止后台 Worker。
+
+[查看 Web Console 完整说明](docs/07-Web-Console本地管理界面.md)。**CLI 保留兼容**，下面全部原有 `run`、`resume`、`doctor` 命令仍可用。
+
+---
 
 在一台 Mac 上**并发运行多个独立**的 Plugin → GMX → Jenkins APP 打包任务。
 每个任务有单独的 Git 克隆、时间戳、Jenkins 编号、日志和恢复状态。**没有用 Jenkins REST API**；Jenkins 操作由 Playwright 打开浏览器页面模拟人操作。
@@ -15,7 +30,7 @@
 - [内网 Jenkins/SSO 联调清单](docs/05-企业内网联调清单.md)
 - 流程图：[完整流程](diagrams/01-完整流程.svg) / [Jenkins 状态机](diagrams/02-Jenkins状态机.svg) / [多进程架构](diagrams/03-多进程架构.svg)（均有 PNG 预览及可修改 `.dot` 源码）。
 
-> **v0.3 原版经过三轮离线审查；本次 v0.4.0 Nexus 修复已增加专门测试并重新执行三轮离线回归，但尚未连接公司的 Nexus、SSO、Plugin/GMX Jenkins 真正执行打包。**
+> **当前 v0.6 已增加独立 Web Console、安全的本地 HTTP API 与离线回归。真实 Nexus/SSO/Plugin/GMX Jenkins 仍需在公司 Mac 和企业网络中现场联调，不能把离线模拟当作端到端成功。**
 
 ## 0. 工作流
 
@@ -59,14 +74,14 @@ export PLAYWRIGHT_DOWNLOAD_HOST='https://你的内部Playwright浏览器镜像'
 
 > 公司 Chrome 可能受到企业策略限制，无法由 Playwright 控制，或 SSO 会话不允许持久化。账号密码自动填入属于尽力兼容企业登录页面的能力，不保证适用所有 SSO/MFA。
 
-## 2. 设置 GitHub Token（仅环境变量）
+## 2. 设置 GitHub Token（页面 Keychain 或环境变量）
 
 ```bash
 export GITHUB_TOKEN='你的企业GitHub PAT'
 ./app-build doctor
 ```
 
-如果没有 Token，工具会给出 GitHub 创建网址以及授权说明。建议通过 macOS Keychain 或公司密码管理器把 Token 加载为环境变量；**不要把 Token 写到 config.yaml、脚本、Git URL 或项目仓库里**。企业 GitHub PAT 可能需要管理员批准、SSO 授权、Contents read/write。工具在启动前检查变量存在，真正的仓库权限由后续 Git 操作验证。Mac 上 `export` 仅对当前 Shell 及其子进程生效。
+Web Console 也支持首次填写 GitHub PAT 并保存到 Mac Keychain，因此无需每次在 Terminal 导出变量。如果没有 Token，工具会给出 GitHub 创建网址以及授权说明。建议通过 macOS Keychain 或公司密码管理器管理 Token；**不要把 Token 写到 config.yaml、脚本、Git URL 或项目仓库里**。企业 GitHub PAT 可能需要管理员批准、SSO 授权、Contents read/write。工具在启动前检查变量存在，真正的仓库权限由后续 Git 操作验证。Mac 上 `export` 仅对当前 Shell 及其子进程生效。
 
 ## 3. 一条命令启动 / Jenkins 自动登录（v0.5）
 

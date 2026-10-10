@@ -21,6 +21,9 @@ def token_or_error(config):
     key = config.get("github", {}).get("token_env", "GITHUB_TOKEN")
     token = os.environ.get(key, "").strip()
     if not token:
+        from .auth import read_github_token
+        token = (read_github_token() or "").strip()
+    if not token:
         repo = config.get('github', {}).get('plugin_url', '')
         parsed = urlsplit(repo)
         enterprise = f'{parsed.scheme}://{parsed.netloc}' if parsed.scheme == 'https' and parsed.netloc else '你的企业 GitHub'
