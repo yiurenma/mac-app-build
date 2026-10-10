@@ -40,7 +40,13 @@ def create_task(config, params):
             stamp = (datetime.strptime(stamp, '%Y%m%d%H%M') + timedelta(minutes=1)).strftime('%Y%m%d%H%M')
         task_id = f"{stamp}-{os.urandom(3).hex()}"
         generated = branch_names(params['plugin_version_input'], stamp)
-        urls = job_urls(config, generated['plugin_branch'], generated['gmx_branch'])
+        # Resolve branch Jobs using this task's explicit Jenkins defaults, not
+        # mutable process-global config. Other concurrent tasks remain isolated.
+        job_config = {**config, 'jenkins': {**config['jenkins'], **{
+            k: v for k, v in params.get('jenkins_settings', {}).items()
+            if k in ('plugin_parent', 'gmx_parent')
+        }}}
+        urls = job_urls(job_config, generated['plugin_branch'], generated['gmx_branch'])
         params = {**params, **generated, **urls, 'stamp': stamp, 'id': task_id}
         workdir = task_folder(task_id)
         # mkdir before INSERT: a missing working directory must never become

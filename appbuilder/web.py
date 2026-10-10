@@ -6,6 +6,7 @@ browser or task DB. Browser HTTP actions are CSRF-checked and same-origin only.
 from __future__ import annotations
 
 import hmac
+from copy import deepcopy
 import json
 import mimetypes
 import os
@@ -102,33 +103,146 @@ def get_doctor():
     return {'ready': ok, 'messages': notes}
 
 
+# Safe nonsecret form defaults; never return credentials, PAT or authentication cookies.
+def form_defaults(config):
+    j = config.get('jenkins', {})
+    b = config.get('build', {})
+    return {
+        'plugin_url': config['github']['plugin_url'],
+        'gmx_url': config['github']['gmx_url'],
+        'plugin_parent': j['plugin_parent'],
+        'gmx_parent': j['gmx_parent'],
+        'browser_channel': j.get('browser_channel', 'chrome'),
+        'discover_poll_seconds': j.get('discover_poll_seconds', 10),
+        'poll_seconds': j.get('poll_seconds', 45),
+        'console_settle_seconds': j.get('console_settle_seconds', 10),
+        'discover_timeout_minutes': j.get('discover_timeout_minutes', 30),
+        'build_timeout_minutes': j.get('build_timeout_minutes', 180),
+        'callback_timeout_minutes': j.get('callback_timeout_minutes', 30),
+        'max_changed_lines': b.get('max_changed_lines', 100),
+        'upload_success_pattern': b.get('upload_success_pattern', ''),
+        'max_parallel': b.get('max_parallel', 2),
+        'gmx_build_type': j.get('gmx_defaults', {}).get('BUILD_TYPE', 'Develop'),
+        'gmx_signing_repo_branch': j.get('gmx_defaults', {}).get('SIGNING_REPO_BRANCH', 'master'),
+        'gmx_sync_upload': j.get('gmx_defaults', {}).get('SYNC_UPLOAD', True),
+        'gmx_custom_folder': j.get('gmx_defaults', {}).get('CUSTOM_FOLDER', ''),
+        'gmx_fields': {key: j.get('gmx_fields', {}).get(key, '') for key in
+                       ('ENTITIES', 'SYNC_UPLOAD', 'CUSTOM_FOLDER', 'BUILD_TYPE', 'SIGNING_REPO_BRANCH')},
+    }
+
+
+def _plain_url(raw, label, *, maxlen=2048):
+    if not isinstance(raw, str) or not raw or len(raw) > maxlen:
+        raise ValueError(f'{label} 地址不能为空或过长')
+    u = urlsplit(raw.strip())
+    if (u.scheme != 'https' or not u.hostname or u.username or u.password
+            or u.query or u.fragment or any(c.isspace() for c in raw)):
+        raise ValueError(f'{label} 必须是无账号密码、查询参数的 HTTPS URL')
+    return raw.strip()
+
+
+def _integer_field(body, key, default, lower, upper):
+    value = body.get(key, default)
+    if isinstance(value, bool):
+        raise ValueError(f'{key} 无效')
+    try:
+        n = int(value)
+    except (ValueError, TypeError, OverflowError):
+        raise ValueError(f'{key} 必须是整数') from None
+    if not lower <= n <= upper or str(value).strip() not in (str(n),):
+        raise ValueError(f'{key} 必须在 {lower}～{upper} 之间')
+    return n
+
+
+def build_preferences(body, config, country, project):
+    d = form_defaults(config)
+    github = {
+        'plugin_url': _plain_url(body.get('plugin_url') or d['plugin_url'], 'Plugin GitHub'),
+        'gmx_url': _plain_url(body.get('gmx_url') or d['gmx_url'], 'GMX GitHub'),
+    }
+    jenkins = {
+        'plugin_parent': _plain_url(body.get('plugin_parent') or d['plugin_parent'], 'Plugin Jenkins'),
+        'gmx_parent': _plain_url(body.get('gmx_parent') or d['gmx_parent'], 'GMX Jenkins'),
+    }
+    browser = body.get('browser_channel') or d['browser_channel']
+    if browser not in ('chrome', 'msedge', 'chromium'):
+        raise ValueError('浏览器仅支持 chrome / msedge / chromium')
+    jenkins['browser_channel'] = browser
+    for key, lo, hi in (
+        ('discover_poll_seconds', 5, 3600), ('poll_seconds', 10, 3600),
+        ('console_settle_seconds', 1, 120), ('discover_timeout_minutes', 1, 240),
+        ('build_timeout_minutes', 1, 1440), ('callback_timeout_minutes', 1, 240)):
+        jenkins[key] = _integer_field(body, key, d[key], lo, hi)
+    selectors = {}
+    for name in ('ENTITIES', 'SYNC_UPLOAD', 'CUSTOM_FOLDER', 'BUILD_TYPE', 'SIGNING_REPO_BRANCH'):
+        key = 'selector_' + name.lower()
+        selector = body.get(key, d['gmx_fields'][name])
+        if not isinstance(selector, str) or len(selector) > 256:
+            raise ValueError(f'{key} 选择器过长或不是字符串')
+        selectors[name] = selector.strip()
+    jenkins['gmx_fields'] = selectors
+    bt = body.get('gmx_build_type') or d['gmx_build_type']
+    sr = body.get('gmx_signing_repo_branch') or d['gmx_signing_repo_branch']
+    custom = body.get('gmx_custom_folder') or f'0_A_{country}_{project}'
+    if not isinstance(bt, str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_ .-]{0,127}', bt):
+        raise ValueError('BUILD_TYPE 格式错误')
+    if not isinstance(sr, str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_./-]{0,127}', sr) or '..' in sr or '//' in sr:
+        raise ValueError('SIGNING_REPO_BRANCH 分支格式错误')
+    if not isinstance(custom, str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,127}', custom):
+        raise ValueError('CUSTOM_FOLDER 格式错误')
+    sync = body.get('gmx_sync_upload', d['gmx_sync_upload'])
+    if not isinstance(sync, bool):
+        raise ValueError('SYNC_UPLOAD 只能选择开启或关闭')
+    regex = body.get('upload_success_pattern', d['upload_success_pattern'])
+    if not isinstance(regex, str) or len(regex) > 200:
+        raise ValueError('上传成功日志正则过长')
+    if regex:
+        try:
+            re.compile(regex)
+        except re.error as exc:
+            raise ValueError('上传成功日志正则格式错误') from exc
+    build = {'max_changed_lines': _integer_field(body, 'max_changed_lines', d['max_changed_lines'], 1, 100000),
+             'upload_success_pattern': regex}
+    return github, jenkins, build, {
+        'BUILD_TYPE': bt, 'SIGNING_REPO_BRANCH': sr,
+        'SYNC_UPLOAD': sync, 'CUSTOM_FOLDER': custom,
+    }
+
+
 def create_build(body):
     """Use the same validations and persistent job engine as CLI run."""
     from .cli import create_params, doctor_check, spawn
     from .auth import store_credentials, store_github_token
     config = load_config()
     github_token = str(body.get('github_token') or '').strip()
-    if github_token:
-        store_github_token(github_token)
     user = str(body.get('jenkins_user') or '').strip()
     password = str(body.get('jenkins_password') or '')
     if bool(user) != bool(password):
         raise ValueError('Jenkins 账号和密码必须同时填写，或同时留空使用 Keychain')
-    if user:
-        if len(user) > 256 or len(password) > 4096:
-            raise ValueError('Jenkins 登录字段过长')
-        store_credentials(user, password)
+    if len(user) > 256 or len(password) > 4096 or len(github_token) > 4096:
+        raise ValueError('账号、密码或 Token 长度超限')
+    country = _field(body, 'country', 30).upper()
+    project = _field(body, 'project_name', 100)
+    # Validate names and build version *before* creating any persistent state.
+    github, jenkins, build, gmx = build_preferences(body, config, country, project)
     args = SimpleNamespace(
         plugin_branch=_field(body, 'plugin_branch', 200),
         gmx_branch=_field(body, 'gmx_branch', 200),
         plugin_version=_field(body, 'plugin_version', 50),
-        project_name=_field(body, 'project_name', 100),
-        country=_field(body, 'country', 30).upper(),
-        plugin_url=None, gmx_url=None,
+        project_name=project, country=country,
+        plugin_url=github['plugin_url'], gmx_url=github['gmx_url'],
         visible=body.get('visible', True) is True,
         verbose=body.get('verbose', True) is True,
     )
     params = create_params(args, config)
+    params['jenkins_settings'] = jenkins
+    params['build_settings'] = build
+    params['gmx_parameters'] = gmx
+    # Persist credentials only after all build parameters are valid.
+    if github_token:
+        store_github_token(github_token)
+    if user:
+        store_credentials(user, password)
     doctor_check(config, strict=True)
     token_or_error(config)
     if active_count() >= int(config.get('build', {}).get('max_parallel', 2)):
@@ -255,9 +369,7 @@ def make_handler(csrf_token):
                 if p == '/api/bootstrap':
                     config = load_config()
                     return self._send({'csrf': csrf_token,
-                        'config': {'plugin_url': config['github']['plugin_url'],
-                                   'gmx_url': config['github']['gmx_url'],
-                                   'max_parallel': config.get('build', {}).get('max_parallel', 2)},
+                        'config': form_defaults(config),
                         'doctor': get_doctor()})
                 if p == '/api/tasks':
                     return self._send({'tasks': [public_task(r) for r in task_list()]})

@@ -1,5 +1,6 @@
 from __future__ import annotations
 import json
+from copy import deepcopy
 import fcntl
 from contextlib import contextmanager
 import os
@@ -122,6 +123,18 @@ def run(task_id):
         return _run_unlocked(task_id)
 
 
+def effective_task_config(config, params):
+    """Resolve task-scoped preferences without mutating other tasks or config.yaml."""
+    conf = deepcopy(config)
+    for k, v in params.get('jenkins_settings', {}).items():
+        if k == 'gmx_fields':
+            conf['jenkins']['gmx_fields'] = {**conf['jenkins'].get('gmx_fields', {}), **v}
+        else:
+            conf['jenkins'][k] = v
+    conf['build'].update(params.get('build_settings', {}))
+    return conf
+
+
 def _run_unlocked(task_id):
     row = task(task_id)
     if row['status'] == 'SUCCESS':
@@ -129,7 +142,7 @@ def _run_unlocked(task_id):
         return
     params = json.loads(row['params'])
     set_verbose(params.get('verbose', False))
-    conf = load_config()
+    conf = effective_task_config(load_config(), params)
     token_or_error(conf)
     home = task_folder(task_id)
     plugin = home / 'plugin'
@@ -234,6 +247,7 @@ def _run_unlocked(task_id):
                 rt = read_state(task_id)['runtime']
                 verify_pushed(gmx, gmx_branch, rt['gmx_sha'], env)
                 with JenkinsBrowser(conf, DATA, home, 'gmx', visible=params.get('visible', False), verbose=params.get('verbose', False)) as browser:
+                    browser.gmx_settings = params.get('gmx_parameters', {})
                     ensure_bootstrap(browser, params['gmx_job'], task_id, 'gmx')
                     num, console = formal_build(browser, params['gmx_job'], task_id, 'gmx',
                                                 country=params['country'], project=params['project'])
@@ -256,7 +270,7 @@ def _run_unlocked(task_id):
         result = {'task_id': task_id, 'status': 'SUCCESS', 'plugin_branch': plugin_branch,
                   'plugin_job': params['plugin_job'], 'gmx_branch': gmx_branch,
                   'gmx_job': params['gmx_job'], 'country': params['country'],
-                  'project': params['project'], 'folder': f"0_A_{params['country']}_{params['project']}",
+                  'project': params['project'], 'folder': params.get('gmx_parameters', {}).get('CUSTOM_FOLDER') or f"0_A_{params['country']}_{params['project']}",
                   'runtime': read_state(task_id)['runtime']}
         tmp = home / 'result.json.tmp'
         tmp.write_text(json.dumps(result, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')

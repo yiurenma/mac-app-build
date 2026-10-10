@@ -1,4 +1,4 @@
-# v0.6.1 本地 Web Console（macOS）
+# v0.6.3 本地 Web Console（macOS）
 
 ## 目标与使用方式
 
@@ -8,7 +8,7 @@
 
 ## 页面能力
 
-- **New build**：Plugin 源分支、GMX 源分支、Plugin 版本、国家、项目名；可选择可见 Chrome、完整动作日志。
+- **New build**：Plugin 源分支、GMX 源分支、Plugin 版本、国家、项目名；高级参数可编辑仓库/Jenkins URL、GMX 默认 Jenkins 字段、各类轮询超时和浏览器配置（详见 docs/11-v0.6.3-Web参数补齐与验证.md）。可选择可见 Chrome、完整动作日志。
 - **Credentials**：GitHub PAT、Jenkins 用户名/密码首次可在页面输入，存储在当前 Mac 用户 Keychain；后续无需输入。用户密码与 Token 不保存到 SQLite、构建任务参数、配置文件，也不会返回给网页。已设置的环境变量 `GITHUB_TOKEN` 优先于 Keychain PAT。
 - **Live activity**：显示原 Worker 产生的真实日志和阶段，3 秒一次增量刷新，含历史记录和等待心跳。它不是对 Jenkins 调用频率的调整；新 Job 仍按 `discover_poll_seconds: 10` 检查，Build 状态仍按 `poll_seconds: 45` 检查。
 - **Jenkins links**：可从任务详情一键打开 Plugin Job、已记录的 Plugin Trigger/Callback 编号及 GMX 构建编号。

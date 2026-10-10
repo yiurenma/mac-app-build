@@ -17,7 +17,7 @@
 
 在一台 Mac 上**并发运行多个独立**的 Plugin → GMX → Jenkins APP 打包任务。
 
-### v0.6.2 — 一键启动稳定性增强
+### v0.6.3 — 一键启动稳定性增强
 
 - 双击 `Start APP Builder.command` 时，若本地 Web Console 已运行，会**直接打开现有页面**，不会重复占用端口。
 - GitHub 暂时不可访问或 `config.yaml` 存在本地未提交的修改时，**跳过更新但继续启动 Web Console**；只有对 `run/resume --update` 的显式更新仍遵循原有严格停止策略。
@@ -43,6 +43,19 @@
 - 可编辑技术版流程图：[完整流程](diagrams/01-完整流程.svg) / [Jenkins 状态机](diagrams/02-Jenkins状态机.svg) / [多进程架构](diagrams/03-多进程架构.svg)（另有 PNG 及可修改的 `.dot` 源码）。
 
 > **当前 v0.6 已增加独立 Web Console、安全的本地 HTTP API 与离线回归。真实 Nexus/SSO/Plugin/GMX Jenkins 仍需在公司 Mac 和企业网络中现场联调，不能把离线模拟当作端到端成功。**
+
+## v0.6.3 — 页面可编辑的默认输入参数
+
+**New build** 的五个常用字段保留不变。展开 **高级参数 & Jenkins Defaults** 即可查看、修改：
+
+- Plugin 和 GMX 的 GitHub 仓库 URL、Jenkins 分支 Job 的父级 URL、Chrome/Edge/Chromium 浏览器模式。
+- GMX `BUILD_TYPE=Develop`、`SIGNING_REPO_BRANCH=master`、`ENTITIES=Country`、`SYNC_UPLOAD=true`、`CUSTOM_FOLDER=0_A_<Country>_<Project>`。提交时 **五项均会填入 Playwright 控制的实际 Jenkins 参数表单并验证**；字段不存在会报告明确错误而不会盲目点击。Plugin Jenkins 仍保持自己的默认参数。
+- 新 Job 轮询 10 秒、构建状态轮询 45 秒、Console 终态等待 10 秒、发现/构建/Callback 超时、提交变更限制、可选上传成功日志正则及自定义 Jenkins CSS 字段选择器。
+- 最大并发任务显示为只读，因为它是当前 Web Console 的全局配额，仍由 `config.yaml` 控制。
+
+页面从 `config.yaml` 读取默认值，并展示自动派生的 Plugin/GMX 分支命名和 GMX 自定义目录。每个任务的实际设置写入独立的任务状态，**不会覆盖公司公用 YAML 配置，也不会影响其他正在并发运行的任务**。已有任务的 Resume 保持原任务参数。GitHub Token、Jenkins 密码只经 Mac Keychain 管理，不写入任务数据库。
+
+更多说明见 [v0.6.3 Web 参数配置手册](docs/11-v0.6.3-Web参数补齐与验证.md)。
 
 ## 0. 工作流
 
@@ -297,7 +310,7 @@ Plugin / GMX 分支 Push 后，Jenkins 可能需要时间扫描分支并创建 J
 不会在 404 页面上尝试点击 Build。
 
 
-## v0.6.2 Jenkins Callback 已成功但监控不结束
+## v0.6.3 Jenkins Callback 已成功但监控不结束
 
 - 访问 `/<build>/consoleText` 后等待控制台真正出现**末行** `Finished: SUCCESS/FAILURE/...`，不会因为页面已触发 `DOMContentLoaded` 就立刻离开。
 - 额外等待由 `jenkins.console_settle_seconds` 控制（默认 10 秒）。未加载完时仍会安全检查当前编号 Build 页面头部的结果图标，后续继续重试。

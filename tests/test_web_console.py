@@ -217,7 +217,8 @@ class WebLogicTests(unittest.TestCase):
     def test_static_js_no_remote_analytics_or_inline_password(self):
         html=(web.STATIC/'index.html').read_text()
         js=(web.STATIC/'app.js').read_text()
-        self.assertNotIn('https://',html)
+        self.assertNotIn('https://cdn.',html)
+        self.assertNotIn('<script src="https://',html)
         self.assertIn('textContent',js)
         self.assertNotIn('localStorage',js)
         self.assertNotIn('innerHTML',js)

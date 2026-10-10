@@ -338,7 +338,8 @@ class JenkinsBrowser:
                     return controls.first
         raise NeedsAttention(f'{field} 有多个或没有可识别控件，请配置 jenkins.gmx_fields.{field}')
 
-    def fill_gmx_parameters(self, country, project):
+    def fill_gmx_parameters(self, country, project, settings=None):
+        settings = settings or {}
         selectors = self.conf.get('gmx_fields', {})
         entity = self._find_control('ENTITIES', selectors.get('ENTITIES', ''))
         tag = entity.evaluate('(el) => el.tagName.toLowerCase()')
@@ -358,20 +359,49 @@ class JenkinsBrowser:
         sync = self._find_control('SYNC_UPLOAD', selectors.get('SYNC_UPLOAD', ''))
         if sync.get_attribute('type') != 'checkbox':
             raise NeedsAttention('SYNC_UPLOAD 不是复选框，请检查 Jenkins 参数')
-        operation('PW', 'SYNC_UPLOAD.check()')
-        sync.check()
-        target = folder(country, project)
+        should_sync = settings.get('SYNC_UPLOAD', True)
+        if not isinstance(should_sync, bool):
+            raise NeedsAttention('SYNC_UPLOAD 必须是布尔值')
+        operation('PW', f'SYNC_UPLOAD.{"check" if should_sync else "uncheck"}()')
+        if should_sync:
+            sync.check()
+        else:
+            sync.uncheck()
+        target = settings.get('CUSTOM_FOLDER') or folder(country, project)
         custom = self._find_control('CUSTOM_FOLDER', selectors.get('CUSTOM_FOLDER', ''))
         if custom.evaluate('(el) => el.tagName.toLowerCase()') not in ('input', 'textarea'):
             raise NeedsAttention('CUSTOM_FOLDER 不是文本框')
         operation('PW', f'CUSTOM_FOLDER.fill({target})')
         custom.fill(target)
-        action('FORM', f'GMX 参数设置 ENTITIES={country} SYNC_UPLOAD=true CUSTOM_FOLDER={target}')
+        # CLI tasks that supply no advanced options keep remaining Jenkins defaults.
+        # Web tasks provide explicit values and we verify the actual input state.
+        for field in ('BUILD_TYPE', 'SIGNING_REPO_BRANCH'):
+            if field not in settings:
+                continue
+            value = settings[field]
+            control = self._find_control(field, selectors.get(field, ''))
+            tag = control.evaluate('(el) => el.tagName.toLowerCase()')
+            if tag == 'select':
+                choices = control.locator('option').evaluate_all(
+                    '(es) => es.map(e=>({value:e.value,text:e.textContent.trim()}))')
+                matched = [c for c in choices if c['value'] == value or c['text'] == value]
+                if len(matched) != 1:
+                    raise NeedsAttention(f'{field} 无法找到唯一选项 {value}')
+                value = matched[0]['value']
+                operation('PW', f'{field}.select_option({value})')
+                control.select_option(value=value)
+            elif tag in ('input', 'textarea') and control.get_attribute('type') not in ('checkbox', 'radio'):
+                operation('PW', f'{field}.fill({value})')
+                control.fill(value)
+            else:
+                raise NeedsAttention(f'{field} 输入控件类型不支持')
+            if control.input_value() != value:
+                raise NeedsAttention(f'{field} 写入后校验失败')
+        action('FORM', f'GMX 参数设置 ENTITIES={country} SYNC_UPLOAD={str(should_sync).lower()} CUSTOM_FOLDER={target}')
         operation('PW', '验证 SYNC_UPLOAD.is_checked() && CUSTOM_FOLDER.input_value()')
-        if not sync.is_checked() or custom.input_value() != target:
+        if sync.is_checked() != should_sync or custom.input_value() != target:
             raise NeedsAttention('Jenkins 参数填写结果验证失败')
-        # Keep BUILD_TYPE / SIGNING_REPO_BRANCH / other parameters unchanged.
-        print(f'[Jenkins/gmx] ENTITIES={country} SYNC_UPLOAD=true CUSTOM_FOLDER={target}', flush=True)
+        print(f'[Jenkins/gmx] ENTITIES={country} SYNC_UPLOAD={str(should_sync).lower()} CUSTOM_FOLDER={target}', flush=True)
 
     def request_build(self, job_url, *, with_parameters, country='', project=''):
         action('JENKINS', f'{self.site} 准备触发 {"Build with Parameters" if with_parameters else "首次 Build"}')
@@ -383,7 +413,7 @@ class JenkinsBrowser:
             if self.page.locator('form').count() == 0:
                 raise NeedsAttention('参数化构建页面没有表单')
             if self.site == 'gmx':
-                self.fill_gmx_parameters(country, project)
+                self.fill_gmx_parameters(country, project, getattr(self, 'gmx_settings', None))
             # plugin: all defaults untouched
             self._safe_click('Build', 'button')
         else:
