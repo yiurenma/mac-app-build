@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, unquote
 import json
 import re
 import time
@@ -34,8 +34,6 @@ def parse_target(url: str, config: dict, *, number: int | None = None) -> Target
         raise ValueError('只支持不含凭据、查询参数和锚点的 HTTPS Jenkins URL')
     if number is not None and (type(number) is not int or number <= 0 or number > 2_000_000_000):
         raise ValueError('Build Number 必须是正整数')
-    if re.search(r'%(?:2f|5c|2e2e)', s.path, re.I) and '%2f' not in s.path.lower():
-        raise ValueError('不支持特殊路径编码')
     if any(p in ('.', '..') for p in s.path.split('/')) or '\\' in s.path:
         raise ValueError('URL 路径不能包含相对路径')
     for site in ('plugin', 'gmx'):
@@ -48,8 +46,16 @@ def parse_target(url: str, config: dict, *, number: int | None = None) -> Target
         # E.g. /job/release_1_3_.../2/ or /job/upload%2Fauto.../2/
         if not suffix or len(parts) not in (1, 2) or not re.fullmatch(r'[A-Za-z0-9%_.-]{1,180}', parts[0]):
             raise ValueError('请输入具体分支 Job URL 或它的 /数字/ Build URL')
-        if re.search(r'%(?!2[fF])', parts[0]):
-            raise ValueError('Job 名称只允许 Jenkins 的 %2F 分支编码')
+        # Jenkins/Chrome may expose a slash in a multibranch job name as
+        # %2F (encoded slash) or %252F (encoded literal "%2F"). Accept both
+        # EXACTLY, preserving the copied URL for navigation; reject arbitrary
+        # percent escapes, traversal and triple-encoding.  Do not unquote() the
+        # name: changing %252F to %2F can identify another Jenkins resource.
+        if not re.fullmatch(r'(?:[A-Za-z0-9_.-]|%2[fF]|%252[fF])+', parts[0]):
+            raise ValueError('Job 名称仅支持普通字符及 Jenkins 分支编码 %2F / %252F；请复制分支 Job 地址')
+        unpacked = unquote(unquote(parts[0]))
+        if any(segment in ('.', '..') for segment in unpacked.split('/')):
+            raise ValueError('Job URL 包含不允许的路径段')
         if len(parts) == 2:
             if not re.fullmatch(r'[1-9][0-9]{0,9}', parts[1]):
                 raise ValueError('Build URL 结尾应为 /数字/；请检查 URL')
@@ -96,6 +102,10 @@ def run_diagnosis(url: str, *, number: int | None = None, expected='SUCCESS', vi
 
     log(f'[DIAG] READ ONLY · {target.site.upper()} · 不触发 Jenkins 构建，不操作 Git')
     log(f'[TARGET] Job URL: {target.job_url}')
+    if '%252f' in target.job_url.lower():
+        log('[URL] Jenkins 采用双重编码 %252F：保留浏览器原始地址，不改写为 %2F')
+    elif '%2f' in target.job_url.lower():
+        log('[URL] Jenkins 采用分支编码 %2F：保留浏览器原始地址')
     log(f'[TARGET] Build Number: {target.number if target.number else "自动发现最新编号"}; expected={expected}')
     log('[BROWSER] 正在启动可见 Chrome；如需 SSO，请直接在该窗口人工登录，最多等待 180 秒')
     folder = DATA / 'diagnostics' / target.site

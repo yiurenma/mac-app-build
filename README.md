@@ -1,5 +1,12 @@
-# HSBC UK PBB — Mac APP Build Automation (v0.6.8)
+# HSBC UK PBB — Mac APP Build Automation (v0.6.9)
 
+
+
+## v0.6.9 — GMX URL 复制兼容和初始化说明
+
+**现场诊断 URL**：允许从公司 Jenkins 浏览器复制的 GMX 分支编码 `%2F` 或 `%252F`，保留原样访问，不做有风险的自动解码；严格拒绝其他百分号编码。Web Console 和 `diagnose-jenkins` 均适用，输入已有 GMX Build #2 URL 时不会触发任何新 Build。
+
+**GMX 实际正式打包**：新 Job 初始只有 `Build` → 必须点击第一次 Build（可因参数未初始化而 Disabled/Skipped）→ 等待 Jenkins 出现 `Build with Parameters` → 填写并确认参数 → 启动正式 Build #2 → 检查当前编号的结果及上传状态。只读 URL 测试不能代替前面的初始化。
 
 ## v0.6.8 — GMX 参数化运行模式适配
 

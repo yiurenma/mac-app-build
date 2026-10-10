@@ -22,6 +22,30 @@ class URLChecks(unittest.TestCase):
         self.assertEqual(parse_target(P,C,number=2).number,2)
     def test_gmx_encoded_job(self):
         self.assertEqual(parse_target(G,C).site,'gmx')
+
+    def test_gmx_double_encoded_job_from_real_chrome_address_bar(self):
+        copied=G.replace('%2F','%252F')
+        target=parse_target(copied,C,number=2)
+        self.assertEqual(target.site,'gmx')
+        self.assertEqual(target.number,2)
+        self.assertEqual(target.job_url,copied)
+        self.assertEqual(parse_target(copied+'2/',C).number,2)
+        self.assertEqual(parse_target(copied.replace('%252F','%252f'),C).job_url,
+                         copied.replace('%252F','%252f'))
+
+    def test_reject_unsafe_percent_sequences_without_normalization(self):
+        for sequence in ('%25foo','%25252F','%2e','%252e','%5c','%252f%25zz','%', '%2F..%2F', '%252F..%252F'):
+            with self.subTest(sequence=sequence), self.assertRaises(ValueError):
+                parse_target(G.replace('%2F',sequence),C,number=2)
+
+    def test_copied_gmx_double_encoded_url_diagnostic_readonly(self):
+        copied=G.replace('%2F','%252F')
+        with tempfile.TemporaryDirectory() as tmp, patch.object(diagnose,'DATA',Path(tmp)):
+            report=run_diagnosis(copied+'2/', expected='SUCCESS', config=C, factory=FakeJenkins)
+        self.assertEqual(report['verdict'],'PASS')
+        self.assertEqual(report['build_url'],copied+'2/')
+        self.assertIn('[URL] Jenkins 采用双重编码 %252F', '\n'.join(report['logs']))
+        self.assertFalse(any(c[0] in ('click','build') for c in FakeJenkins.calls))
     def test_reject_other_domains_or_branches(self):
         for url in ['https://evil.example/job/p/2/', 'http://evil.example/job/p/2/',
                     'https://evil.example@'+P[len('https://'):],

@@ -136,6 +136,20 @@ class GMXBuildState(unittest.TestCase):
                 formal_build(browser,'https://gmx/job/branch/','gmx-test','gmx',country='UK',project='PayByBank')
                 self.assertEqual(len([a for a in browser.actions if a[0]=='click']),2)
 
+    def test_never_start_parameterized_gmx_before_bootstrap_is_ready(self):
+        class NotReady(DisabledGMXBootstrap):
+            def wait_parameter_mode(self, url):
+                self.actions.append(('waiting_for_first_build',))
+                raise NeedsAttention('首次 Build 尚未完成，参数化入口尚未出现')
+        with tempfile.TemporaryDirectory() as root,patch.object(store,'DATA',Path(root)):
+            store.save_state('gmx-notready',{'completed':[],'runtime':{}})
+            browser=NotReady()
+            with patch('appbuilder.jenkins.read_state',store.read_state),patch('appbuilder.jenkins.patch_runtime',store.patch_runtime):
+                with self.assertRaisesRegex(NeedsAttention,'首次 Build 尚未完成'):
+                    ensure_bootstrap(browser,'https://gmx/job/branch/','gmx-notready','gmx')
+            self.assertEqual([a[:2] for a in browser.actions if a[0]=='click'], [('click',False)])
+            self.assertNotIn('gmx_bootstrap_completed',store.read_state('gmx-notready')['runtime'])
+
     def test_job_already_has_parameters_no_bootstrap_one(self):
         with tempfile.TemporaryDirectory() as root,patch.object(store,'DATA',Path(root)):
             store.save_state('gmx-test',{'completed':[],'runtime':{}})
