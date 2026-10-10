@@ -9,10 +9,10 @@ import re
 import time
 import tempfile
 from pathlib import Path
-from urllib.parse import urlsplit, unquote
+from urllib.parse import urlsplit
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout, Error as PlaywrightError
 from .auth import read_credentials, approved_login_host, submit_recognized_login
-from .versions import parse_artifacts, folder
+from .versions import folder
 from .store import patch_runtime, read_state
 from .telemetry import action, debug, operation
 
@@ -811,47 +811,6 @@ class JenkinsBrowser:
             time.sleep(min(self.poll, max(0, deadline - time.monotonic())))
         raise TimeoutError(f'Jenkins Build #{number} 在监控超时后仍未确认: {build_url}')
 
-    def build_artifact_paths(self, job_url, number):
-        """Traverse THIS numbered Build's Artifact browser (not Last Successful).
-
-        Jenkins often shows folders instead of linking tarballs on the initial
-        artifact page. Limit crawl to one numbered build, 40 pages, and never
-        execute/download artifact contents.
-        """
-        base = job_url + str(number) + '/artifact/'
-        base_url = urlsplit(base)
-        queue = [base]
-        visited = set()
-        paths = set()
-        action('ARTIFACT', f'{getattr(self, "site", "jenkins")} 读取 Build #{number} 的产物目录')
-        while queue:
-            url = queue.pop(0)
-            if url in visited:
-                continue
-            if len(visited) >= 40:
-                raise NeedsAttention('Jenkins Artifact 目录过多，已停止自动遍历')
-            visited.add(url)
-            if self.visit(url) != 200:
-                continue
-            operation('PW', f'page.locator(a[href]).evaluate_all(hrefs) 读取 Artifact 路径 {url}')
-            hrefs = self.page.locator('a[href]').evaluate_all('(els) => els.map(a => a.href)')
-            for href in hrefs:
-                item = urlsplit(href)
-                if ((item.scheme, item.netloc) != (base_url.scheme, base_url.netloc)
-                        or not item.path.startswith(base_url.path)):
-                    continue
-                tail = unquote(item.path[len(base_url.path):])
-                if not tail or any(x in ('.', '..') for x in tail.split('/')):
-                    continue
-                if item.path.endswith('/'):
-                    new_url = item._replace(query='', fragment='').geturl()
-                    if new_url not in visited and new_url not in queue:
-                        queue.append(new_url)
-                else:
-                    paths.add('build-artifact/' + tail)
-        operation('PW', f'本次 Build Artifact 文件数={len(paths)}，候选 tar.gz={[x for x in sorted(paths) if x.endswith(".tar.gz")]}')
-        return sorted(paths)
-
     def find_callback(self, job_url, source_number):
         self.visit(job_url)
         operation('PW', 'page.locator(body).inner_text() 查找本次关联的 Callback')
@@ -1017,18 +976,47 @@ def plugin_upload_hashes(browser, job_url, number, version, *, confirmed_success
         raise NeedsAttention(str(exc)) from exc
 
 
-def plugin_artifact_version(browser, job_url, source_number, task_id):
+def _plugin_upload_from_build(browser, job_url, number):
+    """Read ONE numbered build's full log and return (version, hashes).
+
+    The version and SHA256 both come from the same Nexus upload output JSON, so
+    the Jenkins Artifact browser (and its slow zip viewer links) is never opened.
+    Raises ValueError when this build's log has no usable Nexus upload output.
+    """
+    from .nexus import parse_upload_metadata
+    console = read_full_console(browser, job_url, number)
+    result = final_result_from_console(console)
+    metadata = parse_upload_metadata(console, emit=lambda message: action('NEXUS', message))
+    if result and result != 'SUCCESS':
+        raise NeedsAttention(f'Plugin Build #{number} 日志终态={result}，与成功构建冲突')
+    return metadata['version'], metadata['hashes']
+
+
+def plugin_artifact_info(browser, job_url, source_number, task_id):
+    """Return (version, hashes, build_number) from the Plugin build's own log.
+
+    The source build is tried first; when it only triggered a downstream
+    Callback build, the Callback's log is used instead.
+    """
     key = 'plugin_callback_number'
     rt = read_state(task_id)['runtime']
+
+    def from_callback(child):
+        result, _ = browser.wait_result(job_url, child)
+        if result != 'SUCCESS':
+            raise RuntimeError(f'Plugin Callback #{child} 失败: {result}')
+        try:
+            version, hashes = _plugin_upload_from_build(browser, job_url, child)
+        except ValueError as exc:
+            raise NeedsAttention(f'Plugin Callback #{child} 日志中没有可用的 Nexus 上传记录: {exc}') from exc
+        return version, hashes, child
+
     known = rt.get(key)
     if known:
-        result, _ = browser.wait_result(job_url, known)
-        if result != 'SUCCESS':
-            raise RuntimeError(f'Plugin Callback #{known} 失败: {result}')
-        return parse_artifacts(browser.build_artifact_paths(job_url, known)), known
-    paths = browser.build_artifact_paths(job_url, source_number)
+        return from_callback(known)
     try:
-        return parse_artifacts(paths), source_number
+        version, hashes = _plugin_upload_from_build(browser, job_url, source_number)
+        return version, hashes, source_number
     except ValueError:
         pass
     deadline = time.monotonic() + 60 * float(browser.conf.get('callback_timeout_minutes', 30))
@@ -1036,10 +1024,13 @@ def plugin_artifact_version(browser, job_url, source_number, task_id):
         child = browser.find_callback(job_url, source_number)
         if child is not None:
             patch_runtime(task_id, **{key: child})
-            result, _ = browser.wait_result(job_url, child)
-            if result != 'SUCCESS':
-                raise RuntimeError(f'Plugin Callback #{child} 失败: {result}')
-            return parse_artifacts(browser.build_artifact_paths(job_url, child)), child
+            return from_callback(child)
         time.sleep(browser.poll)
-    raise NeedsAttention('正式 Plugin Build 已成功，但在对应 Build 或 Callback 中没有找到两个 Artifacts。'
+    raise NeedsAttention('正式 Plugin Build 已成功，但在对应 Build 或 Callback 的日志中没有找到 Nexus 上传记录。'
                          '请检查 Jenkins 页面小箭头的具体结构与下游 Job。')
+
+
+def plugin_artifact_version(browser, job_url, source_number, task_id):
+    """Backward-compatible wrapper: (version, build_number)."""
+    version, _hashes, number = plugin_artifact_info(browser, job_url, source_number, task_id)
+    return version, number

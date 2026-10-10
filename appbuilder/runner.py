@@ -15,7 +15,7 @@ from .store import task, read_state, patch_runtime, complete, update_task, task_
 from .gitops import credentials, clone_branch, git, changed_files, commit_and_push, verify_pushed, recover_pushed_commit
 from .verify import plugin_commit, gmx_commit
 from .edits import edit_plugin_versions, update_mobile_ci, update_lock_from_hashes, validate_lock, ensure_lock_other_entries_unchanged, XCCONFIGS
-from .jenkins import JenkinsBrowser, ensure_bootstrap, formal_build, plugin_artifact_version, plugin_upload_hashes, NeedsAttention
+from .jenkins import JenkinsBrowser, ensure_bootstrap, formal_build, plugin_artifact_info, plugin_upload_hashes, NeedsAttention
 from .telemetry import set_verbose, debug, action, operation, safe_text, is_verbose
 
 
@@ -200,8 +200,7 @@ def _run_unlocked(task_id):
                 with JenkinsBrowser(conf, DATA, home, 'plugin', visible=params.get('visible', False), verbose=params.get('verbose', False)) as browser:
                     ensure_bootstrap(browser, params['plugin_job'], task_id, 'plugin')
                     num, _ = formal_build(browser, params['plugin_job'], task_id, 'plugin')
-                    v, artifact_build = plugin_artifact_version(browser, params['plugin_job'], num, task_id)
-                    hashes = plugin_upload_hashes(browser, params['plugin_job'], artifact_build, v, confirmed_success=True)
+                    v, hashes, artifact_build = plugin_artifact_info(browser, params['plugin_job'], num, task_id)
                     patch_runtime(task_id, artifact_version=v, plugin_artifact_number=artifact_build,
                                   plugin_artifact_hashes=hashes)
                     log(f'[ARTIFACT] 完整依赖版本: {v}, Build #{artifact_build}')

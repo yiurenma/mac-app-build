@@ -1,4 +1,5 @@
 """Browser-independent Jenkins simulation: no corporate endpoints contacted."""
+import json
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -6,64 +7,80 @@ from types import SimpleNamespace
 from unittest.mock import patch
 from appbuilder.jenkins import (
     JenkinsBrowser, callback_number_from_text, ensure_bootstrap,
-    formal_build, plugin_artifact_version, NeedsAttention, final_result_from_console,
+    formal_build, plugin_artifact_version, plugin_artifact_info, NeedsAttention, final_result_from_console,
     result_from_status_markup,
 )
 from appbuilder.versions import ARTIFACTS
 from appbuilder import store
 
 
-class FakeAnchorLocator:
-    def __init__(self, links):
-        self.links = links
-
-    def evaluate_all(self, expression):
-        return self.links
+VERSION = '1.3.1-alpha.1-SNAPSHOT.2'
 
 
-class FakePage:
-    def __init__(self):
-        self.links = []
-
-    def locator(self, css):
-        if css == 'a[href]':
-            return FakeAnchorLocator(self.links)
-        raise ValueError(css)
+def nexus_console(version=VERSION, result='SUCCESS'):
+    rows = [{'artifactUrl': f'https://nexus.invalid/plugin/{version}/{name}-{version}.tar.gz',
+             'version': '1.3.1-alpha.1', 'artifactSHA256': str(i + 1) * 64}
+            for i, name in enumerate(ARTIFACTS)]
+    body = '::group::Nexus upload output\n' + json.dumps({'upload_results': rows}, indent=2)
+    return '\n'.join('20:43:53 ' + line for line in body.splitlines()) + f'\nFinished: {result}\n'
 
 
-class FakeArtifacts:
-    def __init__(self, pages):
-        self.pages = pages
-        self.page = FakePage()
-        self.visited = []
-
-    def visit(self, url):
-        self.visited.append(url)
-        self.page.links = self.pages.get(url, [])
-        return 200 if url in self.pages else 404
+NO_UPLOAD_CONSOLE = '20:40:00 Manual Trigger\nFinished: SUCCESS\n'
 
 
-class TestArtifactCrawl(unittest.TestCase):
-    def test_walks_nested_artifact_directories_only_for_exact_build(self):
-        base = 'https://ci.corp/job/plugin/job/release_1_3/7/artifact/'
-        version = '1.3.1-alpha.1-SNAPSHOT.2'
-        paths = {
-            base: [base+'build-universal/', 'https://evil.test/7/artifact/build-universal/hack.tar.gz',
-                   'https://ci.corp/job/plugin/job/release_1_3/6/artifact/build-universal/old.tar.gz'],
-            base+'build-universal/': [base+'build-universal/'+n+'-'+version+'.tar.gz' for n in ARTIFACTS],
-        }
-        browser = FakeArtifacts(paths)
-        got = JenkinsBrowser.build_artifact_paths(browser, 'https://ci.corp/job/plugin/job/release_1_3/', 7)
-        self.assertEqual(len(got), 2)
-        self.assertEqual(plugin_artifact_version.__name__, 'plugin_artifact_version')
-        self.assertTrue(all('build-artifact/build-universal/' in v for v in got))
-        self.assertNotIn(base+'build-universal/', browser.visited[0:1])
-        self.assertEqual(len(browser.visited), 2)
+class NoArtifactPages:
+    """A browser that fails the test if anything opens the Jenkins Artifact browser."""
+    conf = {'callback_timeout_minutes': 1}
+    poll = 0.01
 
-    def test_crawl_never_follows_cross_job_links(self):
-        base = 'https://ci.corp/job/plugin/job/branch/8/artifact/'
-        b = FakeArtifacts({base: ['https://ci.corp/job/plugin/job/other/8/artifact/build-universal/x.tar.gz']})
-        self.assertEqual(JenkinsBrowser.build_artifact_paths(b, 'https://ci.corp/job/plugin/job/branch/', 8), [])
+    def __init__(self, logs, callback=None):
+        self.logs, self.callback, self.read = logs, callback, []
+
+    def visit(self, url, timeout=60000):
+        raise AssertionError(f'Artifact/页面不应被访问: {url}')
+
+    def wait_result(self, job_url, num, *, watch_callback=False):
+        return 'SUCCESS', ''
+
+    def find_callback(self, job_url, source_number):
+        return self.callback
+
+
+class TestPluginArtifactFromLog(unittest.TestCase):
+    def run_case(self, browser, source=7):
+        def fake_read(b, job_url, number, emit=None):
+            b.read.append(number)
+            return b.logs[number]
+        with TemporaryDirectory() as root, patch.object(store, 'DATA', Path(root)):
+            store.save_state('t', {'completed': [], 'runtime': {}})
+            with patch('appbuilder.jenkins.read_state', store.read_state), \
+                    patch('appbuilder.jenkins.patch_runtime', store.patch_runtime), \
+                    patch('appbuilder.jenkins.read_full_console', fake_read):
+                return plugin_artifact_info(browser, 'https://ci.corp/job/plugin/job/release_1_3/', source, 't')
+
+    def test_version_and_sha_come_from_source_build_log_without_artifact_pages(self):
+        b = NoArtifactPages({7: nexus_console()})
+        version, hashes, number = self.run_case(b)
+        self.assertEqual((version, number), (VERSION, 7))
+        self.assertEqual(hashes, {name: str(i + 1) * 64 for i, name in enumerate(ARTIFACTS)})
+        self.assertEqual(b.read, [7])
+
+    def test_falls_back_to_callback_log_when_source_build_has_no_upload_output(self):
+        b = NoArtifactPages({7: NO_UPLOAD_CONSOLE, 8: nexus_console()}, callback=8)
+        version, hashes, number = self.run_case(b)
+        self.assertEqual((version, number), (VERSION, 8))
+        self.assertEqual(b.read, [7, 8])
+
+    def test_failed_log_result_is_rejected(self):
+        b = NoArtifactPages({7: nexus_console(result='FAILURE')})
+        with self.assertRaises(NeedsAttention):
+            self.run_case(b)
+
+    def test_missing_upload_output_everywhere_needs_attention(self):
+        b = NoArtifactPages({7: NO_UPLOAD_CONSOLE})
+        b.conf = {'callback_timeout_minutes': 0}
+        with self.assertRaisesRegex(NeedsAttention, 'Nexus 上传记录'):
+            self.run_case(b)
 
     def test_callback_source_relation(self):
         text = '''Builds\n#3 04:48\nManual Callback ← Source #2\n#2 04:47\nManual Trigger → build will be created soon\n#1 04:20\nFailure\n'''
@@ -132,7 +149,8 @@ class TestJenkinsStateMachine(unittest.TestCase):
             store.save_state(task_id, {'completed': [], 'runtime': {}})
             b = SimulatedJenkins()
             with patch('appbuilder.jenkins.read_state', store.read_state), \
-                    patch('appbuilder.jenkins.patch_runtime', store.patch_runtime):
+                    patch('appbuilder.jenkins.patch_runtime', store.patch_runtime), \
+                    patch('appbuilder.jenkins.read_full_console', linked_read):
                 ensure_bootstrap(b, 'job_url/', task_id, 'plugin')
                 self.assertEqual(b.requests, [(False, '', '')])
                 self.assertEqual(store.read_state(task_id)['runtime']['plugin_bootstrap_result'], 'FAILURE')
@@ -148,7 +166,8 @@ class TestJenkinsStateMachine(unittest.TestCase):
             b = SimulatedJenkins()
             b.current_mode = 'parameters'
             with patch('appbuilder.jenkins.read_state', store.read_state), \
-                    patch('appbuilder.jenkins.patch_runtime', store.patch_runtime):
+                    patch('appbuilder.jenkins.patch_runtime', store.patch_runtime), \
+                    patch('appbuilder.jenkins.read_full_console', linked_read):
                 ensure_bootstrap(b, 'job_url/', 'task', 'gmx')
                 formal_build(b, 'job_url/', 'task', 'gmx', country='UK', project='PayByBank')
                 self.assertEqual(b.requests, [(True, 'UK', 'PayByBank')])
@@ -211,6 +230,11 @@ class TestParameterControls(unittest.TestCase):
         self.assertEqual(JenkinsBrowser.mode(fake, 'https://ci.corp/job/example/'), 'unknown')
 
 
+def linked_read(browser, job_url, number, emit=None):
+    """#1 is the Manual Trigger (no upload); #2 is the Callback that uploaded to Nexus."""
+    return NO_UPLOAD_CONSOLE if number == 1 else nexus_console()
+
+
 class LinkedReleaseJenkins(SimulatedJenkins):
     """The first formal job is a Manual Trigger; #2 is its real callback."""
     def __init__(self):
@@ -228,13 +252,6 @@ class LinkedReleaseJenkins(SimulatedJenkins):
             return 'SUCCESS', ''
         raise AssertionError(f'unexpected Build #{num}')
 
-    def build_artifact_paths(self, job_url, num):
-        if num == 1:
-            return []
-        assert num == 2
-        return [f'build-artifact/build-universal/{name}-1.3.1-alpha.1-SNAPSHOT.2.tar.gz'
-                for name in ARTIFACTS]
-
     def find_callback(self, job_url, source_number):
         return 2 if source_number == 1 else None
 
@@ -246,7 +263,8 @@ class TestLinkedPluginBuild(unittest.TestCase):
             store.save_state(task_id, {'completed': [], 'runtime': {}})
             b = LinkedReleaseJenkins()
             with patch('appbuilder.jenkins.read_state', store.read_state), \
-                    patch('appbuilder.jenkins.patch_runtime', store.patch_runtime):
+                    patch('appbuilder.jenkins.patch_runtime', store.patch_runtime), \
+                    patch('appbuilder.jenkins.read_full_console', linked_read):
                 ensure_bootstrap(b, 'job_url/', task_id, 'plugin')
                 n, _ = formal_build(b, 'job_url/', task_id, 'plugin')
                 self.assertEqual(n, 1)
@@ -324,7 +342,8 @@ class TestExistingTaskCallbackRecovery(unittest.TestCase):
             b = LinkedReleaseJenkins()
             b.numbers = {1, 2}
             with patch('appbuilder.jenkins.read_state', store.read_state), \
-                    patch('appbuilder.jenkins.patch_runtime', store.patch_runtime):
+                    patch('appbuilder.jenkins.patch_runtime', store.patch_runtime), \
+                    patch('appbuilder.jenkins.read_full_console', linked_read):
                 n, _ = formal_build(b, 'job_url/', task_id, 'plugin')
                 self.assertEqual(n, 1)
                 self.assertEqual(b.requests, [])  # no new build, no new branch
@@ -343,7 +362,8 @@ class TestExistingTaskCallbackRecovery(unittest.TestCase):
             store.save_state(task_id, {'completed': [], 'runtime': {}})
             b = FailedCallback()
             with patch('appbuilder.jenkins.read_state', store.read_state), \
-                    patch('appbuilder.jenkins.patch_runtime', store.patch_runtime):
+                    patch('appbuilder.jenkins.patch_runtime', store.patch_runtime), \
+                    patch('appbuilder.jenkins.read_full_console', linked_read):
                 n, _ = formal_build(b, 'job_url/', task_id, 'plugin')
                 with self.assertRaisesRegex(RuntimeError, 'Callback #2 失败'):
                     plugin_artifact_version(b, 'job_url/', n, task_id)

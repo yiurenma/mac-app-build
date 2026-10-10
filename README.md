@@ -115,7 +115,7 @@ GMX 参数页按现场截图新增 `SKIP_TEST`（默认 true）、`FORCE`（默�
 
 1. 使用 Plugin 输入源分支创建 `release/<大版本>.<YYYYMMDDHHmm>`，两个 `.xcconfig` 的 `BUNDLE_VERSION_SHORT` 同步设为 `<大版本>.<时间戳>`，精确提交并 Push。
 2. 根据规则 `/` 和 `.` → `_` 定位 Plugin Jenkins 新 Job；如果初次只有 `Build`，先触发初始化构建，再等待 `Build with Parameters`。随后使用默认参数触发正式构建。
-3. 仅在本次成功 Build 及关联 Callback 的 `build-universal/` artifacts 里查找 DomainModel 和 Journey 的 `*.tar.gz`；要求两个**完整 Artifact Version 一致**。
+3. 从本次成功 Build（或其关联 Callback）完整 `consoleText` 的 Nexus upload output JSON 中，按 DomainModel 和 Journey 的 `*.tar.gz` 文件名读取**完整 Artifact Version**，要求两个版本一致。不再打开 Jenkins 的 Artifacts 页面（其 `*view*`/`*fingerprint*` 链接会让大 `source.zip` 解压预览超时）。
 4. 使用 GMX 输入源分支创建 `upload/auto<同一时间戳>`。在根目录 `mobile-ci.json` 精准修改两个 `paybybank-ios-plugin` 依赖的 `version` 为**完整 Artifact Version**，不做 `1.3.0` 等转换。
 5. 读取本次 Plugin 成功构建的 Nexus upload output JSON，按插件名与完整版本提取两个 `.tar.gz` 的 `artifactSHA256`；直接更新 `mobile-ci.lock` 对应版本和 SHA256，检查其他依赖未变。无需运行本地 Bootstrap。
 6. 只提交 `mobile-ci.json` 和 `mobile-ci.lock`，推送后根据 `upload/xxx` → `upload%2Fxxx` 定位 GMX Jenkins 新 Job。
