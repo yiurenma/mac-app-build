@@ -72,14 +72,14 @@ class FastResultTests(unittest.TestCase):
         outcome, tail = JenkinsBrowser.wait_result(browser, 'https://ci.corp/job/p/', 2)
         self.assertEqual(outcome, 'SUCCESS')
         self.assertIn('Finished: SUCCESS', tail)
-        self.assertEqual(browser.visits, [])
+        self.assertEqual(browser.visits, ['https://ci.corp/job/p/', 'https://ci.corp/job/p/2/'])
         self.assertEqual(browser.context.request.calls[0][1]['timeout'], 10000)
 
     def test_gmx_failure_uses_same_fast_detector(self):
         browser = RawBrowser([RawReply('Finished: FAILURE\n')])
         browser.site = 'gmx'
         self.assertEqual(JenkinsBrowser.wait_result(browser, 'https://ci.corp/job/p/', 2)[0], 'FAILURE')
-        self.assertEqual(browser.visits, [])
+        self.assertEqual(browser.visits, ['https://ci.corp/job/p/', 'https://ci.corp/job/p/2/'])
 
     def test_running_console_then_finishes_with_five_second_poll(self):
         browser = RawBrowser([RawReply('stage work\n'), RawReply('Finished: SUCCESS\n')])
@@ -102,7 +102,7 @@ class FastResultTests(unittest.TestCase):
         browser = RawBrowser([RawReply('not yet rendered')], heading='SUCCESS')
         result, tail = JenkinsBrowser.wait_result(browser, 'https://ci.corp/job/p/', 2)
         self.assertEqual((result, tail), ('SUCCESS', ''))
-        self.assertEqual(browser.visits, ['https://ci.corp/job/p/2/'])
+        self.assertEqual(browser.visits, ['https://ci.corp/job/p/', 'https://ci.corp/job/p/2/'])
 
     def test_trigger_callback_fallback_still_works(self):
         browser = RawBrowser([RawReply('still running')], callback=3)

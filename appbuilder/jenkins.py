@@ -39,6 +39,10 @@ def result_from_status_markup(markup):
     build cards and sidebar icons might contain SUCCESS or FAILURE.
     """
     value = str(markup).lower()
+    # Jenkins modern builds may use semantic success classes/accessible labels.
+    # This parser is ONLY fed one status icon, never a whole page.
+    if re.search(r'(?:data-(?:build-)?result|data-(?:build-)?status)=["\'](?:success|successful|passed)["\']', value):
+        return 'SUCCESS'
     # Jenkins may encode status in SVG <use href=".../status/blue.svg#blue">
     # rather than the SVG class; ignore generic icons and unrelated page text.
     if re.search(r'icon-(?:running|progress|building|pending|queued|anime)\b|\b(?:building|running|progress)\b', value):
@@ -47,7 +51,7 @@ def result_from_status_markup(markup):
         ('FAILURE', r'icon-(?:failure|red)\b|build-status-(?:failure|red)\b|(?:title|aria-label|alt)=["\']failure["\']|(?:status/|status%2f)(?:red|failure)(?:\.svg|[\#/?"\'])|[\#/]failure(?:["\']|\b)'),
         ('ABORTED', r'icon-aborted\b|build-status-aborted\b|(?:title|aria-label|alt)=["\']aborted["\']|(?:status/|status%2f)aborted(?:\.svg|[\#/?"\'])|[\#/]aborted(?:["\']|\b)'),
         ('UNSTABLE', r'icon-(?:unstable|yellow)\b|build-status-(?:unstable|yellow)\b|(?:title|aria-label|alt)=["\']unstable["\']|(?:status/|status%2f)(?:yellow|unstable)(?:\.svg|[\#/?"\'])|[\#/]unstable(?:["\']|\b)'),
-        ('SUCCESS', r'icon-(?:success|green|blue)\b|build-status-(?:success|green|blue)\b|(?:title|aria-label|alt)=["\']success["\']|(?:status/|status%2f)(?:blue|green|success)(?:\.svg|[\#/?"\'])|[\#/]success(?:["\']|\b)'),
+        ('SUCCESS', r'icon-(?:success|green|blue)\b|(?:jenkins-)?(?:build-)?status-(?:success|green|blue)\b|(?:title|aria-label|alt)=["\'](?:success|successful|passed)["\']|(?:status/|status%2f)(?:blue|green|success)(?:\.svg|[\#/?"\'])|[\#/]success(?:["\']|\b)'),
     ):
         if re.search(signature, value):
             return outcome
@@ -463,6 +467,64 @@ class JenkinsBrowser:
                 return result
         return None
 
+    def _history_result(self, job_url, number):
+        """Read the status icon attached to precisely Build #number in Build History.
+
+        Called ONLY while viewing this job's main page. The page may show many
+        green ticks for earlier runs: never inspect a whole sidebar or accept
+        another build's icon.
+        """
+        if not hasattr(self.page, 'evaluate'):
+            return None
+        operation('PW', f'page.evaluate(Build History #{number} exact-link status icon)')
+        try:
+            markup = self.page.evaluate(r"""({jobUrl, number}) => {
+              const base = new URL(jobUrl);
+              const target = base.pathname.replace(/\/+$/, '') + '/' + number + '/';
+              const links = document.querySelectorAll(`
+                #buildHistory a[href], [id*="buildHistory"] a[href],
+                .build-history a[href], [class*="build-history"] a[href],
+                .jenkins-builds-list a[href], [class*="builds-list"] a[href],
+                [data-build-number] a[href], .build-row a[href]`);
+              for (const link of links) {
+                let url;
+                try { url = new URL(link.href, document.location.href); }
+                catch { continue; }
+                if (url.host !== base.host || url.pathname.replace(/\/+$/, '') + '/' !== target) continue;
+                const row = link.closest(`
+                  [data-build-number], .build-row, .build-history-entry,
+                  .jenkins-builds-list__item, .jenkins-build-history__item, li, tr`);
+                if (!row) continue;
+                const rowNumber = row.getAttribute('data-build-number');
+                if (rowNumber && rowNumber !== String(number)) continue;
+                // Prevent accidentally using an ancestor with icons from many builds.
+                const other = Array.from(row.querySelectorAll('a[href]')).some(a => {
+                  try {
+                    const u = new URL(a.href, document.location.href);
+                    const m = u.pathname.match(/\/(\d+)\/$/);
+                    return u.host === base.host && m && Number(m[1]) !== Number(number)
+                      && u.pathname.startsWith(base.pathname);
+                  } catch { return false; }
+                });
+                if (other) continue;
+                const icons = row.querySelectorAll(`
+                  .build-status-icon, [class*="build-status"], [class*="status-icon"],
+                  svg[title], svg[aria-label], img[alt], svg use, svg, img`);
+                // Read status icon markup only; never infer success from a green
+                // progress bar, navigation label or unrelated build's status.
+                const matches = Array.from(icons).map(el => el.outerHTML).slice(0, 12);
+                return matches.join(' ');
+              }
+              return null;
+            }""", {'jobUrl': job_url, 'number': number})
+        except PlaywrightError as exc:
+            debug(f'{self.site} Build #{number} Build History DOM 无法读取: {type(exc).__name__}')
+            return None
+        result = result_from_status_markup(markup) if markup else None
+        if result:
+            action('JENKINS', f'{self.site} Build History #{number} 专属图标确认终态: {result}')
+        return result
+
     def _fast_console_result(self, build_url, number):
         """Read raw consoleText HTTP response through this browser's cookie context.
 
@@ -503,33 +565,38 @@ class JenkinsBrowser:
         start = time.monotonic()
         build_url = job_url + str(number) + '/'
         interval = max(2, min(60, int(getattr(self, 'result_poll', 5))))
-        header_interval = max(15, int(getattr(self, 'poll', 45)))
-        next_header_probe = 0
-        action('JENKINS', f'{self.site} 快速监控 Build #{number}：每 {interval}s 读取原始 Console，'
-                         f'并每 {header_interval}s 检查构建页面')
+        action('JENKINS', f'{self.site} Build #{number}：优先检查绿色状态勾（每 {interval}s），'
+                         '日志仅作补充确认')
         while time.monotonic() < deadline:
+            # The job's Build History is lightweight and contains the green tick
+            # visible next to this EXACT Build number. Probe it BEFORE loading
+            # the often huge consoleText, which can take >10s to download.
+            code = self.visit(job_url)
+            if code in (401, 403):
+                raise NeedsAttention(f'{self.site} Job 页面无访问权限 (HTTP {code})')
+            if code == 200:
+                result = JenkinsBrowser._history_result(self, job_url, number)
+                if result:
+                    return result, ''
+            code = self.visit(build_url)
+            if code in (401, 403):
+                raise NeedsAttention(f'{self.site} Build #{number} 页面无访问权限 (HTTP {code})')
+            if code == 200:
+                result = JenkinsBrowser._heading_result(self, number)
+                if result:
+                    return result, ''
+                if watch_callback:
+                    child = self.find_callback(job_url, number)
+                    if child is not None:
+                        action('CALLBACK', f'{self.site} Build #{number} 已创建 Callback #{child}；改为监控 #{child}')
+                        return 'DELEGATED', str(child)
+            # If the icons are not exposed by this Jenkins theme, fall back to
+            # the explicit final marker (never an arbitrary SUCCESS in log text).
             found = JenkinsBrowser._fast_console_result(self, build_url, number)
             if found:
                 return found
-            now = time.monotonic()
-            if now >= next_header_probe:
-                code = self.visit(build_url)
-                if code in (401, 403):
-                    raise NeedsAttention(f'{self.site} Build #{number} 页面无访问权限 (HTTP {code})')
-                if code == 200:
-                    result = JenkinsBrowser._heading_result(self, number)
-                    if result:
-                        return result, ''
-                    if watch_callback:
-                        child = self.find_callback(job_url, number)
-                        if child is not None:
-                            action('CALLBACK', f'{self.site} Build #{number} 已创建 Callback #{child}；改为监控 #{child}')
-                            return 'DELEGATED', str(child)
-                else:
-                    action('WAIT', f'{self.site} Build #{number} 页面 HTTP {code}，继续检查原始 Console')
-                next_header_probe = time.monotonic() + header_interval
-            action('WAIT', f'{self.site} Build #{number} 尚未出现最终 Finished 标记；'
-                           f'已等待 {int(time.monotonic()-start)}s，{interval}s 后重查')
+            action('WAIT', f'{self.site} Build #{number} 仍未确认终态；已等待 '
+                           f'{int(time.monotonic()-start)}s，{interval}s 后检查状态勾')
             time.sleep(min(interval, max(0, deadline - time.monotonic())))
         raise TimeoutError(f'{self.site} Build #{number} 结果未确认，超出构建监控时间；'
                            f'请直接检查 {build_url}consoleText')

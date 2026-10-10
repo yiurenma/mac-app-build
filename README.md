@@ -330,3 +330,15 @@ Plugin / GMX 分支 Push 后，Jenkins 可能需要时间扫描分支并创建 J
 - 旧 Worker 必须退出，新 Worker 才能加载升级后的检查逻辑。
 
 详细说明见 [快速结果检测设计与验收](docs/12-v0.6.4-快速结果检测.md)。
+
+
+## v0.6.5 — Jenkins Build History 状态勾快速确认
+
+优先访问 Jenkins Job 主页，精确匹配当前 Build Number（如 #2）左侧的状态图标。
+只读取该编号的 SVG / img / status 元数据，不使用其他历史构建的状态，
+随后读取当前编号 Build 页面标题作为第二来源；两者都无法明确判断时，
+才回退到原始 `consoleText` 的 `Finished:` 行。所有检查使用已有登录会话和 Playwright，
+无需滚动长日志页面。默认每 5 秒重试。
+
+> 这是 DOM 检测，尚未验证公司实际 Jenkins HTML；有些 Jenkins 主题的
+> 图标标记可能不同。无明确结果不猜测成功，也不会再触发已经创建的构建。
