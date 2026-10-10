@@ -53,7 +53,7 @@ def run_bootstrap(root: Path, logfile: Path, timeout_minutes=60):
         raise FileNotFoundError(f'GMX 根目录缺少 {script}')
     if not os.access(script, os.X_OK):
         raise RuntimeError('GMX bootstrap.sh 不具备执行权限，请检查 Git 中的可执行位')
-    _run_bootstrap_command(['ci-script', 'upgrade'], root, logfile, timeout_minutes)
+    _run_bootstrap_command(['ci-script', '--upgrade'], root, logfile, timeout_minutes)
     _run_bootstrap_command(['./bootstrap.sh'], root, logfile, timeout_minutes)
 
 

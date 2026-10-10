@@ -1,4 +1,8 @@
-# HSBC UK PBB — Mac APP Build Automation (v0.7.3)
+# HSBC UK PBB — Mac APP Build Automation (v0.7.4)
+
+## v0.7.4 — 修正 ci-script 升级参数
+
+正式流程和 Bootstrap Test 使用 `ci-script --upgrade`（两个 ASCII 横杠），成功后执行 `./bootstrap.sh`。同时处理十进程首次初始化 SQLite WAL 模式时的锁竞争：仅对 BUSY/LOCKED 错误有限重试，其他错误立即抛出。原 v0.7.3 的 `ci-script upgrade` 会被公司 CLI 当成名为 upgrade 的脚本，现场报未声明；本版修正参数，保留失败停止和现有隔离校验。离线测试现在明确拒绝不带横杠的参数；公司 CLI 的实际升级仍须现场验证。
 
 ## v0.7.3 — Bootstrap 前自动升级 ci-script
 

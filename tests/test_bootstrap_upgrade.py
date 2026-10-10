@@ -32,15 +32,15 @@ class BootstrapUpgradeTests(unittest.TestCase):
             return (root / 'order.txt').read_text().splitlines(), error, (root / 'bootstrap.log').read_text()
 
     def test_upgrade_runs_first_in_same_directory_with_upgrade_argument(self):
-        order, error, log = self.run_local('test "$1" = upgrade || exit 99\necho upgrade >> order.txt\n')
+        order, error, log = self.run_local('test "$1" = --upgrade || exit 99\necho upgrade >> order.txt\n')
         self.assertIsNone(error)
         self.assertEqual(order, ['upgrade', 'bootstrap'])
-        self.assertLess(log.index('$ ci-script upgrade'), log.index('$ ./bootstrap.sh'))
+        self.assertLess(log.index('$ ci-script --upgrade'), log.index('$ ./bootstrap.sh'))
 
     def test_upgrade_failure_blocks_bootstrap(self):
         order, error, log = self.run_local('echo upgrade >> order.txt\nexit 23\n')
         self.assertEqual(order, ['upgrade'])
-        self.assertRegex(str(error), r'ci-script upgrade.*exit=23')
+        self.assertRegex(str(error), r'ci-script --upgrade.*exit=23')
         self.assertNotIn('$ ./bootstrap.sh', log)
 
     def test_live_bootstrap_upgrade_failure_blocks_bootstrap_and_lock_check(self):
@@ -55,13 +55,13 @@ class BootstrapUpgradeTests(unittest.TestCase):
                                              'version': '1.2.2', 'sha256': 'a'*64} for n in ARTIFACTS]}
                 for name in ('mobile-ci.json', 'mobile-ci.lock'):
                     (root / name).write_text(json.dumps(fixture))
-            elif label == 'ci-script upgrade':
-                raise RuntimeError('ci-script upgrade failed exit=23')
+            elif label == 'ci-script --upgrade':
+                raise RuntimeError('ci-script --upgrade failed exit=23')
             return []
         with tempfile.TemporaryDirectory() as td, patch('appbuilder.live_tests.credentials') as credentials, patch('appbuilder.live_tests.subprocess.run', return_value=SimpleNamespace(stdout='deadbeef\n')):
             credentials.return_value.__enter__.return_value = {}
             with self.assertRaisesRegex(RuntimeError, 'upgrade failed'):
                 bootstrap_test('upload/test', lambda line: None, artifact_version='1.3.1-alpha.1-SNAPSHOT.2',
                                config=load_config(), base_dir=td, run_process=process)
-        self.assertEqual(commands[-1], ['ci-script', 'upgrade'])
+        self.assertEqual(commands[-1], ['ci-script', '--upgrade'])
         self.assertNotIn(['./bootstrap.sh'], commands)

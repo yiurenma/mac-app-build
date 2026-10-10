@@ -168,7 +168,7 @@ def bootstrap_test(branch, emit, *, artifact_version, config=None, base_dir=None
          f'两个依赖旧版本={old_versions}')
     env=os.environ.copy()
     # Script can mutate its own isolated directory; it does not run git push.
-    run_process(['ci-script','upgrade'],cwd=repo,env=env,emit=emit,timeout=3600,label='ci-script upgrade')
+    run_process(['ci-script','--upgrade'],cwd=repo,env=env,emit=emit,timeout=3600,label='ci-script --upgrade')
     lines=run_process(['./bootstrap.sh'],cwd=repo,env=env,emit=emit,timeout=3600,label='./bootstrap.sh')
     checks = validate_lock(lock_file, artifact_version)
     ensure_lock_other_entries_unchanged(before_lock, lock_file.read_text(encoding='utf-8'))

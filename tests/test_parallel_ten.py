@@ -91,7 +91,7 @@ with patch('appbuilder.runner.task_folder', return_value=Path(sys.argv[1])):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td); bindir = root / 'bin'; bindir.mkdir()
             upgrade = bindir / 'ci-script'
-            upgrade.write_text('#!/bin/sh\nset -eu\ntest "$1" = upgrade\npwd > upgrade-cwd.txt\n'
+            upgrade.write_text('#!/bin/sh\nset -eu\ntest "$1" = --upgrade\npwd > upgrade-cwd.txt\n'
                                'echo upgrade >> order.txt\necho "upgrade $(basename "$PWD")"\n'
                                'touch ready\nwhile [ ! -f ../release ]; do sleep .02; done\n')
             upgrade.chmod(0o755)

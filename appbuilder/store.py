@@ -4,6 +4,7 @@ import json
 import os
 import sqlite3
 import shutil
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from .config import DATA
@@ -14,13 +15,28 @@ def connect():
     DATA.mkdir(parents=True, exist_ok=True)
     db = sqlite3.connect(DATA / 'tasks.sqlite', timeout=30)
     db.row_factory = sqlite3.Row
-    db.execute('PRAGMA journal_mode=WAL')
-    db.execute('PRAGMA busy_timeout=30000')
-    db.execute('''CREATE TABLE IF NOT EXISTS tasks (
-        id TEXT PRIMARY KEY, created TEXT NOT NULL, stamp TEXT NOT NULL,
-        status TEXT NOT NULL, pid INTEGER, params TEXT NOT NULL,
-        stage TEXT NOT NULL, note TEXT NOT NULL DEFAULT '')''')
-    db.commit()
+    try:
+        db.execute('PRAGMA busy_timeout=30000')
+        # Concurrent first connections may get SQLITE_BUSY while changing the
+        # journal mode, even when sqlite's busy timeout is configured.
+        deadline = time.monotonic() + 30
+        while True:
+            try:
+                db.execute('PRAGMA journal_mode=WAL')
+                break
+            except sqlite3.OperationalError as exc:
+                code = getattr(exc, 'sqlite_errorcode', 0) & 0xff
+                if code not in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED) or time.monotonic() >= deadline:
+                    raise
+                time.sleep(.05)
+        db.execute('''CREATE TABLE IF NOT EXISTS tasks (
+            id TEXT PRIMARY KEY, created TEXT NOT NULL, stamp TEXT NOT NULL,
+            status TEXT NOT NULL, pid INTEGER, params TEXT NOT NULL,
+            stage TEXT NOT NULL, note TEXT NOT NULL DEFAULT '')''')
+        db.commit()
+    except BaseException:
+        db.close()
+        raise
     return db
 
 
