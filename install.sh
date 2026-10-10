@@ -7,10 +7,10 @@ usage() {
   cat <<'HELP'
 用法: ./install.sh
 
-先设置企业 Python 包仓库（示例仅为占位符）:
-  export PIP_INDEX_URL='https://nexus.company.example/repository/pypi-group/simple/'
-  # 如企业 CA 不在系统信任链中，按 IT 指引设置：
-  # export PIP_CERT='/path/to/company-ca.pem'
+默认沿用公司现有的 pip 配置（含 index-url、extra-index-url 和 CA 证书）。
+  python3 -m pip config list    # 仅供查看；注意不要分享含凭据的输出
+  # 如使用非 *.hsbc 等批准域名，须先获得 IT 确认，再指定准确主机：
+  # export APP_BUILDER_ALLOWED_PIP_HOSTS='nexus.company.example'
 
 浏览器选择在 config.yaml -> jenkins.browser_channel 中配置:
   chrome     已安装的企业 Chrome，跳过 Chromium 下载（推荐）
@@ -35,45 +35,10 @@ if sys.version_info < (3, 11):
     raise SystemExit('需要 Python >= 3.11，请使用公司批准的安装渠道。')
 PY
 
-# Corporate pip config can be set by PIP_INDEX_URL, user/global pip.conf, or PIP_CONFIG_FILE.
-if [ -z "${PIP_INDEX_URL:-}" ]; then
-  index_config="$(python3 -m pip config get global.index-url 2>/dev/null || true)"
-  if [ -z "$index_config" ]; then
-    index_config="$(python3 -m pip config get install.index-url 2>/dev/null || true)"
-  fi
-  if [ -z "$index_config" ]; then
-    echo '未检测到公司 Python 包仓库。为避免访问公网 PyPI，安装已停止。' >&2
-    usage >&2
-    exit 1
-  fi
-  case "$index_config" in
-    *pypi.org*|*pythonhosted.org*)
-      echo '当前 pip index 配置指向公网 PyPI，请先配置公司 Nexus。' >&2
-      exit 1
-      ;;
-  esac
-else
-  case "$PIP_INDEX_URL" in
-    *pypi.org*|*pythonhosted.org*)
-      echo 'PIP_INDEX_URL 指向公网 PyPI；请改成公司 Nexus。' >&2
-      exit 1
-      ;;
-  esac
-fi
-
-# Never silently use a secondary index: package resolution across indexes can
-# fall back to public registries and increase dependency-confusion risk.
-extra_index="${PIP_EXTRA_INDEX_URL:-}"
-if [ -z "$extra_index" ]; then
-  extra_index="$(python3 -m pip config get global.extra-index-url 2>/dev/null || true)"
-fi
-if [ -z "$extra_index" ]; then
-  extra_index="$(python3 -m pip config get install.extra-index-url 2>/dev/null || true)"
-fi
-if [ -n "$extra_index" ]; then
-  echo '发现额外的 pip package index。为避免依赖混淆和意外访问外部仓库，请使用公司 Nexus group 单一索引，并清除 PIP_EXTRA_INDEX_URL / pip.conf extra-index-url。' >&2
-  exit 1
-fi
+# Respect corporate pip.conf, environment overrides, and existing corporate CA.
+# Validate every effective package index without discarding extra-index-url.
+# The check is stdlib-only and does NOT install or upgrade pip.
+python3 -m appbuilder.pip_sources
 
 if [ ! -d .venv ]; then
   python3 -m venv .venv

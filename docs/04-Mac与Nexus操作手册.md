@@ -10,14 +10,15 @@
 ## B. 安装（默认不用公网）
 
 ```bash
-cd mac-app-builder-v0.3
-export PIP_INDEX_URL='https://<企业 Nexus 主机>/repository/<pypi-group>/simple/'
-# 如果公司要求内部 CA 证书：export PIP_CERT='/path/to/company-ca.pem'
-./install.sh
+cd mac-app-build
+python3 -m pip --version      # 只检查已安装的 pip
+./install.sh                  # 沿用公司 Nexus 和 CA 配置
 ./app-build doctor
 ```
 
-`install.sh` 会：检查 Python 版本 → 检测 pip 企业包索引 → 阻止额外索引以降低依赖混淆/意外公网访问风险 → 创建 `.venv` → 从该 pip 索引安装 requirements.txt → 根据 `config.yaml` 浏览器通道决定是否下载浏览器。默认 `jenkins.browser_channel: chrome`，会复用**已安装的企业 Chrome**，因此不下载 Playwright Chromium。
+`install.sh` 会：检查已有 Python 3.11+ → 只读验证有效的 `index-url` 和 `extra-index-url`（均为 HTTPS 企业 Nexus 时允许）→ 创建 `.venv` → 使用**现有 pip 配置**安装 `requirements.txt` → 检查浏览器配置。**它不安装/升级 pip，不修改 pip.conf、global.cert 或 PIP_CERT。** 默认 `jenkins.browser_channel: chrome`，复用公司管理的 Chrome。
+
+默认允许 `*.hsbc` 等公司域名，拒绝公网 PyPI、HTTP 和陌生主机。其他由 IT 批准的企业主机，可通过 `APP_BUILDER_ALLOWED_PIP_HOSTS` 明确列出准确域名。已安装 pip 仍然需要在 `.venv` 内安装 `playwright` 和 `PyYAML`。`python3 -m pip config list` 可能含凭据，请不要分享完整输出。
 
 **三个容易混淆的下载源：**
 

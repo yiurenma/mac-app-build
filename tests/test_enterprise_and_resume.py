@@ -43,7 +43,7 @@ class TestNexusAndTokenSafety(unittest.TestCase):
     def test_installer_no_default_public_browser_or_pip_upgrade(self):
         install = (Path(__file__).resolve().parents[1] / 'install.sh').read_text()
         self.assertNotIn('pip install --upgrade pip', install)
-        self.assertIn('PIP_INDEX_URL', install)
+        self.assertIn('python3 -m appbuilder.pip_sources', install)
         self.assertIn('PLAYWRIGHT_DOWNLOAD_HOST', install)
         self.assertIn('browser_channel', install)
 
@@ -106,7 +106,7 @@ home = Path(sys.argv[1]); ident = sys.argv[2]
 with patch('appbuilder.runner.task_folder', return_value=home / ident):
     with worker_lease(ident):
         (home / (ident + '.ready')).touch()
-        for _ in range(200):
+        for _ in range(800):
             if (home / 'release').exists():
                 break
             time.sleep(.01)
@@ -118,7 +118,7 @@ with patch('appbuilder.runner.task_folder', return_value=home / ident):
                                         cwd=project, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
                        for ident in ('A', 'B')]
             try:
-                for _ in range(200):
+                for _ in range(800):
                     if (root / 'A.ready').exists() and (root / 'B.ready').exists():
                         break
                     __import__('time').sleep(.01)

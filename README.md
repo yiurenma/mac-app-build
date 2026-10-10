@@ -1,4 +1,4 @@
-# HSBC UK PBB — Mac APP Build Automation (v0.3)
+# HSBC UK PBB — Mac APP Build Automation (v0.3.1)
 
 在一台 Mac 上**并发运行多个独立**的 Plugin → GMX → Jenkins APP 打包任务。
 每个任务有单独的 Git 克隆、时间戳、Jenkins 编号、日志和恢复状态。**没有用 Jenkins REST API**；Jenkins 操作由 Playwright 打开浏览器页面模拟人操作。
@@ -15,7 +15,7 @@
 - [内网 Jenkins/SSO 联调清单](docs/05-企业内网联调清单.md)
 - 流程图：[完整流程](diagrams/01-完整流程.svg) / [Jenkins 状态机](diagrams/02-Jenkins状态机.svg) / [多进程架构](diagrams/03-多进程架构.svg)（均有 PNG 预览及可修改 `.dot` 源码）。
 
-> **本版经过三轮离线审查与回归（每轮 30 项通过），但尚未连接公司的 Nexus、SSO、Plugin/GMX Jenkins 真正执行打包。**
+> **v0.3 原版经过三轮离线审查；本次 v0.3.1 Nexus 修复已增加专门测试并重新执行三轮离线回归，但尚未连接公司的 Nexus、SSO、Plugin/GMX Jenkins 真正执行打包。**
 
 ## 0. 工作流
 
@@ -39,14 +39,15 @@
 推荐方式：通过公司 Nexus 安装 Python 依赖，使用 IT 已安装的 Chrome。项目 `config.yaml` 默认 `jenkins.browser_channel: "chrome"`，与原版的 Playwright-managed Chromium 不同。
 
 ```bash
-cd mac-app-builder
-export PIP_INDEX_URL='https://你的Nexus主机/repository/你的pypi代理或group/simple/'
-# 如需企业 CA 证书，请按 IT 指引设置：export PIP_CERT='/path/to/company-ca.pem'
+# 公司已配置好 pip/Nexus 时，不需要再设置 PIP_INDEX_URL
+python3 -m pip --version
 ./install.sh
 ./app-build doctor
 ```
 
-`PIP_INDEX_URL` 也可以通过企业统一管理的 pip.conf 提供。脚本不会打印 Nexus 凭据，也不再无条件升级 pip；如果没有配置包索引，会停下来提示，避免默默走公网 PyPI。检测到额外的 `extra-index-url` 也会停止，建议公司统一使用单一 Nexus group 索引，避免依赖混淆。**Nexus URL 请向公司开发工具/DevOps 团队确认；上面只是占位符，不是实际地址。** 建议使用凭据管理器或公司允许的认证方案，不要把用户名密码写进项目文件、Shell 历史或截图。
+`install.sh` **不会安装或升级 pip，也不会修改 pip.conf、`PIP_CERT` / `global.cert`**。它只读检查当前有效的 `index-url` 和 `extra-index-url`：两个地址都是 HTTPS 企业 Nexus 时可以同时使用，且保留现有 CA 证书与认证配置。公网 PyPI、HTTP 或陌生主机会触发安全停止，不自动回退公网。非 `.hsbc` 的批准企业域名可经公司 IT 确认后设置 `APP_BUILDER_ALLOWED_PIP_HOSTS`（填准确主机名）。
+
+已安装 pip 不等于项目依赖齐全：`./install.sh` 仍然会在独立 `.venv` 中通过现有 Nexus 安装 `playwright` 和 `PyYAML`。默认使用公司 Chrome，不下载 Playwright Chromium。请勿分享包含凭据的 pip 配置截图或输出。
 
 如果公司没有允许 Playwright 控制的 Chrome，但提供了 Playwright 浏览器二进制镜像，可把 `config.yaml` 的 `jenkins.browser_channel` 改为 `chromium`，然后：
 
