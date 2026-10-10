@@ -105,6 +105,35 @@ def update_mobile_ci(path: Path, version: str):
     return {name: matches[name][0][2]['version'] for name in ARTIFACTS}
 
 
+def update_lock_from_hashes(path: Path, version: str, hashes):
+    """Replace only the two target version/hash values, preserving exact formatting."""
+    if set(hashes) != set(ARTIFACTS) or any(
+            not isinstance(v, str) or not re.fullmatch(r'[a-fA-F0-9]{64}', v)
+            for v in hashes.values()):
+        raise ValueError('必须提供两个插件各自的有效 SHA256')
+    original = path.read_bytes().decode('utf-8')
+    matches = matching_entries(original)
+    replacements = []
+    for name in ARTIFACTS:
+        start, end, obj = matches[name][0]
+        segment = original[start:end]
+        for key, value in [('version', version), ('sha256', hashes[name])]:
+            if not isinstance(obj.get(key), str):
+                raise ValueError(f'{name} 缺少 string 类型的 {key}')
+            pattern = re.compile(r'("' + key + r'"\s*:\s*")([^"\\]*(?:\\.[^"\\]*)*)(")')
+            hits = list(pattern.finditer(segment))
+            if len(hits) != 1:
+                raise ValueError(f'{name} 无法定位唯一 {key}')
+            hit = hits[0]
+            replacements.append((start + hit.start(2), start + hit.end(2), value))
+    updated = original
+    for a, b, value in sorted(replacements, reverse=True):
+        updated = updated[:a] + value + updated[b:]
+    ensure_lock_other_entries_unchanged(original, updated)
+    path.write_bytes(updated.encode('utf-8'))
+    return validate_lock(path, version)
+
+
 def validate_lock(path: Path, version: str):
     content = path.read_text(encoding='utf-8')
     entries = matching_entries(content)

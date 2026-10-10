@@ -335,8 +335,11 @@ _DIAG_LOCK = threading.Lock()
 _DIAG_JOBS: dict[str, dict] = {}
 
 
-def start_diagnostic(url: str, *, number=None, expected='SUCCESS', site: str):
-    from .diagnose import parse_target, run_diagnosis
+def start_diagnostic(url: str, *, number=None, expected='SUCCESS', site: str, expected_artifacts=None):
+    from .diagnose import parse_target, run_diagnosis, validate_artifact_expectations
+    expected_artifacts = validate_artifact_expectations(expected_artifacts)
+    if expected_artifacts is not None and site != 'plugin':
+        raise ValueError('版本/SHA 对比适用于 Plugin Jenkins 测试')
     config = load_config()
     target = parse_target(url, config, number=number)
     if target.site != site:
@@ -366,7 +369,7 @@ def start_diagnostic(url: str, *, number=None, expected='SUCCESS', site: str):
     def work():
         try:
             report = run_diagnosis(url, number=number, expected=expected, visible=True,
-                                   config=config, emit=emit)
+                                   config=config, emit=emit, expected_artifacts=expected_artifacts)
         except Exception as exc:
             emit(f'[DIAG-ERROR] {type(exc).__name__}: {safe_text(str(exc))}')
             report = {'verdict': 'UNKNOWN', 'actual': 'UNKNOWN', 'expected': expected,
@@ -395,13 +398,12 @@ _LIVE_JOBS: dict[str, dict] = {}
 
 
 def start_live_test(body):
-    from .live_tests import validate_options, validate_artifact_version, bootstrap_test, gmx_build_test, validate_job_url
+    from .live_tests import validate_options, gmx_build_test, validate_job_url
     kind = body.get('kind')
-    if kind not in ('bootstrap', 'gmx-build'):
-        raise ValueError('请选择 Bootstrap Test 或 GMX Jenkins Build Test')
+    if kind != 'gmx-build':
+        raise ValueError('Bootstrap Test 已移除，请使用 Plugin Jenkins 单元测试或 GMX Jenkins Build Test')
     branch, country, project, settings = validate_options(body)
     job_url = body.get('job_url') or ''
-    artifact_version = validate_artifact_version(body.get('artifact_version')) if kind == 'bootstrap' else None
     if kind == 'gmx-build':
         if body.get('confirm_trigger') is not True:
             raise ValueError('必须明确确认将真正触发 GMX Jenkins Build')
@@ -409,8 +411,6 @@ def start_live_test(body):
             raise ValueError('Jenkins Job URL 格式无效')
         if job_url:
             validate_job_url(job_url, branch, load_config())
-    elif job_url:
-        raise ValueError('Bootstrap Test 不接受 Jenkins Job URL')
     with _LIVE_LOCK:
         if any(v['status']=='RUNNING' and v['kind']==kind and v['branch']==branch for v in _LIVE_JOBS.values()):
             raise ValueError(f'{branch} 的 {kind} 测试正在运行，不能重复触发')
@@ -437,10 +437,7 @@ def start_live_test(body):
         set_live_sink(emit)
         set_verbose(True)
         try:
-            if kind == 'bootstrap':
-                report = bootstrap_test(branch, emit, artifact_version=artifact_version)
-            else:
-                report = gmx_build_test(branch,country,project,settings,emit,job_url=job_url)
+            report = gmx_build_test(branch,country,project,settings,emit,job_url=job_url)
         except Exception as exc:
             emit(f'[ERROR] {type(exc).__name__}: {safe_text(str(exc))}')
             report = {'kind':kind, 'verdict':'FAIL','branch':branch,'error':safe_text(str(exc))}
@@ -581,7 +578,8 @@ def make_handler(csrf_token):
                     elif type(num) is not int:
                         raise ValueError('Build Number 必须为正整数')
                     return self._send(start_diagnostic(url, number=num,
-                                      expected=body.get('expected', 'SUCCESS'), site=site), status=202)
+                                      expected=body.get('expected', 'SUCCESS'), site=site,
+                                      expected_artifacts=body.get('expected_artifacts')), status=202)
                 if self.path == '/api/diagnose':
                     from .diagnose import run_diagnosis
                     raw = body.get('url')
@@ -594,7 +592,7 @@ def make_handler(csrf_token):
                         raise ValueError('Build Number 必须是整数')
                     result = run_diagnosis(raw, number=number,
                                            expected=body.get('expected', 'SUCCESS'),
-                                           visible=True)
+                                           visible=True, expected_artifacts=body.get('expected_artifacts'))
                     return self._send(result)
                 if self.path == '/api/tasks':
                     return self._send({'task': create_build(body)}, status=201)

@@ -962,6 +962,21 @@ def formal_build(browser: JenkinsBrowser, job_url, task_id, site, country='', pr
     return num, console
 
 
+def plugin_upload_hashes(browser, job_url, number, version):
+    from .nexus import parse_upload_hashes
+    url = job_url + str(number) + '/consoleText'
+    response = browser.context.request.get(url, timeout=120000)
+    if response.status != 200 or urlsplit(response.url) != urlsplit(url):
+        raise NeedsAttention('当前 Plugin Build 完整日志不可读，请检查 Jenkins 登录/权限')
+    console = response.text()
+    if final_result_from_console(console) != 'SUCCESS':
+        raise NeedsAttention('Plugin 日志尚未确认 Finished: SUCCESS，禁止使用其中的 SHA256')
+    try:
+        return parse_upload_hashes(console, version)
+    except ValueError as exc:
+        raise NeedsAttention(str(exc)) from exc
+
+
 def plugin_artifact_version(browser, job_url, source_number, task_id):
     key = 'plugin_callback_number'
     rt = read_state(task_id)['runtime']

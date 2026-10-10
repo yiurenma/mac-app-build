@@ -14,8 +14,8 @@ from .config import DATA, load_config, token_or_error
 from .store import task, read_state, patch_runtime, complete, update_task, task_folder
 from .gitops import credentials, clone_branch, git, changed_files, commit_and_push, verify_pushed, recover_pushed_commit
 from .verify import plugin_commit, gmx_commit
-from .edits import edit_plugin_versions, update_mobile_ci, validate_lock, ensure_lock_other_entries_unchanged, XCCONFIGS
-from .jenkins import JenkinsBrowser, ensure_bootstrap, formal_build, plugin_artifact_version, NeedsAttention
+from .edits import edit_plugin_versions, update_mobile_ci, update_lock_from_hashes, validate_lock, ensure_lock_other_entries_unchanged, XCCONFIGS
+from .jenkins import JenkinsBrowser, ensure_bootstrap, formal_build, plugin_artifact_version, plugin_upload_hashes, NeedsAttention
 from .telemetry import set_verbose, debug, action, operation, safe_text, is_verbose
 
 
@@ -201,7 +201,9 @@ def _run_unlocked(task_id):
                     ensure_bootstrap(browser, params['plugin_job'], task_id, 'plugin')
                     num, _ = formal_build(browser, params['plugin_job'], task_id, 'plugin')
                     v, artifact_build = plugin_artifact_version(browser, params['plugin_job'], num, task_id)
-                    patch_runtime(task_id, artifact_version=v, plugin_artifact_number=artifact_build)
+                    hashes = plugin_upload_hashes(browser, params['plugin_job'], artifact_build, v)
+                    patch_runtime(task_id, artifact_version=v, plugin_artifact_number=artifact_build,
+                                  plugin_artifact_hashes=hashes)
                     log(f'[ARTIFACT] 完整依赖版本: {v}, Build #{artifact_build}')
             step(task_id, 'PLUGIN_JENKINS', plugin_build)
 
@@ -224,15 +226,27 @@ def _run_unlocked(task_id):
             def gmx_resolve():
                 lock = gmx / 'mobile-ci.lock'
                 before = lock.read_text(encoding='utf-8')
-                run_bootstrap(gmx, home / 'bootstrap.log')
-                digests = validate_lock(lock, artifact)
+                rt = read_state(task_id)['runtime']
+                hashes = rt.get('plugin_artifact_hashes')
+                if not hashes:
+                    # Resume pre-migration tasks using their exact recorded build.
+                    number = rt.get('plugin_artifact_number')
+                    if not number:
+                        raise NeedsAttention('缺少当前 Plugin Artifact Build 编号，禁止使用旧 SHA256')
+                    with JenkinsBrowser(conf, DATA, home, 'plugin', visible=params.get('visible', False), verbose=params.get('verbose', False)) as browser:
+                        hashes = plugin_upload_hashes(browser, params['plugin_job'], number, artifact)
+                    patch_runtime(task_id, plugin_artifact_hashes=hashes)
+                if rt.get('gmx_sha'):
+                    if validate_lock(lock, artifact) != hashes:
+                        raise NeedsAttention('此旧任务已提交 GMX，但 lock SHA256 与当前 Nexus 输出不同，请创建新任务')
+                digests = update_lock_from_hashes(lock, artifact, hashes)
                 ensure_lock_other_entries_unchanged(before, lock.read_text(encoding='utf-8'))
                 extras = set(changed_files(gmx)) - {'mobile-ci.json', 'mobile-ci.lock'}
                 if extras:
-                    raise NeedsAttention(f'bootstrap.sh 生成非预期变更（已阻止提交）：{sorted(extras)}')
+                    raise NeedsAttention(f'更新 lock 后出现非预期变更（已阻止提交）：{sorted(extras)}')
                 patch_runtime(task_id, lock_hashes=digests)
                 log(f'[LOCK] 版本与 SHA256 验证成功: {artifact}')
-            step(task_id, 'GMX_BOOTSTRAP', gmx_resolve)
+            step(task_id, 'GMX_LOCK', gmx_resolve)
 
             def gmx_push():
                 rt = read_state(task_id)['runtime']
@@ -241,7 +255,7 @@ def _run_unlocked(task_id):
                     return
                 message = f'build: update PayByBank plugins to {artifact}'
                 expected = {'mobile-ci.json', 'mobile-ci.lock'}
-                validator = lambda: gmx_commit(gmx, rt['gmx_base_sha'], artifact)
+                validator = lambda: gmx_commit(gmx, rt['gmx_base_sha'], artifact, rt['plugin_artifact_hashes'])
                 sha = recover_pushed_commit(gmx, gmx_branch, expected, message,
                                             rt['gmx_base_sha'], env, validate_before_push=validator)
                 if not sha:

@@ -1,4 +1,14 @@
-# HSBC UK PBB — Mac APP Build Automation (v0.7.4)
+# HSBC UK PBB — Mac APP Build Automation (v0.7.5)
+
+## v0.7.5 — 从 Nexus 上传日志直接更新 lock
+
+正式流程不再运行本地 `ci-script --upgrade` 或 `./bootstrap.sh`。从当前 Plugin 成功 Build（或已关联的 Artifact Callback）的完整 `consoleText` 中解析 `Nexus upload output` JSON，按两个插件名、完整版本与 `.tar.gz` 文件名读取各自 `artifactSHA256`。忽略 `.sha256`、`.metadata.json` 等附件；缺失、版本不符、哈希冲突或日志未成功结束时停止。
+
+直接精准更新 `mobile-ci.lock` 的两个版本和 SHA256，再提交并 Push `mobile-ci.json` 与 `mobile-ci.lock`。Push 前验证 Commit 内的 SHA256 与当前日志完全一致。独立 Bootstrap Test 的页面和后台执行入口已移除。
+
+现有 Plugin Jenkins URL Test 保留图标状态判断，另行读取同一指定 Build 的完整日志，显示两个插件各自的版本和 SHA256，并保存到诊断结果 JSON。Plugin 测试表单新增三个必填输入：完整版本号、Journey SHA256、DomainModel SHA256。逐项显示输入值、提取实际值与匹配结果；只有构建状态符合预期且三个值都一致，整体测试才 PASS。构建状态与 Nexus 提取结果仍分开报告。
+
+验证：新增 9 项 Nexus/lock/诊断比对测试；移除 Bootstrap 测试后，当前环境可运行的 207 项离线测试全部通过，Python 编译和 shell 语法检查通过。三组真实 Chromium DOM 测试因本环境缺少 `/usr/bin/chromium` 未执行；公司 Jenkins 仍需现场复测。未将现场日志或截图写入仓库。
 
 ## v0.7.4 — 修正 ci-script 升级参数
 
@@ -99,7 +109,7 @@ GMX 参数页按现场截图新增 `SKIP_TEST`（默认 true）、`FORCE`（默�
 2. 根据规则 `/` 和 `.` → `_` 定位 Plugin Jenkins 新 Job；如果初次只有 `Build`，先触发初始化构建，再等待 `Build with Parameters`。随后使用默认参数触发正式构建。
 3. 仅在本次成功 Build 及关联 Callback 的 `build-universal/` artifacts 里查找 DomainModel 和 Journey 的 `*.tar.gz`；要求两个**完整 Artifact Version 一致**。
 4. 使用 GMX 输入源分支创建 `upload/auto<同一时间戳>`。在根目录 `mobile-ci.json` 精准修改两个 `paybybank-ios-plugin` 依赖的 `version` 为**完整 Artifact Version**，不做 `1.3.0` 等转换。
-5. 在当前任务 GMX 根目录运行 `./bootstrap.sh`；读取 `mobile-ci.lock` 新 SHA256，检查版本、校验和与其他依赖未被意外修改。
+5. 读取本次 Plugin 成功构建的 Nexus upload output JSON，按插件名与完整版本提取两个 `.tar.gz` 的 `artifactSHA256`；直接更新 `mobile-ci.lock` 对应版本和 SHA256，检查其他依赖未变。无需运行本地 Bootstrap。
 6. 只提交 `mobile-ci.json` 和 `mobile-ci.lock`，推送后根据 `upload/xxx` → `upload%2Fxxx` 定位 GMX Jenkins 新 Job。
 7. 兼容首次普通 `Build` 初始化，正式执行 `Build with Parameters`：`ENTITIES=国家`（默认 UK）、`SYNC_UPLOAD=true`、`CUSTOM_FOLDER=0_A_<国家>_<项目>`；其他保持 Jenkins 默认（如 BUILD_TYPE=Develop、SIGNING_REPO_BRANCH=master）。
 8. 等待 GMX Jenkins 本次 Build 结果（不能依赖 Last Successful）。保存 Build Number、Commit SHA、日志、结果 JSON。

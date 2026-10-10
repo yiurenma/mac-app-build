@@ -12,6 +12,7 @@ import time
 from .jenkins import JenkinsBrowser, final_result_from_console
 from .config import DATA, load_config
 from .telemetry import safe_text
+from .nexus import parse_upload_metadata
 
 
 @dataclass(frozen=True)
@@ -78,7 +79,25 @@ def expectation(actual: str, expected: str, site: str) -> tuple[str, str]:
     return 'FAIL', f'实际结果 {actual} 不符合预期 {expected}；不执行任何自动构建动作。'
 
 
-def run_diagnosis(url: str, *, number: int | None = None, expected='SUCCESS', visible=True,
+def validate_artifact_expectations(values):
+    if values is None:
+        return None
+    keys = {'version', 'journey_sha256', 'domainmodel_sha256'}
+    if not isinstance(values, dict) or set(values) != keys:
+        raise ValueError('请同时输入完整版本号、Journey SHA256 和 DomainModel SHA256')
+    version = values['version']
+    if not isinstance(version, str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.+-]{0,99}', version):
+        raise ValueError('预期完整版本号无效')
+    result = {'version': version}
+    for key in keys - {'version'}:
+        sha = values[key]
+        if not isinstance(sha, str) or not re.fullmatch(r'[a-fA-F0-9]{64}', sha):
+            raise ValueError(f'{key} 必须为 64 位十六进制 SHA256')
+        result[key] = sha.lower()
+    return result
+
+
+def run_diagnosis(url: str, *, number: int | None = None, expected='SUCCESS', visible=True, expected_artifacts=None,
                   config: dict | None = None, factory=JenkinsBrowser, emit=None) -> dict:
     """Read-only: inspect job history, numbered build heading, optional console.
 
@@ -87,6 +106,9 @@ def run_diagnosis(url: str, *, number: int | None = None, expected='SUCCESS', vi
     """
     config = config or load_config()
     target = parse_target(url, config, number=number)
+    expected_artifacts = validate_artifact_expectations(expected_artifacts)
+    if expected_artifacts is not None and target.site != 'plugin':
+        raise ValueError('版本/SHA 对比适用于 Plugin Jenkins 测试')
     if expected not in ('SUCCESS', 'FAILURE', 'ABORTED', 'UNSTABLE', 'NOT_BUILT'):
         raise ValueError('预期结果必须为 Jenkins 标准终态')
     began = time.monotonic()
@@ -147,6 +169,7 @@ def run_diagnosis(url: str, *, number: int | None = None, expected='SUCCESS', vi
             log(f'[RESULT] Build #{n} heading: {heading or "UNKNOWN"}')
             console = None
             console_code = 'SKIPPED'
+            full_console = None
             if history and heading and history != heading:
                 # Disagreement must not become a false success.
                 actual = 'UNKNOWN'
@@ -160,7 +183,8 @@ def run_diagnosis(url: str, *, number: int | None = None, expected='SUCCESS', vi
                     console_code = response.status
                     if (response.status == 200 and urlsplit(response.url).hostname == urlsplit(build_url).hostname
                             and urlsplit(response.url).path == urlsplit(build_url).path + 'consoleText'):
-                        body = response.text()[-4096:]
+                        full_console = response.text()
+                        body = full_console[-4096:]
                         console = final_result_from_console(body)
                         content_type = getattr(response, 'headers', {}).get('content-type', 'unknown')
                         log(f'[HTTP] consoleText={console_code}; type={content_type}; tail bytes checked={len(body.encode("utf-8"))}')
@@ -182,12 +206,49 @@ def run_diagnosis(url: str, *, number: int | None = None, expected='SUCCESS', vi
                 except Exception:
                     pass
             verdict, next_action = expectation(actual, expected, target.site)
-            log(f'[VERDICT] {verdict} · expected={expected} · actual={actual}')
+            status_verdict = verdict
+            artifact_result = {'status': 'NOT_APPLICABLE', 'artifacts': []}
+            if target.site == 'plugin':
+                log('[ARTIFACT] 从指定 Build 的完整 Nexus upload output 提取版本和 SHA256')
+                try:
+                    if full_console is None:
+                        response = browser.context.request.get(build_url + 'consoleText', timeout=20000)
+                        if response.status != 200 or urlsplit(response.url) != urlsplit(build_url + 'consoleText'):
+                            raise ValueError('指定 Build 完整日志不可读或发生登录跳转')
+                        full_console = response.text()
+                    if final_result_from_console(full_console) != 'SUCCESS':
+                        raise ValueError('日志未以 Finished: SUCCESS 结束')
+                    metadata = parse_upload_metadata(full_console)
+                    artifact_result = {'status': 'PASS', 'artifacts': [
+                        {'library': name, 'version': metadata['version'], 'sha256': digest}
+                        for name, digest in metadata['hashes'].items()]}
+                    for item in artifact_result['artifacts']:
+                        log(f'[ARTIFACT] {item["library"]} · version={item["version"]} · SHA256={item["sha256"]}')
+                except Exception as exc:
+                    artifact_result = {'status': 'FAIL', 'artifacts': [], 'error': safe_text(str(exc))}
+                    log(f'[ARTIFACT] FAIL · {artifact_result["error"]}')
+            comparisons = []
+            if expected_artifacts is not None:
+                values = {item['library']: item for item in artifact_result['artifacts']}
+                actual_versions = {item['version'] for item in artifact_result['artifacts']}
+                observed = {'version': next(iter(actual_versions)) if len(actual_versions) == 1 else None,
+                            'journey_sha256': values.get('PayByBankJourneyPluginKit', {}).get('sha256'),
+                            'domainmodel_sha256': values.get('PayByBankDomainModelPluginKit', {}).get('sha256')}
+                for key in ('version', 'journey_sha256', 'domainmodel_sha256'):
+                    match = observed[key] == expected_artifacts[key]
+                    comparisons.append({'field': key, 'expected': expected_artifacts[key], 'actual': observed[key], 'match': match})
+                    log(f'[COMPARE] {key} · expected={expected_artifacts[key]} · actual={observed[key] or "NOT FOUND"} · {"PASS" if match else "FAIL"}')
+                if artifact_result['status'] != 'PASS' or not all(item['match'] for item in comparisons):
+                    verdict = 'FAIL'
+                next_action = ('图标状态和版本、两个 SHA256 均符合输入。' if verdict == 'PASS'
+                               else '测试未通过，请核对构建状态与三项输入/实际值。')
+            log(f'[VERDICT] {verdict} · status={status_verdict} · expected={expected} · actual={actual}')
             log(f'[NEXT] {next_action}')
-            output = {'verdict': verdict, 'actual': actual, 'expected': expected,
+            output = {'verdict': verdict, 'actual': actual, 'expected': expected, 'status_verdict': status_verdict,
                       'site': target.site, 'build_number': n, 'job_url': target.job_url,
                       'build_url': build_url, 'history': history, 'heading': heading,
-                      'console': console, 'console_http': console_code, 'next': next_action}
+                      'console': console, 'console_http': console_code, 'next': next_action,
+                      'artifact_result': artifact_result, 'comparisons': comparisons}
     except Exception as exc:
         log(f'[DIAG-ERROR] {type(exc).__name__}: {str(exc)}')
         verdict, next_action = expectation('UNKNOWN', expected, target.site)

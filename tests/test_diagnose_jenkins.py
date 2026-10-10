@@ -84,12 +84,13 @@ class DiagLogic(unittest.TestCase):
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory(); self.addCleanup(self.temp.cleanup)
         FakeJenkins.calls=[]
-    def test_existing_build_2_success_without_console_or_build(self):
+    def test_existing_build_2_success_with_separate_artifact_result(self):
         with patch.object(diagnose,'DATA',Path(self.temp.name)):
             report=run_diagnosis(P+'2/',expected='SUCCESS',config=C,factory=FakeJenkins)
         self.assertEqual(report['verdict'],'PASS');self.assertEqual(report['build_number'],2)
         self.assertEqual(report['actual'],'SUCCESS')
-        self.assertNotIn('console',[c[0] for c in FakeJenkins.calls])
+        self.assertEqual([c[0] for c in FakeJenkins.calls].count('console'),1)
+        self.assertEqual(report['artifact_result']['status'],'FAIL')
         self.assertEqual(len([c for c in FakeJenkins.calls if c[0]=='history']),1)
         self.assertTrue((Path(self.temp.name)/'diagnostics/last-result.json').is_file())
         self.assertIn('[VERDICT] PASS','\n'.join(report['logs']))

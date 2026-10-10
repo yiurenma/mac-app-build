@@ -7,7 +7,6 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from appbuilder.runner import run_bootstrap
-from appbuilder.live_tests import bootstrap_test
 from appbuilder.config import load_config
 from appbuilder.versions import ARTIFACTS
 import json
@@ -42,26 +41,3 @@ class BootstrapUpgradeTests(unittest.TestCase):
         self.assertEqual(order, ['upgrade'])
         self.assertRegex(str(error), r'ci-script --upgrade.*exit=23')
         self.assertNotIn('$ ./bootstrap.sh', log)
-
-    def test_live_bootstrap_upgrade_failure_blocks_bootstrap_and_lock_check(self):
-        commands = []
-        def process(args, *, cwd, env, emit, timeout, label):
-            commands.append(args)
-            if label.startswith('Git clone'):
-                root = Path(args[-1]); root.mkdir(parents=True)
-                (root / 'bootstrap.sh').write_text('#!/bin/sh\nexit 0\n')
-                (root / 'bootstrap.sh').chmod(0o755)
-                fixture = {'dependencies': [{'group': 'paybybank-ios-plugin', 'library': n,
-                                             'version': '1.2.2', 'sha256': 'a'*64} for n in ARTIFACTS]}
-                for name in ('mobile-ci.json', 'mobile-ci.lock'):
-                    (root / name).write_text(json.dumps(fixture))
-            elif label == 'ci-script --upgrade':
-                raise RuntimeError('ci-script --upgrade failed exit=23')
-            return []
-        with tempfile.TemporaryDirectory() as td, patch('appbuilder.live_tests.credentials') as credentials, patch('appbuilder.live_tests.subprocess.run', return_value=SimpleNamespace(stdout='deadbeef\n')):
-            credentials.return_value.__enter__.return_value = {}
-            with self.assertRaisesRegex(RuntimeError, 'upgrade failed'):
-                bootstrap_test('upload/test', lambda line: None, artifact_version='1.3.1-alpha.1-SNAPSHOT.2',
-                               config=load_config(), base_dir=td, run_process=process)
-        self.assertEqual(commands[-1], ['ci-script', '--upgrade'])
-        self.assertNotIn(['./bootstrap.sh'], commands)

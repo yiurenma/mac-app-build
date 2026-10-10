@@ -1,4 +1,4 @@
-"""Offline safety and execution-sequencing checks for the two actionful on-demand tests."""
+"""Offline safety and execution-sequencing checks for GMX Jenkins build tests."""
 import tempfile
 import json
 import unittest
@@ -8,7 +8,7 @@ from unittest.mock import patch
 from appbuilder import web
 from appbuilder.config import load_config
 from appbuilder.live_tests import (validate_branch, validate_options, job_candidates,
-                                   validate_job_url, gmx_build_test, bootstrap_test, validate_artifact_version)
+                                   validate_job_url, gmx_build_test)
 
 CFG=load_config()
 BRANCH='upload/UKPBB-203745-V8'
@@ -28,12 +28,8 @@ class BranchValidation(unittest.TestCase):
         self.assertEqual(validate_job_url(a,BRANCH,CFG),a)
         self.assertEqual(validate_job_url(b,BRANCH,CFG),b)
         with self.assertRaises(ValueError):validate_job_url(b.replace('V8','V7'),BRANCH,CFG)
-    def test_full_plugin_artifact_version_required(self):
-        self.assertEqual(validate_artifact_version(VERSION), VERSION)
-        for bad in (None, '', '1.3', '../1.3.0', '1.3.0;rm', '1.3.0\nBAD', '1.3.0'+'A'*110):
-            with self.subTest(bad=bad), self.assertRaises(ValueError):
-                validate_artifact_version(bad)
-        with self.assertRaisesRegex(ValueError,'Artifact Version'):
+    def test_removed_bootstrap_test_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, '已移除'):
             web.start_live_test({'kind':'bootstrap','branch':BRANCH})
 
     def test_parameters(self):
@@ -101,38 +97,6 @@ class ExecutionFlow(unittest.TestCase):
         with self.assertRaisesRegex(Exception,'Build'):
             gmx_build_test(BRANCH,country,project,settings,self.logs.append,config=CFG,factory=FakeBrowser)
         self.assertFalse(any(x[0]=='trigger' for x in FakeBrowser.calls))
-    def test_bootstrap_isolated_path_and_lock_version(self):
-        from appbuilder.versions import ARTIFACTS
-        commands=[]
-        fixture = {'dependencies':[{'group':'paybybank-ios-plugin','library':n,'version':'1.2.2','sha256':'a'*64}
-                    for n in ARTIFACTS]+[{'group':'other','library':'example','version':'7.0'}]}
-        def fake_proc(args,*,cwd,env,emit,timeout,label):
-            commands.append((args,cwd,label))
-            if label.startswith('Git clone'):
-                dst=Path(args[-1]);dst.mkdir(parents=True)
-                (dst/'bootstrap.sh').write_text('#!/bin/sh\nexit 0\n');(dst/'bootstrap.sh').chmod(0o755)
-                (dst/'mobile-ci.json').write_text(json.dumps(fixture))
-                (dst/'mobile-ci.lock').write_text(json.dumps(fixture))
-            if label=='./bootstrap.sh':
-                j=json.loads((Path(cwd)/'mobile-ci.json').read_text())
-                for dep in j['dependencies'][:2]: dep['sha256']='b'*64
-                (Path(cwd)/'mobile-ci.lock').write_text(json.dumps(j))
-            return []
-        with tempfile.TemporaryDirectory() as td,patch('appbuilder.live_tests.credentials') as credentials,patch('appbuilder.live_tests.subprocess.run') as run:
-            credentials.return_value.__enter__.return_value={}
-            run.side_effect=[SimpleNamespace(stdout='deadbeef\n'),SimpleNamespace(stdout=' M mobile-ci.json\n M mobile-ci.lock\n')]
-            result=bootstrap_test(BRANCH,self.logs.append,artifact_version=VERSION,config=CFG,base_dir=td,run_process=fake_proc)
-            newdeps=json.loads((Path(result['work_dir'])/'mobile-ci.json').read_text())['dependencies']
-        self.assertEqual(result['verdict'],'PASS')
-        self.assertEqual(result['artifact_version'],VERSION)
-        self.assertEqual([x['version'] for x in newdeps[:2]],[VERSION,VERSION])
-        self.assertEqual(newdeps[2]['version'],'7.0')
-        self.assertEqual(len(result['lock_hashes']),2)
-        self.assertEqual([x[2] for x in commands],['Git clone (read-only)','ci-script --upgrade','./bootstrap.sh'])
-        self.assertEqual(commands[1][0],['ci-script','--upgrade'])
-        self.assertEqual(commands[2][0],['./bootstrap.sh'])
-        self.assertEqual(commands[1][1],commands[2][1])
-        self.assertEqual(result['changed'],[' M mobile-ci.json',' M mobile-ci.lock'])
 
 
 class LiveWebIntegration(unittest.TestCase):
@@ -140,35 +104,14 @@ class LiveWebIntegration(unittest.TestCase):
         from appbuilder import web
         html=(web.STATIC/'index.html').read_text()
         js=(web.STATIC/'app.js').read_text()
-        self.assertIn('id="bootstrap-live-form"',html)
-        self.assertIn('name="artifact_version"',html)
-        self.assertIn('body.artifact_version',js)
+        self.assertNotIn('id="bootstrap-live-form"',html)
+        self.assertNotIn('body.artifact_version',js)
+        self.assertNotIn("$('bootstrap-live-form')",js)
         self.assertIn('id="gmx-build-live-form"',html)
         self.assertIn('upload/UKPBB-203745-V8',html)
         self.assertIn("'/api/live-tests/start'",js)
         self.assertIn('confirm_trigger:true',js)
         self.assertIn('/api/live-tests/status/',js)
-    def test_background_bootstrap_streams_and_finishes_without_build(self):
-        import time
-        from appbuilder import web,live_tests
-        with tempfile.TemporaryDirectory() as td,patch.object(web,'DATA',Path(td)),patch.object(live_tests,'bootstrap_test') as fn:
-            def fake(branch,emit,*,artifact_version):
-                self.assertEqual(artifact_version,VERSION)
-                emit('[CHECK] simulated bootstrap command')
-                return {'kind':'bootstrap','branch':branch,'verdict':'PASS'}
-            fn.side_effect=fake
-            response=web.start_live_test({'kind':'bootstrap','branch':BRANCH,'artifact_version':VERSION})
-            end=time.monotonic()+3
-            while time.monotonic()<end:
-                result=web.poll_live_test(response['id'])
-                if result['status']=='DONE':break
-                time.sleep(.01)
-            self.assertEqual(result['report']['verdict'],'PASS')
-            self.assertIn('[CHECK] simulated bootstrap command',result['logs'])
-            logs=list((Path(td)/'live-tests'/'logs').glob('*.log'))
-            self.assertEqual(len(logs),1)
-            self.assertIn('simulated bootstrap',logs[0].read_text())
-            fn.assert_called_once()
     def test_http_rejects_jenkins_trigger_without_confirmation(self):
         import json,http.client,threading
         from http.server import ThreadingHTTPServer

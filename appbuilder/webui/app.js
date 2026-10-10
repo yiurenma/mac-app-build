@@ -32,7 +32,7 @@ function renderSelection(){const row=state.tasks.find(t=>t.id===state.selected);
       const a=create('a','jenkins-link','↗ '+link.label);a.href=target.href;a.target='_blank';a.rel='noopener noreferrer';links.append(a);
     }catch(e){/* invalid stored URL is never rendered */}
   }
-  const phases=['PLUGIN_CHECKOUT','PLUGIN_EDIT','PLUGIN_PUSH','PLUGIN_JENKINS','GMX_CHECKOUT','GMX_EDIT','GMX_BOOTSTRAP','GMX_PUSH','GMX_JENKINS'];const idx=phases.indexOf(row.stage);
+  const phases=['PLUGIN_CHECKOUT','PLUGIN_EDIT','PLUGIN_PUSH','PLUGIN_JENKINS','GMX_CHECKOUT','GMX_EDIT','GMX_LOCK','GMX_PUSH','GMX_JENKINS'];const idx=phases.indexOf(row.stage);
   $('stage-strip').querySelectorAll('div').forEach((e,i)=>{e.className='';if(row.status==='SUCCESS'||(idx>=0&&i<idx))e.className='done';else if(i===idx)e.className='current';});
   $('resume-build').hidden=['SUCCESS','RUNNING','QUEUED'].includes(row.status);
 }
@@ -94,6 +94,7 @@ async function diagnoseJenkins(evt){
  const raw=form.elements.build_number.value.trim();
  const body={site:form.dataset.site,url:form.elements.url.value.trim(),build_number:raw?Number(raw):null,
    expected:form.elements.expected.value};
+ if(body.site==='plugin')body.expected_artifacts={version:form.elements.expected_version.value.trim(),journey_sha256:form.elements.journey_sha256.value.trim(),domainmodel_sha256:form.elements.domainmodel_sha256.value.trim()};
  const button=form.querySelector('button[type="submit"]');
  button.disabled=true;const label=button.textContent;button.textContent='正在启动可见 Chrome…';
  $('diagnose-verdict').textContent=`RUNNING · ${body.site.toUpperCase()} · 允许人工登录 SSO（最长 180 秒）`;
@@ -109,6 +110,7 @@ async function diagnoseJenkins(evt){
     if(progress.status==='DONE'){
       const r=progress.report||{},el=$('diagnose-verdict');
       el.textContent=`${r.verdict||'UNKNOWN'} · ${r.site?.toUpperCase()||body.site.toUpperCase()} Build #${r.build_number||'?'} · Expected ${r.expected||body.expected} · Actual ${r.actual||'UNKNOWN'}`;
+      if(r.artifact_result&&r.site==='plugin')el.textContent+=` · Nexus 版本/SHA ${r.artifact_result.status}`;
       el.className='diagnose-verdict '+String(r.verdict||'unknown').toLowerCase();
       break;
     }
@@ -121,7 +123,6 @@ async function launchGMXLiveTest(evt){
  evt.preventDefault();const form=evt.currentTarget,kind=form.dataset.kind;
  const result=$(kind+'-live-result'),out=$(kind+'-live-output');
  const f=form.elements;const body={kind,branch:f.branch.value.trim()};
- if(kind==='bootstrap')body.artifact_version=f.artifact_version.value.trim();
  if(kind==='gmx-build'){
    if(!f.confirm_trigger.checked){result.textContent='请先确认：这会真正触发 Jenkins Build';return;}
    if(!confirm('确认对分支 '+body.branch+' 真正执行 GMX Jenkins 构建？\n如果只想检查状态，请使用 Jenkins URL Test。'))return;
@@ -168,7 +169,6 @@ $('build-form').addEventListener('invalid',evt=>{
 $('build-form').addEventListener('submit',submitBuild);
 $('diagnose-form').addEventListener('submit',diagnoseJenkins);
 $('diagnose-gmx-form').addEventListener('submit',diagnoseJenkins);
-$('bootstrap-live-form').addEventListener('submit',launchGMXLiveTest);
 $('gmx-build-live-form').addEventListener('submit',launchGMXLiveTest);
 $('resume-build').addEventListener('click',resumeTask);
 $('refresh-tasks').addEventListener('click',loadTasks);

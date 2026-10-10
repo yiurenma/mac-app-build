@@ -81,14 +81,16 @@ class DiagnosticApi(unittest.TestCase):
             r=c.getresponse();return r.status,json.loads(r.read())
         finally:c.close()
     def test_plugin_and_gmx_live_traces(self):
-        def fake_diag(url,*,number=None,expected='SUCCESS',visible=False,config=None,emit=None):
+        def fake_diag(url,*,number=None,expected='SUCCESS',visible=False,config=None,emit=None,expected_artifacts=None):
             site='plugin' if 'release_1_3_' in url else 'gmx'
             emit('[BROWSER] visible Chrome started');emit('[AUTH] manual SSO permitted')
             emit('[RESULT] Build #2 SUCCESS')
             return {'verdict':'PASS','actual':'SUCCESS','expected':expected,'site':site,'build_number':2}
         with patch.object(diagnose,'run_diagnosis',side_effect=fake_diag) as runner,patch.object(web,'create_build') as create:
             for site,url in [('plugin',P),('gmx',G)]:
-                status,r=self.request('POST','/api/diagnose/start',{'url':url,'site':site,'build_number':2})
+                body={'url':url,'site':site,'build_number':2}
+                if site=='plugin':body['expected_artifacts']={'version':'1.3.0','journey_sha256':'a'*64,'domainmodel_sha256':'b'*64}
+                status,r=self.request('POST','/api/diagnose/start',body)
                 self.assertEqual(status,202,r)
                 for i in range(40):
                     status,s=self.request('GET','/api/diagnose/status/'+r['id'])
@@ -98,6 +100,7 @@ class DiagnosticApi(unittest.TestCase):
                 self.assertEqual(s['report']['verdict'],'PASS')
                 self.assertIn('manual SSO permitted','\n'.join(s['logs']))
             self.assertEqual(runner.call_count,2)
+            self.assertEqual(runner.call_args_list[0].kwargs['expected_artifacts'],{'version':'1.3.0','journey_sha256':'a'*64,'domainmodel_sha256':'b'*64})
             self.assertTrue(all(c.kwargs['visible'] for c in runner.call_args_list))
             create.assert_not_called()
 
