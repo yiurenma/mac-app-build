@@ -1,4 +1,4 @@
-# HSBC UK PBB — Mac APP Build Automation (v0.4.1)
+# HSBC UK PBB — Mac APP Build Automation (v0.4.2)
 
 在一台 Mac 上**并发运行多个独立**的 Plugin → GMX → Jenkins APP 打包任务。
 每个任务有单独的 Git 克隆、时间戳、Jenkins 编号、日志和恢复状态。**没有用 Jenkins REST API**；Jenkins 操作由 Playwright 打开浏览器页面模拟人操作。
@@ -207,3 +207,24 @@ mac-app-builder/
 ```
 
 `--live` 等于 `--watch --visible --verbose`：Mac 上打开真实 Chrome，终端同步报告每次 Git 命令和结果、Playwright 页面打开/定位/点击/填写、Jenkins 状态轮询，以及 `./bootstrap.sh` 输出。适合首次调试；若只看终端，加 `--watch --verbose` 而不加 `--visible`。操作流水按任务保存在 `.appbuilder/runs/TASK_ID/run.log`，依赖下载输出另外在 `bootstrap.log`。日志尽力隐藏常见凭据，但可能包含企业内部文件名、CI URL 等敏感信息，请勿外传。更多说明见 [实时监控与可见浏览器](docs/06-实时监控与可见浏览器.md)。
+
+
+## v0.4.2 — Plugin Trigger / Callback 监控修复
+
+**企业 Jenkins 现场发现的实际问题：** 新分支 Job 的第一次正式点击会生成 `#1 Manual Trigger → build will be created soon`；随后 Jenkins 自行生成 `#2 Manual Callback ← Source #1`。旧监控器只轮询 #1 的控制台 `Finished:` 标记及旧版状态图标，可能持续把已经成功的 #1 误判成“运行中”，完全忽略已经开始的 #2。
+
+已修复：
+
+- 同时支持旧版 Jenkins 状态图标与当前 Jenkins 新版构建标题中的状态 SVG。
+- 监控 Plugin Trigger 时，轮询 **同一 Job** 的关联 Callback；只有存在明确的 `Manual Callback ← Source #n` 才把监控转到 #n，**不会把任何新编号都当成关联构建**。
+- 日志会打印 `[CALLBACK] Plugin Trigger #1 → Callback #2`，之后追踪 #2 的执行结果和 Artifacts。#2 失败就终止，不会继续 GMX。
+- **恢复现有任务**：如果已经记录 `plugin_formal_number=1`，会重新检查与 #1 关联的 Callback，继续追踪 #2，**不会再次触发 Plugin Build**。
+- 在企业内网无法访问 Jenkins 的情况下只做了离线模拟；真实 Jenkins 页面 HTML/SSO 仍需要现场验证。
+
+如果任务还在旧 Worker 内运行，修改源码不会自动更换运行中的 Python 模块；先结束旧 Worker，确保没有其他同 Task Worker 活动，再运行：
+
+```bash
+./app-build resume TASK_ID --live
+```
+
+**不要重新执行 `run` 创建新分支，也不要对同一任务手工多次点击 Jenkins Build。** 如 #2 正在运行，恢复后应直接跟踪现有 #2，而不是重新触发 #1。

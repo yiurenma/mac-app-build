@@ -29,6 +29,27 @@ def final_result_from_console(text):
     return match[1].upper() if match else None
 
 
+def result_from_status_markup(markup):
+    """Recognize modern Jenkins build-header status icons, not arbitrary page text.
+
+    Input MUST be markup from a build-status element or the build heading's
+    status SVG. Never feed this function the entire job page: other historical
+    build cards and sidebar icons might contain SUCCESS or FAILURE.
+    """
+    value = str(markup).lower()
+    if re.search(r'icon-(?:running|progress|building|pending|queued|anime)\b|\b(?:building|running|progress)\b', value):
+        return None
+    for outcome, signature in (
+        ('FAILURE', r'icon-(?:failure|red)\b|build-status-(?:failure|red)\b|(?:title|aria-label|alt)=["\']failure["\']'),
+        ('ABORTED', r'icon-aborted\b|build-status-aborted\b|(?:title|aria-label|alt)=["\']aborted["\']'),
+        ('UNSTABLE', r'icon-unstable\b|build-status-unstable\b|(?:title|aria-label|alt)=["\']unstable["\']'),
+        ('SUCCESS', r'icon-(?:success|green|blue)\b|build-status-(?:success|green|blue)\b|(?:title|aria-label|alt)=["\']success["\']'),
+    ):
+        if re.search(signature, value):
+            return outcome
+    return None
+
+
 def browser_launch_options(config, *, headless: bool):
     """Use an IT-managed system browser or the Playwright-managed Chromium."""
     channel = config.get('jenkins', {}).get('browser_channel', 'chromium')
@@ -307,7 +328,7 @@ class JenkinsBrowser:
             time.sleep(self.poll)
         raise NeedsAttention(f'触发后没有发现 Build Number。可能仍在队列中，请人工确认: {job_url}')
 
-    def wait_result(self, job_url, number, minutes=None):
+    def wait_result(self, job_url, number, minutes=None, *, watch_callback=False):
         deadline = time.monotonic() + 60 * float(minutes or self.conf.get('build_timeout_minutes', 180))
         start = time.monotonic()
         action('JENKINS', f'{self.site} 正在监控 Build #{number}: {job_url}{number}/')
@@ -326,19 +347,36 @@ class JenkinsBrowser:
             code = self.visit(build_url)
             if code not in (200,):
                 raise NeedsAttention(f'Build #{number} 页面 HTTP {code}')
-            operation('PW', 'page.locator(#build-status-icon, .build-status-icon) 检查构建状态')
-            icon = self.page.locator('#build-status-icon, .build-status-icon')
-            if icon.count():
-                info = icon.first.evaluate('(el) => [el.className?.baseVal || el.className, el.getAttribute("title"), el.getAttribute("alt"), el.outerHTML.slice(0,400)].join(" ")').lower()
-                if any(x in info for x in ('-anime', 'building', 'progress', 'running')):
-                    pass
-                elif 'success' in info or 'icon-blue' in info or 'icon-green' in info:
-                    return 'SUCCESS', ''
-                if 'failure' in info or 'icon-red' in info:
-                    return 'FAILURE', ''
-                if 'aborted' in info or 'icon-aborted' in info:
-                    return 'ABORTED', ''
-            action('WAIT', f'{self.site} Build #{number} 执行中，已运行或等待 {int(time.monotonic()-start)}s')
+            # Jenkins 2.x modern UI uses SVG icons, while older instances use
+            # #build-status-icon / .build-status-icon. Only inspect this build's
+            # HEADER status controls; never interpret other jobs' green icons.
+            selector = ("#build-status-icon, .build-status-icon, "
+                        ".jenkins-build-status, .page-headline svg.svg-icon, "
+                        "#main-panel h1 svg.svg-icon, h1 svg.icon-success, "
+                        "h1 svg.icon-failure, h1 svg.icon-aborted, h1 svg.icon-unstable")
+            operation('PW', f'page.locator({selector!r}) 检查当前 Build 的新旧版状态图标')
+            icons = self.page.locator(selector)
+            for index in range(min(icons.count(), 6)):
+                info = icons.nth(index).evaluate(
+                    '(el) => [el.className?.baseVal || el.className, '
+                    'el.getAttribute("title"), el.getAttribute("aria-label"), '
+                    'el.getAttribute("alt"), el.outerHTML.slice(0,700)].join(" ")')
+                status = result_from_status_markup(info)
+                if status:
+                    action('JENKINS', f'{self.site} Build #{number} 页面图标确认终态: {status}')
+                    return status, ''
+            if watch_callback:
+                # Plugin release-build is a two-part Jenkins pipeline. The
+                # lightweight Manual Trigger (#1) launches a linked Manual
+                # Callback (#2). Some corporate console pages omit the final
+                # "Finished:" line, so don't keep polling #1 after the
+                # explicitly related callback is already visible.
+                child = self.find_callback(job_url, number)
+                if child is not None:
+                    action('CALLBACK', f'{self.site} Build #{number} 已创建关联 Callback #{child}；切换监控 #{child}')
+                    return 'DELEGATED', str(child)
+            action('WAIT', f'{self.site} Build #{number} 状态尚未确认，已等待 {int(time.monotonic()-start)}s'
+                           + ('（同时检查关联 Callback）' if watch_callback else ''))
             time.sleep(self.poll)
         raise TimeoutError(f'Jenkins Build #{number} 在 {minutes or self.conf.get("build_timeout_minutes")} 分钟内未结束: {build_url}')
 
@@ -464,9 +502,25 @@ def formal_build(browser: JenkinsBrowser, job_url, task_id, site, country='', pr
     result = rt.get(key + '_result')
     console = ''
     if not result:
-        result, console = browser.wait_result(job_url, num)
+        if site == 'plugin':
+            result, console = browser.wait_result(job_url, num, watch_callback=True)
+            if result == 'DELEGATED':
+                child = int(console)
+                if child <= num:
+                    raise NeedsAttention(f'Callback #{child} 不在 Plugin Trigger #{num} 之后')
+                patch_runtime(task_id, plugin_callback_number=child)
+                action('CALLBACK', f'Plugin Trigger #{num} → Callback #{child}；下一步监控 Callback')
+                console = ''
+        else:
+            result, console = browser.wait_result(job_url, num)
         patch_runtime(task_id, **{key + '_result': result})
-    if result != 'SUCCESS':
+    if result == 'DELEGATED' and site == 'plugin':
+        if not read_state(task_id)['runtime'].get('plugin_callback_number'):
+            child = browser.find_callback(job_url, num)
+            if child is None:
+                raise NeedsAttention(f'Plugin Trigger #{num} 记录了关联构建，但恢复时找不到对应 Callback')
+            patch_runtime(task_id, plugin_callback_number=child)
+    if result != 'SUCCESS' and not (site == 'plugin' and result == 'DELEGATED'):
         raise RuntimeError(f'{site} 正式构建 #{num} 失败: {result} ({job_url}{num}/)')
     return num, console
 
