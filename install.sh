@@ -74,4 +74,4 @@ case "$browser_channel" in
     exit 1
     ;;
 esac
-printf '\n安装完成。后续执行：\n  ./app-build doctor\n  ./app-build login --site plugin\n  ./app-build login --site gmx\n'
+printf '\n安装完成。下次可直接执行 ./app-build run ...，自动 doctor 和登录。\n'

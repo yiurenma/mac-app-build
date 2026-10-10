@@ -1,8 +1,39 @@
 #!/bin/sh
+# One-command bootstrap. Never upgrades pip; install.sh respects enterprise Nexus.
 set -eu
 HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 cd "$HERE"
-if [ -x ".venv/bin/python" ]; then
+COMMAND=${1:-}
+# Explicit opt-in: update this tool only if its tracked worktree is clean.
+if [ "$COMMAND" = run ] || [ "$COMMAND" = resume ]; then
+  DRY_RUN=0
+  for arg in "$@"; do
+    if [ "$arg" = --dry-run ]; then DRY_RUN=1; fi
+  done
+  if [ "$DRY_RUN" = 0 ]; then
+  for arg in "$@"; do
+    if [ "$arg" = --update ]; then
+      if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        echo '[UPDATE] 当前目录不是 Git 工作区；无法自动更新。' >&2; exit 1
+      fi
+      if [ -n "$(git status --porcelain)" ]; then
+        echo '[UPDATE] 工作区存在未提交更改，拒绝自动更新。' >&2; exit 1
+      fi
+      echo '[UPDATE] git pull --ff-only'
+      git pull --ff-only
+      break
+    fi
+  done
+  # Installer is run only if the isolated environment does not have deps.
+  if [ ! -x .venv/bin/python ] || ! .venv/bin/python -c 'import playwright, yaml' >/dev/null 2>&1; then
+    echo '[SETUP] 依赖缺失，自动执行 ./install.sh（使用现有公司 Nexus 配置）'
+    ./install.sh
+  else
+    echo '[SETUP] 项目依赖已安装，跳过 install.sh'
+  fi
+  fi
+fi
+if [ -x .venv/bin/python ]; then
   exec .venv/bin/python -m appbuilder "$@"
 fi
 exec python3 -m appbuilder "$@"

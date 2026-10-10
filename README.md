@@ -1,4 +1,4 @@
-# HSBC UK PBB — Mac APP Build Automation (v0.4.3)
+# HSBC UK PBB — Mac APP Build Automation (v0.5.0)
 
 在一台 Mac 上**并发运行多个独立**的 Plugin → GMX → Jenkins APP 打包任务。
 每个任务有单独的 Git 克隆、时间戳、Jenkins 编号、日志和恢复状态。**没有用 Jenkins REST API**；Jenkins 操作由 Playwright 打开浏览器页面模拟人操作。
@@ -41,8 +41,7 @@
 ```bash
 # 公司已配置好 pip/Nexus 时，不需要再设置 PIP_INDEX_URL
 python3 -m pip --version
-./install.sh
-./app-build doctor
+# 推荐直接运行 ./app-build run ...，它会在需要时自动 install + doctor
 ```
 
 `install.sh` **不会安装或升级 pip，也不会修改 pip.conf、`PIP_CERT` / `global.cert`**。它只读检查当前有效的 `index-url` 和 `extra-index-url`：两个地址都是 HTTPS 企业 Nexus 时可以同时使用，且保留现有 CA 证书与认证配置。公网 PyPI、HTTP 或陌生主机会触发安全停止，不自动回退公网。非 `.hsbc` 的批准企业域名可经公司 IT 确认后设置 `APP_BUILDER_ALLOWED_PIP_HOSTS`（填准确主机名）。
@@ -58,7 +57,7 @@ export PLAYWRIGHT_DOWNLOAD_HOST='https://你的内部Playwright浏览器镜像'
 
 也可以用 `PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST`。如果 Chromium 已由 IT 提供到 Playwright 的标准缓存，可通过 `APP_BUILDER_SKIP_BROWSER_INSTALL=1 ./install.sh` 跳过下载；运行前需实际检查浏览器版本和启动是否可用。
 
-> 公司 Chrome 可能受到企业策略限制，无法由 Playwright 控制，或 SSO 会话不允许持久化。首次使用 `./app-build login` 联调，不能仅凭安装成功认定 Jenkins 可以自动化。
+> 公司 Chrome 可能受到企业策略限制，无法由 Playwright 控制，或 SSO 会话不允许持久化。账号密码自动填入属于尽力兼容企业登录页面的能力，不保证适用所有 SSO/MFA。
 
 ## 2. 设置 GitHub Token（仅环境变量）
 
@@ -69,14 +68,44 @@ export GITHUB_TOKEN='你的企业GitHub PAT'
 
 如果没有 Token，工具会给出 GitHub 创建网址以及授权说明。建议通过 macOS Keychain 或公司密码管理器把 Token 加载为环境变量；**不要把 Token 写到 config.yaml、脚本、Git URL 或项目仓库里**。企业 GitHub PAT 可能需要管理员批准、SSO 授权、Contents read/write。工具在启动前检查变量存在，真正的仓库权限由后续 Git 操作验证。Mac 上 `export` 仅对当前 Shell 及其子进程生效。
 
-## 3. 首次登录 Jenkins
+## 3. 一条命令启动 / Jenkins 自动登录（v0.5）
+
+**首次运行**，可以直接在 `run` 后面提供 Jenkins 账号密码；工具自动写入当前 Mac 用户的 Keychain，**不会写入** `config.yaml`、任务 SQLite/JSON、日志或 Git：
 
 ```bash
-./app-build login --site plugin
-./app-build login --site gmx
+./app-build run --plugin-branch develop --plugin-version 1.3 \
+  --gmx-branch develop --country UK --project-name PayByBank \
+  --jenkins-user '你的公司账号' --jenkins-password '你的公司密码' --live
 ```
 
-会打开浏览器，请完成公司 SSO，然后**回到终端按 Enter**。保存的 cookies / storage_state 在 `.appbuilder/auth/`，权限 `0600`，**视为敏感文件**，不能上传、分享或提交到 Git。如失效需重新登录。部分 SSO 使用 sessionStorage、设备凭据等，Playwright 可能无法复用；这种情况联调时需改成公司允许的浏览器持久化认证方式。
+**以后运行**，完全不需要 `login` 或再次输入 Jenkins 账号密码：
+
+```bash
+./app-build run --plugin-branch develop --plugin-version 1.3 \
+  --gmx-branch develop --country UK --project-name PayByBank --live
+```
+
+`./app-build run` / `resume` 将按顺序自动处理：
+
+1. 检查 `.venv` 是否可用，缺失时自动执行 `./install.sh`（通过现有企业 Nexus；不更新 pip）。
+2. 自动 `doctor`：Python、Git、Playwright、Chrome、GitHub Token 和 Jenkins 认证状态。
+3. 复用两个 Jenkins 的浏览器登录缓存；登录过期时从 Mac Keychain 读取账号密码，尝试重新登录并刷新缓存。
+4. 进入 Git / Plugin / GMX / Jenkins 的正式构建流程；`--live` 可见浏览器、实时状态和操作轨迹。
+
+**可选**：传入 `--update` 先执行安全的 `git pull --ff-only`；如果工作树不干净会停止，不覆盖本地文件。它只更新本工具代码，不更改 Plugin 或 GMX 的源分支。
+
+```bash
+./app-build run --update --plugin-branch develop --plugin-version 1.3 \
+  --gmx-branch develop --country UK --project-name PayByBank --live
+```
+
+如果希望**只保存凭据但不开始打包**，也可以使用：
+
+```bash
+./app-build auth --jenkins-user '你的公司账号' --jenkins-password '你的公司密码'
+```
+
+安全提醒：命令行输入的密码会出现在 Shell 历史及短暂的进程参数中；不会进入工具日志和 Git。如果公司 SSO 要求 MFA、验证码、设备认证，账号密码**不能跳过该验证**，有时仍需在可见 Chrome 中完成一次确认。对于未识别的外部 SSO 登录域名，程序不会填入密码；请先经 IT 确认后将域名加入 `jenkins.auth_allowed_hosts`。原有 `./app-build login --site plugin/gmx` 仍作为手动应急功能保留，但不再是每次运行的前置步骤。
 
 ## 4. 运行多个独立 APP
 

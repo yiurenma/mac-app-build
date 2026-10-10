@@ -64,7 +64,7 @@ class FullTraceTests(unittest.TestCase):
                 return SimpleNamespace(count=lambda: 0)
             def title(self):
                 return 'Jenkins'
-        fake = SimpleNamespace(site='plugin', page=Page())
+        fake = SimpleNamespace(site='plugin', page=Page(), _login_if_needed=lambda _: False)
         out = io.StringIO()
         set_verbose(True)
         try:

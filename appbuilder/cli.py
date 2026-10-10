@@ -11,7 +11,8 @@ from pathlib import Path
 from .config import DATA, ROOT, load_config
 from .versions import validate_args, branch_names, job_urls, folder
 from .store import create_task, task, task_list, update_task, update_task_params, task_folder, active_count
-from .jenkins import interactive_login
+from .jenkins import interactive_login, saved_auth_path
+from .auth import store_credentials, read_credentials, CredentialError
 
 
 def args_parser():
@@ -21,6 +22,9 @@ def args_parser():
     for name in ('plugin-branch', 'gmx-branch', 'plugin-version', 'project-name'):
         run.add_argument('--' + name, required=True)
     run.add_argument('--plugin-url', help='覆盖 Plugin GitHub URL')
+    run.add_argument('--update', action='store_true', help='启动前安全执行 git pull --ff-only（由 ./app-build 处理）')
+    run.add_argument('--jenkins-user', help='首次填写 Jenkins 用户名并保存到 Mac Keychain')
+    run.add_argument('--jenkins-password', help='首次填写 Jenkins 密码并保存到 Mac Keychain（命令历史可能可见）')
     run.add_argument('--gmx-url', help='覆盖 GMX GitHub URL')
     run.add_argument('--country', default='UK')
     run.add_argument('--dry-run', action='store_true', help='仅预览，不克隆/修改/提交/触发 Jenkins')
@@ -32,6 +36,9 @@ def args_parser():
     resume = sub.add_parser('resume', help='恢复上次未完成任务')
     resume.add_argument('task_id')
     resume.add_argument('--wait', action='store_true')
+    resume.add_argument('--update', action='store_true')
+    resume.add_argument('--jenkins-user')
+    resume.add_argument('--jenkins-password')
     resume.add_argument('--watch', action='store_true', help='恢复任务后实时监控')
     resume.add_argument('--live', action='store_true', help='恢复时启用完整现场模式')
     resume.add_argument('--visible', action='store_true', help='恢复后显示真实浏览器')
@@ -48,6 +55,9 @@ def args_parser():
     login = sub.add_parser('login', help='手动登录 Jenkins，保存本地认证状态')
     login.add_argument('--site', choices=['plugin', 'gmx'], required=True)
     sub.add_parser('doctor', help='检查本机 Python/Git/Playwright/Token')
+    auth = sub.add_parser('auth', help='仅首次保存 Jenkins 账号密码到 Mac Keychain')
+    auth.add_argument('--jenkins-user', required=True)
+    auth.add_argument('--jenkins-password', required=True)
     return p
 
 
@@ -141,22 +151,64 @@ def alive(pid):
         return True
 
 
+
+def doctor_check(config, *, strict=False):
+    """Preflight performed on every real run/resume; no network side-effects."""
+    issues = []
+    if sys.version_info < (3, 11):
+        issues.append('Python 版本必须 >= 3.11')
+    if not shutil.which('git'):
+        issues.append('未安装 Git')
+    try:
+        import playwright.sync_api
+        import yaml
+    except ImportError:
+        issues.append('缺少 Playwright / PyYAML（请运行 ./install.sh）')
+    browser = config.get('jenkins', {}).get('browser_channel', 'chromium')
+    if browser not in ('chromium', 'chrome', 'msedge'):
+        issues.append('配置的 Jenkins 浏览器通道不合法')
+    if sys.platform == 'darwin' and browser == 'chrome':
+        chrome_locations = [Path('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'),
+                            Path.home() / 'Applications/Google Chrome.app/Contents/MacOS/Google Chrome']
+        if not any(v.exists() for v in chrome_locations):
+            issues.append('找不到 Google Chrome，请安装公司管理的 Chrome 或选择其他 browser_channel')
+    token_name = config.get('github', {}).get('token_env', 'GITHUB_TOKEN')
+    if not os.environ.get(token_name):
+        issues.append(f'{token_name} 尚未设置')
+    auth_cached = all(saved_auth_path(DATA, site).exists() for site in ('plugin', 'gmx'))
+    keychain = read_credentials() is not None
+    if not auth_cached and not keychain:
+        issues.append('Jenkins 认证未配置：首次请指定 --jenkins-user 和 --jenkins-password')
+    print(f'[DOCTOR] Python={sys.version.split()[0]} | Git={bool(shutil.which("git"))} | '
+          f'Playwright={"缺失" if "缺少 Playwright / PyYAML（请运行 ./install.sh）" in issues else "已安装"} | '
+          f'Jenkins 认证={"已保存" if auth_cached or keychain else "未配置"}', flush=True)
+    for issue in issues:
+        print('[DOCTOR] ' + issue, flush=True)
+    if strict and issues:
+        raise RuntimeError('启动前环境检查未通过；请先处理上面提示的问题')
+    return not issues
+
+
+def setup_credentials(args):
+    user = getattr(args, 'jenkins_user', None)
+    password = getattr(args, 'jenkins_password', None)
+    if bool(user) != bool(password):
+        raise CredentialError('请同时填写 --jenkins-user 与 --jenkins-password')
+    if user and password:
+        store_credentials(user, password)
+        print('[AUTH] Jenkins 凭据已保存到 macOS Keychain（后续运行无需重复输入）', flush=True)
+
+
 def main(argv=None):
     p = args_parser()
     a = p.parse_args(argv)
     if a.command in ('run', 'resume') and a.live:
         a.watch = a.visible = a.verbose = True
     if a.command == 'doctor':
-        c = load_config()
-        print('Python:', sys.version.split()[0], '| macOS:', sys.platform == 'darwin')
-        print('git:', shutil.which('git') or '未安装')
-        print('caffeinate:', shutil.which('caffeinate') or '未找到 (macOS 运行时推荐)')
-        print(c['github'].get('token_env', 'GITHUB_TOKEN') + ':', '已设置' if os.environ.get(c['github'].get('token_env', 'GITHUB_TOKEN')) else '未设置')
-        try:
-            import playwright
-            print('playwright: 已安装；浏览器通道:', c.get('jenkins', {}).get('browser_channel', 'chromium'))
-        except ImportError:
-            print('playwright: 未安装')
+        doctor_check(load_config())
+        return
+    if a.command == 'auth':
+        setup_credentials(a)
         return
     if a.command == 'login':
         interactive_login(load_config(), DATA, a.site)
@@ -174,6 +226,8 @@ def main(argv=None):
             return
         if a.wait and a.watch:
             p.error('--wait 和 --watch 不能同时使用')
+        setup_credentials(a)
+        doctor_check(c, strict=True)
         if active_count() >= int(c.get('build', {}).get('max_parallel', 2)):
             p.error('并发任务已达上限，请先等待任务结束或调整 config.yaml')
         # Refuse to queue tasks that cannot read an environment token.
@@ -195,6 +249,8 @@ def main(argv=None):
     if a.command == 'resume':
         if a.wait and a.watch:
             p.error('--wait 和 --watch 不能同时使用')
+        setup_credentials(a)
+        doctor_check(load_config(), strict=True)
         r = task(a.task_id)
         if r['status'] in ('RUNNING', 'QUEUED') and alive(r['pid']):
             p.error('任务进程仍在运行，不能重复恢复')

@@ -7,9 +7,11 @@ from __future__ import annotations
 import os
 import re
 import time
+import tempfile
 from pathlib import Path
 from urllib.parse import urlsplit, unquote
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
+from .auth import read_credentials, approved_login_host, submit_recognized_login
 from .versions import parse_artifacts, folder
 from .store import patch_runtime, read_state
 from .telemetry import action, debug, operation
@@ -93,8 +95,11 @@ class JenkinsBrowser:
         self.screens = task_dir / 'screenshots'
         self.screens.mkdir(parents=True, exist_ok=True)
         auth = saved_auth_path(data_dir, site)
-        if not auth.exists():
-            raise NeedsAttention(f'未发现 {site} Jenkins 登录态，请先运行: ./app-build login --site {site}')
+        self.auth_path = auth
+        self.credentials = read_credentials()
+        if not auth.exists() and not self.credentials:
+            raise NeedsAttention('尚未配置 Jenkins 登录，请在首次 run 中提供 '
+                                 '--jenkins-user 和 --jenkins-password')
         self.playwright = sync_playwright().start()
         launch_opts = browser_launch_options(config, headless=not self.visible)
         if self.visible:
@@ -102,8 +107,9 @@ class JenkinsBrowser:
         operation('PW', f'chromium.launch(channel={launch_opts.get("channel", "chromium")}, headless={launch_opts["headless"]}, slow_mo={launch_opts.get("slow_mo", 0)})')
         self.browser = self.playwright.chromium.launch(**launch_opts)
         action('BROWSER', f'{site} Chrome 已启动（{"可见窗口" if self.visible else "后台模式"}）')
-        operation('PW', f'browser.new_context(storage_state=<本地认证文件>, accept_downloads=False)')
-        self.context = self.browser.new_context(storage_state=str(auth), accept_downloads=False)
+        operation('PW', f'browser.new_context(storage_state={"本地登录缓存" if auth.exists() else "新会话"}, accept_downloads=False)')
+        self.context = (self.browser.new_context(storage_state=str(auth), accept_downloads=False)
+                        if auth.exists() else self.browser.new_context(accept_downloads=False))
         operation('PW', 'context.new_page()')
         self.page = self.context.new_page()
         self.page.set_default_timeout(12000)
@@ -130,6 +136,62 @@ class JenkinsBrowser:
                 pass
         self.close()
 
+    def _cache_login(self):
+        """Atomic write; independent workers must never see a partial JSON."""
+        path = self.auth_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd, temp = tempfile.mkstemp(prefix='.jenkins-', suffix='.json', dir=path.parent)
+        os.close(fd)
+        try:
+            self.context.storage_state(path=temp)
+            os.chmod(temp, 0o600)
+            os.replace(temp, path)
+            action('AUTH', f'{self.site} 登录会话已更新，后续可直接复用')
+        finally:
+            if os.path.exists(temp):
+                os.unlink(temp)
+
+    def _login_if_needed(self, expected_url):
+        host = urlsplit(expected_url).hostname
+        redirected = urlsplit(self.page.url).hostname != host
+        password_page = self.page.locator('input[type="password"]').count() > 0
+        login_input = (self.page.locator('input[name="j_username"]').count() > 0
+                       or self.page.locator('input[name="loginfmt"]').count() > 0)
+        if not (redirected or password_page or login_input):
+            return False
+        if not self.credentials:
+            raise NeedsAttention(f'{self.site} 会话已过期且未配置 Keychain 认证；'
+                                 '请用 --jenkins-user / --jenkins-password 初始化')
+        extra = self.conf.get('auth_allowed_hosts', ['*.hsbc'])
+        if not approved_login_host(self.page.url, expected_url, extra):
+            raise NeedsAttention(f'{self.site} 登录跳转到未获批准域名：'
+                                 f'{urlsplit(self.page.url).hostname}。'
+                                 '请先核实域名，再加入 config.yaml 的 jenkins.auth_allowed_hosts')
+        username, password = self.credentials
+        action('AUTH', f'{self.site} 检测到登录页面，尝试自动填写账号密码')
+        if not submit_recognized_login(self.page, username, password,
+                                       log=lambda m: operation('PW', m)):
+            raise NeedsAttention(f'{self.site} 登录页控件无法安全识别；'
+                                 '请检查公司 SSO 页面或改用 --live 人工处理')
+        try:
+            self.page.wait_for_url(lambda u: urlsplit(str(u)).hostname == host,
+                                   timeout=25000)
+        except PlaywrightTimeout:
+            if not self.visible:
+                raise NeedsAttention(f'{self.site} SSO 登录后未返回 Jenkins，'
+                                     '可能需要 MFA；请用 --live 运行以查看认证过程')
+            action('AUTH', f'{self.site} 等待 SSO/MFA 完成，最多 90 秒')
+            try:
+                self.page.wait_for_url(lambda u: urlsplit(str(u)).hostname == host,
+                                       timeout=90000)
+            except PlaywrightTimeout as e:
+                raise NeedsAttention(f'{self.site} SSO/MFA 未完成，需要人工检查') from e
+        # Verify no password form remained; only then save state.
+        if self.page.locator('input[type="password"]').count():
+            raise NeedsAttention(f'{self.site} 仍停留在认证页面，可能是密码错误或额外验证')
+        self._cache_login()
+        return True
+
     def visit(self, url, timeout=60000):
         operation('PW', f'page.goto(url={url}, wait_until=domcontentloaded, timeout={timeout})')
         started = time.monotonic()
@@ -138,13 +200,15 @@ class JenkinsBrowser:
             response = self.page.goto(url, wait_until='domcontentloaded', timeout=timeout)
         except PlaywrightTimeout as e:
             raise NeedsAttention(f'Jenkins 页面访问超时: {url}') from e
-        # Authentication redirects often move away from Jenkins host.
-        expected_host = urlsplit(url).hostname
-        actual_host = urlsplit(self.page.url).hostname
-        if actual_host != expected_host:
-            raise NeedsAttention(f'{self.site} 登录可能过期或跳转到 SSO，请重新运行 login --site {self.site}')
-        if self.page.locator('input[type="password"]').count():
-            raise NeedsAttention(f'{self.site} 登录已过期，请重新运行 login --site {self.site}')
+        # Reuse saved SSO state first; log in again only when it expired.
+        authenticated = self._login_if_needed(url)
+        if authenticated:
+            operation('PW', f'page.goto({url}) 登录后重新加载目标 Job')
+            response = self.page.goto(url, wait_until='domcontentloaded', timeout=timeout)
+            # Do not keep retrying invalid credentials.
+            if urlsplit(self.page.url).hostname != urlsplit(url).hostname or \
+                    self.page.locator('input[type="password"]').count():
+                raise NeedsAttention(f'{self.site} 认证后仍未返回 Jenkins Job 页面')
         code = response.status if response else None
         operation('PW', f'page.goto completed: HTTP={code}, elapsed={time.monotonic()-started:.1f}s, title={self.page.title()}')
         debug(f'[BROWSER/{self.site}] HTTP {code} page={self.page.title()}')
