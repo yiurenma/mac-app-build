@@ -58,6 +58,29 @@ def result_from_status_markup(markup):
     return None
 
 
+def status_from_icon_colors(colors):
+    """Conservative CSS-color fallback for a small status icon in the exact build row.
+
+    The caller MUST verify the specific build link, icon visibility, and size;
+    never classify generic green text/charts or another build's icon.
+    """
+    seen = set()
+    for color in colors:
+        match = re.fullmatch(r'rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})(?:\s*,\s*([\d.]+))?\s*\)', str(color).lower())
+        if not match:
+            continue
+        r, g, b = map(int, match.group(1,2,3))
+        alpha = float(match[4]) if match[4] is not None else 1.0
+        if alpha < 0.5:
+            continue
+        # Jenkins theme greens & reds; do not infer blue/yellow/gray.
+        if g >= 92 and g >= r * 1.45 and g >= b * 1.2 and r <= 145:
+            seen.add('SUCCESS')
+        elif r >= 145 and r >= g * 1.5 and r >= b * 1.3:
+            seen.add('FAILURE')
+    return next(iter(seen)) if len(seen) == 1 else None
+
+
 def browser_launch_options(config, *, headless: bool):
     """Use an IT-managed system browser or the Playwright-managed Chromium."""
     channel = config.get('jenkins', {}).get('browser_channel', 'chromium')
@@ -499,62 +522,104 @@ class JenkinsBrowser:
         return None
 
     def _history_result(self, job_url, number):
-        """Read the status icon attached to precisely Build #number in Build History.
+        """Identify only the status icon adjacent to the *exact* numbered build.
 
-        Called ONLY while viewing this job's main page. The page may show many
-        green ticks for earlier runs: never inspect a whole sidebar or accept
-        another build's icon.
+        Recent Jenkins themes use a "Builds" sidebar instead of #buildHistory;
+        discover target build links by URL, not by a fixed sidebar selector.
+        Store concise, credential-free DOM evidence for diagnostics.
         """
         if not hasattr(self.page, 'evaluate'):
             return None
-        operation('PW', f'page.evaluate(Build History #{number} exact-link status icon)')
+        operation('PW', f'page.evaluate(精确 Build #{number} 链接及其邻近图标)')
         try:
-            markup = self.page.evaluate(r"""({jobUrl, number}) => {
+            evidence = self.page.evaluate(r"""({jobUrl, number}) => {
               const base = new URL(jobUrl);
-              const target = base.pathname.replace(/\/+$/, '') + '/' + number + '/';
-              const links = document.querySelectorAll(`
-                #buildHistory a[href], [id*="buildHistory"] a[href],
-                .build-history a[href], [class*="build-history"] a[href],
-                .jenkins-builds-list a[href], [class*="builds-list"] a[href],
-                [data-build-number] a[href], .build-row a[href]`);
-              for (const link of links) {
-                let url;
-                try { url = new URL(link.href, document.location.href); }
-                catch { continue; }
-                if (url.host !== base.host || url.pathname.replace(/\/+$/, '') + '/' !== target) continue;
-                const row = link.closest(`
-                  [data-build-number], .build-row, .build-history-entry,
-                  .jenkins-builds-list__item, .jenkins-build-history__item, li, tr`);
-                if (!row) continue;
-                const rowNumber = row.getAttribute('data-build-number');
-                if (rowNumber && rowNumber !== String(number)) continue;
-                // Prevent accidentally using an ancestor with icons from many builds.
-                const other = Array.from(row.querySelectorAll('a[href]')).some(a => {
-                  try {
-                    const u = new URL(a.href, document.location.href);
-                    const m = u.pathname.match(/\/(\d+)\/$/);
-                    return u.host === base.host && m && Number(m[1]) !== Number(number)
-                      && u.pathname.startsWith(base.pathname);
-                  } catch { return false; }
-                });
-                if (other) continue;
-                const icons = row.querySelectorAll(`
-                  .build-status-icon, [class*="build-status"], [class*="status-icon"],
-                  svg[title], svg[aria-label], img[alt], svg use, svg, img`);
-                // Read status icon markup only; never infer success from a green
-                // progress bar, navigation label or unrelated build's status.
-                const matches = Array.from(icons).map(el => el.outerHTML).slice(0, 12);
-                return matches.join(' ');
+              const jobPath = base.pathname.replace(/\/+$/, '') + '/';
+              const buildPath = jobPath + number + '/';
+              const allLinks = Array.from(document.querySelectorAll('a[href]'));
+              const buildNumber = link => {
+                try {
+                  const url = new URL(link.href, document.location.href);
+                  if (url.origin !== base.origin) return null;
+                  const normalized = url.pathname.replace(/\/+$/, '') + '/';
+                  if (!normalized.startsWith(jobPath)) return null;
+                  const suffix = normalized.slice(jobPath.length);
+                  return /^\d+\/$/.test(suffix) ? Number(suffix.slice(0, -1)) : null;
+                } catch { return null; }
+              };
+              const matches = allLinks.filter(a => buildNumber(a) === Number(number));
+              const records = [];
+              for (const link of matches.slice(0, 8)) {
+                let node = link;
+                for (let depth = 0; depth < 8 && node && node !== document.body; depth++, node = node.parentElement) {
+                  // NEVER climb into a container containing other build numbers.
+                  const numbers = Array.from(node.querySelectorAll('a[href]')).map(buildNumber).filter(v => v !== null);
+                  if (numbers.some(v => v !== Number(number))) break;
+                  const icons = Array.from(node.querySelectorAll('svg, img, [role="img"]'));
+                  if (node.matches?.('svg, img, [role="img"]')) icons.unshift(node);
+                  if (!icons.length) continue;
+                  const details = icons.slice(0, 12).map(icon => {
+                    const rect = icon.getBoundingClientRect();
+                    const parts = [icon, ...Array.from(icon.querySelectorAll('use, path, circle, polyline')).slice(0, 8)];
+                    const colors = [];
+                    for (const part of parts) {
+                      const css = getComputedStyle(part);
+                      for (const key of ['color','fill','stroke']) {
+                        const val = css[key];
+                        if (val && !colors.includes(val)) colors.push(val);
+                      }
+                    }
+                    const style = getComputedStyle(icon);
+                    const meaningful = icon.tagName.toLowerCase() === 'svg' || icon.tagName.toLowerCase() === 'img';
+                    return {
+                      markup: icon.outerHTML.slice(0, 2200),
+                      tag: icon.tagName.toLowerCase(),
+                      colors: colors.slice(0, 12),
+                      visible: style.display !== 'none' && style.visibility !== 'hidden' &&
+                        rect.width > 0 && rect.height > 0,
+                      width: Math.round(rect.width), height: Math.round(rect.height),
+                      visualIcon: meaningful && rect.width <= 80 && rect.height <= 80
+                    };
+                  });
+                  records.push({depth, container: node.tagName.toLowerCase(), icons: details});
+                  break; // the closest candidate containing an icon is the safest
+                }
               }
-              return null;
+              return {targetLinks: matches.length, candidates: records,
+                      pageBuildLinks: allLinks.filter(a => buildNumber(a) !== null).length};
             }""", {'jobUrl': job_url, 'number': number})
         except PlaywrightError as exc:
+            setattr(self, 'last_history_probe', {'error': type(exc).__name__})
             debug(f'{self.site} Build #{number} Build History DOM 无法读取: {type(exc).__name__}')
             return None
-        result = result_from_status_markup(markup) if markup else None
-        if result:
-            action('JENKINS', f'{self.site} Build History #{number} 专属图标确认终态: {result}')
-        return result
+        # Stubs used by older tests may return a markup string rather than a structured probe.
+        if isinstance(evidence, str):
+            return result_from_status_markup(evidence)
+        if not isinstance(evidence, dict):
+            return None
+        setattr(self, 'last_history_probe', evidence)
+        results = set()
+        source = []
+        for row in evidence.get('candidates', []):
+            for icon in row.get('icons', []):
+                outcome = result_from_status_markup(icon.get('markup', ''))
+                how = 'semantic'
+                if not outcome and icon.get('visualIcon') and icon.get('visible'):
+                    # Only small, visible icon graphics in the row of precisely
+                    # this Build. A green stage bar or old build icon is excluded.
+                    outcome = status_from_icon_colors(icon.get('colors', []))
+                    how = 'icon-color'
+                if outcome:
+                    results.add(outcome)
+                    source.append(f'{how}:{outcome}')
+        evidence['recognized'] = source[:8]
+        if len(results) == 1:
+            status = next(iter(results))
+            action('JENKINS', f'{self.site} Build History #{number} 专属图标确认终态: {status}')
+            return status
+        if len(results) > 1:
+            action('WAIT', f'{self.site} Build History #{number} 多个图标状态冲突: {sorted(results)}')
+        return None
 
     def _fast_console_result(self, build_url, number):
         """Read raw consoleText HTTP response through this browser's cookie context.

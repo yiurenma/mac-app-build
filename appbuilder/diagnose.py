@@ -116,6 +116,19 @@ def run_diagnosis(url: str, *, number: int | None = None, expected='SUCCESS', vi
             log('[STEP 2/4] 读取 Build History 对应编号状态图标')
             history = browser._history_result(target.job_url, n)
             log(f'[RESULT] Build History #{n}: {history or "UNKNOWN（页面无可识别专属图标）"}')
+            probe = getattr(browser, 'last_history_probe', None)
+            if isinstance(probe, dict):
+                matches = probe.get('targetLinks', 0)
+                rows = probe.get('candidates', [])
+                log(f'[DOM] 精确 Build #{n} 链接={matches}; 候选记录={len(rows)}; 当前页面构建链接={probe.get("pageBuildLinks", "?")}')
+                for row in rows[:3]:
+                    for icon in row.get('icons', [])[:4]:
+                        log(f'[ICON] {icon.get("tag", "?")} {icon.get("width", "?")}x{icon.get("height", "?")} '
+                            f'visible={icon.get("visible")} colors={icon.get("colors", [])[:5]}')
+                if probe.get('error'):
+                    log(f'[DOM-ERROR] {probe["error"]}')
+                if not rows:
+                    log('[HINT] 未定位到构建编号旁的状态图标；可能 Jenkins 使用未覆盖的 DOM 布局')
             log('[STEP 3/4] 读取当前 Build 详情页标题状态（只读）')
             build_url = target.job_url + str(n) + '/'
             build_http = browser.visit(build_url, timeout=20000)
@@ -139,7 +152,10 @@ def run_diagnosis(url: str, *, number: int | None = None, expected='SUCCESS', vi
                             and urlsplit(response.url).path == urlsplit(build_url).path + 'consoleText'):
                         body = response.text()[-4096:]
                         console = final_result_from_console(body)
-                        log(f'[HTTP] consoleText={console_code}; tail bytes checked={len(body.encode("utf-8"))}')
+                        content_type = getattr(response, 'headers', {}).get('content-type', 'unknown')
+                        log(f'[HTTP] consoleText={console_code}; type={content_type}; tail bytes checked={len(body.encode("utf-8"))}')
+                        if 'html' in content_type.lower():
+                            log('[HINT] consoleText 返回 HTML 而不是普通构建日志；HTTP 200 不代表已获取完整 Console')
                         log(f'[RESULT] Console Finished marker: {console or "NOT FOUND"}')
                     else:
                         log(f'[HTTP] consoleText={console_code}; redirect={urlsplit(response.url).hostname != urlsplit(build_url).hostname}')
@@ -148,6 +164,13 @@ def run_diagnosis(url: str, *, number: int | None = None, expected='SUCCESS', vi
                 actual = console or 'UNKNOWN'
             else:
                 log('[STEP 4/4] 已通过 #'+str(n)+' 的状态图标识别终态，跳过长 Console 日志下载')
+            if actual == 'UNKNOWN':
+                try:
+                    screenshot = folder / f'{target.site}-build-{n}-unknown.png'
+                    browser.page.screenshot(path=str(screenshot), full_page=False)
+                    log(f'[SNAPSHOT] 已保存现场页面截图: {screenshot}')
+                except Exception:
+                    pass
             verdict, next_action = expectation(actual, expected, target.site)
             log(f'[VERDICT] {verdict} · expected={expected} · actual={actual}')
             log(f'[NEXT] {next_action}')

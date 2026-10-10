@@ -1,5 +1,9 @@
-# HSBC UK PBB — Mac APP Build Automation (v0.6.0)
+# HSBC UK PBB — Mac APP Build Automation (v0.6.7)
 
+
+## v0.6.7 — Plugin / GMX URL 状态测试增强
+
+针对现场 `Build History IDs=[1,2]`，但绿色完成图标无法识别的情况：现在先精确查找指定编号的构建链接，再在相邻记录读取图标语义、SVG 与有限的可见图标 CSS 颜色；若仍不确定会打印 `[DOM]` 和 `[ICON]` 证据、检查 `consoleText` 类型并保留失败现场截图。**无需重新运行 Jenkins Build**。详见 [Jenkins 构建状态现场诊断改进](docs/15-v0.6.7-Jenkins构建状态现场诊断改进.md)。
 
 ## 首选：Web Console（v0.6）
 
