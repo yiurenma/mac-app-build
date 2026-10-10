@@ -10,6 +10,8 @@ jenkins:
   plugin_parent: "https://mobile-premier01-jenkins.build-mobile.iwpb.euw2.prod.aws.cloud.hsbc/job/IWPB_Transaction_Banking/job/Domestic_Payment_and_Transfer_Mobile_Global_12824743/job/Lib/job/mobile_paybybank-ios-plugin/job/release-build/job/"
   gmx_parent: "https://mobile-platform-jenkins.build-mobile.iwpb.euw2.prod.aws.cloud.hsbc/job/mobilex-global-uploads/job/global-ios-upload/job/"
   discover_timeout_minutes: 30
+  # 等待新分支 Jenkins Job 时每 10 秒重试（404 在 Job 创建前通常正常）。
+  discover_poll_seconds: 10
   build_timeout_minutes: 180
   callback_timeout_minutes: 30
   poll_seconds: 45

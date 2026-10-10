@@ -108,6 +108,9 @@ class JenkinsBrowser:
         self.page = self.context.new_page()
         self.page.set_default_timeout(12000)
         self.poll = max(10, int(self.conf.get('poll_seconds', 45)))
+        # Branch jobs are created asynchronously after a Git push. Keep this
+        # discovery cadence independent from long-running Build monitoring.
+        self.discover_poll = max(1, int(self.conf.get('discover_poll_seconds', 10)))
 
     def close(self):
         operation('PW', 'context.close(); browser.close(); playwright.stop()')
@@ -151,17 +154,31 @@ class JenkinsBrowser:
         timeout = 60 * float(self.conf.get('discover_timeout_minutes', 30))
         deadline = time.monotonic() + timeout
         start = time.monotonic()
-        action('JENKINS', f'{self.site} 等待 Job 创建: {job_url}')
+        action('JENKINS', f'{self.site} 等待 Job 创建: {job_url}（每 {self.discover_poll}s 检查一次）')
+        last_http = None
+        attempts = 0
         while time.monotonic() < deadline:
             http = self.visit(job_url)
+            last_http = http
+            attempts += 1
             if http == 200 and '404 Not Found' not in self.page.title():
-                print(f'[Jenkins/{self.site}] Job 已发现: {job_url}', flush=True)
+                print(f'[Jenkins/{self.site}] Job 已发现: {job_url}（检查 {attempts} 次）', flush=True)
                 return
             if http in (401, 403):
                 raise NeedsAttention(f'无权查看 Jenkins Job (HTTP {http}): {job_url}')
-            action('WAIT', f'{self.site} Job 暂未就绪：HTTP {http}，已等待 {int(time.monotonic()-start)}s，{self.poll}s 后重试')
-            time.sleep(self.poll)
-        raise TimeoutError(f'Jenkins Job 等待超时: {job_url}')
+            # A 404 is expected while branch indexing has not created the job.
+            # Retry only until the configured discovery timeout and never click
+            # Build while Jenkins reports Not Found.
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            delay = min(self.discover_poll, remaining)
+            action('WAIT', f'{self.site} Job 暂未就绪：HTTP {http}，累计等待 {int(time.monotonic()-start)}s，{delay:g}s 后重试（第 {attempts} 次检查）')
+            time.sleep(delay)
+        raise TimeoutError(
+            f'{self.site} Jenkins Job 等待超时（最后 HTTP={last_http}，检查 {attempts} 次）。'
+            f'请确认 Jenkins 已扫描新分支、Job URL 正确且有访问权限: {job_url}'
+        )
 
     def mode(self, job_url):
         self.visit(job_url)

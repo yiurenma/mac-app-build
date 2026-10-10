@@ -1,4 +1,4 @@
-# HSBC UK PBB — Mac APP Build Automation (v0.4.2)
+# HSBC UK PBB — Mac APP Build Automation (v0.4.3)
 
 在一台 Mac 上**并发运行多个独立**的 Plugin → GMX → Jenkins APP 打包任务。
 每个任务有单独的 Git 克隆、时间戳、Jenkins 编号、日志和恢复状态。**没有用 Jenkins REST API**；Jenkins 操作由 Playwright 打开浏览器页面模拟人操作。
@@ -10,7 +10,7 @@
 
 - [完整需求与验收标准](docs/01-需求规格与验收.md)
 - [代码架构与逐项映射](docs/02-设计与代码对照.md)
-- [三轮审查及 3 × 30 项自测报告](docs/03-三轮代码审查与自测报告.md)
+- [三轮审查与持续离线回归](docs/03-三轮代码审查与自测报告.md)
 - [macOS 与企业 Nexus 安装手册](docs/04-Mac与Nexus操作手册.md)
 - [内网 Jenkins/SSO 联调清单](docs/05-企业内网联调清单.md)
 - 流程图：[完整流程](diagrams/01-完整流程.svg) / [Jenkins 状态机](diagrams/02-Jenkins状态机.svg) / [多进程架构](diagrams/03-多进程架构.svg)（均有 PNG 预览及可修改 `.dot` 源码）。
@@ -228,3 +228,14 @@ mac-app-builder/
 ```
 
 **不要重新执行 `run` 创建新分支，也不要对同一任务手工多次点击 Jenkins Build。** 如 #2 正在运行，恢复后应直接跟踪现有 #2，而不是重新触发 #1。
+
+
+### Jenkins 新分支 Job 轮询间隔
+
+Plugin / GMX 分支 Push 后，Jenkins 可能需要时间扫描分支并创建 Job。
+访问新 Job 暂时返回 `HTTP 404` 属于可预期的等待状态，而不代表构建失败。
+默认在 `config.yaml` 设置 `jenkins.discover_poll_seconds: 10`，仅用于等待**新 Job 出现**；
+`jenkins.poll_seconds: 45` 仍控制 Build 状态等其他轮询。
+日志中的“累计等待 2s”表示已经过了 2 秒，并非每 2 秒轮询。
+超出 `discover_timeout_minutes` 后会报告最后 HTTP 状态、检查次数和目标 URL；
+不会在 404 页面上尝试点击 Build。
