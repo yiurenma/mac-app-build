@@ -117,6 +117,42 @@ async function diagnoseJenkins(evt){
  }catch(err){$('diagnose-verdict').textContent='ERROR · '+err.message;$('diagnose-verdict').className='diagnose-verdict fail';out.textContent+='\n[ERROR] '+err.message;}
  finally{button.disabled=false;button.textContent=label;}
 }
+async function launchGMXLiveTest(evt){
+ evt.preventDefault();const form=evt.currentTarget,kind=form.dataset.kind;
+ const result=$(kind+'-live-result'),out=$(kind+'-live-output');
+ const f=form.elements;const body={kind,branch:f.branch.value.trim()};
+ if(kind==='bootstrap')body.artifact_version=f.artifact_version.value.trim();
+ if(kind==='gmx-build'){
+   if(!f.confirm_trigger.checked){result.textContent='请先确认：这会真正触发 Jenkins Build';return;}
+   if(!confirm('确认对分支 '+body.branch+' 真正执行 GMX Jenkins 构建？\n如果只想检查状态，请使用 Jenkins URL Test。'))return;
+   Object.assign(body,{job_url:f.job_url.value.trim(),country:f.country.value.trim().toUpperCase(),
+     project:f.project.value.trim(),build_type:f.build_type.value.trim(),
+     signing_repo_branch:f.signing_repo_branch.value.trim(),custom_folder:f.custom_folder.value.trim(),
+     sync_upload:f.sync_upload.checked,skip_test:f.skip_test.checked,
+     force:f.force.checked,keep_alive:f.keep_alive.checked,confirm_trigger:true});
+ }
+ const btn=form.querySelector('button[type="submit"]'),previous=btn.textContent;
+ btn.disabled=true;btn.textContent='执行中，请查看下方日志…';result.textContent='RUNNING · '+kind+' · '+body.branch;
+ result.className='diagnose-verdict';out.textContent='[START] '+kind+' '+body.branch+'\n';
+ try{
+   const job=await api('/api/live-tests/start',{method:'POST',body:JSON.stringify(body)});
+   for(let i=0;i<6000;i++){
+     const p=await api('/api/live-tests/status/'+encodeURIComponent(job.id));
+     out.textContent=p.logs.join('\n');out.scrollTop=out.scrollHeight;
+     if(p.status==='DONE'){
+       const report=p.report||{};
+       result.textContent=String(report.verdict||'UNKNOWN')+' · '+kind+' · '+body.branch+
+          (report.actual==='TRIGGERED'?' · 第二次 Build 已触发，未等待完成':'')+
+          (report.build_number?' · Build #'+report.build_number:'')+
+          (report.error?' · '+report.error:'');
+       result.className='diagnose-verdict '+(report.verdict==='PASS'?'pass':'fail');
+       break;
+     }
+     await new Promise(resolve=>setTimeout(resolve,2000));
+   }
+ }catch(e){result.className='diagnose-verdict fail';result.textContent='ERROR · '+e.message;out.textContent+='\n[ERROR] '+e.message;}
+ finally{btn.disabled=false;btn.textContent=previous;}
+}
 async function init(){const serverAddress=document.querySelector('.connection strong');if(serverAddress)serverAddress.textContent=window.location.host;try{const boot=await api('/api/bootstrap');state.csrf=boot.csrf;installDefaults(boot.config);$('doctor-badge').className=boot.doctor.ready?'dot-label':'dot-label bad';$('doctor-badge').textContent=boot.doctor.ready?'● Environment ready':'● Setup required';$('doctor-badge').title=boot.doctor.messages.join('\n');await loadTasks();await loadLog(true);await loadScreens();}catch(e){toast('本地服务连接失败：'+e.message,true);} }
 document.querySelectorAll('.nav').forEach(e=>e.addEventListener('click',()=>nav(e.dataset.target)));
 $('hero-start').addEventListener('click',()=>nav('new-build'));
@@ -132,6 +168,8 @@ $('build-form').addEventListener('invalid',evt=>{
 $('build-form').addEventListener('submit',submitBuild);
 $('diagnose-form').addEventListener('submit',diagnoseJenkins);
 $('diagnose-gmx-form').addEventListener('submit',diagnoseJenkins);
+$('bootstrap-live-form').addEventListener('submit',launchGMXLiveTest);
+$('gmx-build-live-form').addEventListener('submit',launchGMXLiveTest);
 $('resume-build').addEventListener('click',resumeTask);
 $('refresh-tasks').addEventListener('click',loadTasks);
 $('doctor-refresh').addEventListener('click',refreshDoctor);

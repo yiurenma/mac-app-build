@@ -8,6 +8,10 @@ from contextvars import ContextVar
 from urllib.parse import urlsplit, urlunsplit
 
 _verbose = ContextVar('app_builder_verbose', default=False)
+_live_sink = ContextVar('app_builder_live_sink', default=None)
+
+def set_live_sink(callback):
+    return _live_sink.set(callback)
 
 
 def set_verbose(enabled: bool):
@@ -51,7 +55,11 @@ def debug(message):
 
 
 def action(kind, message):
-    print(time.strftime('%Y-%m-%d %H:%M:%S'), f'[{kind}]', safe_text(message), flush=True)
+    clean = safe_text(message)
+    print(time.strftime('%Y-%m-%d %H:%M:%S'), f'[{kind}]', clean, flush=True)
+    sink = _live_sink.get()
+    if sink is not None:
+        sink(f'[{kind}] {clean}')
 
 
 def operation(kind, message):

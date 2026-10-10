@@ -389,6 +389,80 @@ def poll_diagnostic(token):
                 'report': row['report']}
 
 
+# On-demand *actionful* tests. Separate from the read-only URL diagnostics.
+_LIVE_LOCK = threading.Lock()
+_LIVE_JOBS: dict[str, dict] = {}
+
+
+def start_live_test(body):
+    from .live_tests import validate_options, validate_artifact_version, bootstrap_test, gmx_build_test, validate_job_url
+    kind = body.get('kind')
+    if kind not in ('bootstrap', 'gmx-build'):
+        raise ValueError('请选择 Bootstrap Test 或 GMX Jenkins Build Test')
+    branch, country, project, settings = validate_options(body)
+    job_url = body.get('job_url') or ''
+    artifact_version = validate_artifact_version(body.get('artifact_version')) if kind == 'bootstrap' else None
+    if kind == 'gmx-build':
+        if body.get('confirm_trigger') is not True:
+            raise ValueError('必须明确确认将真正触发 GMX Jenkins Build')
+        if not isinstance(job_url, str):
+            raise ValueError('Jenkins Job URL 格式无效')
+        if job_url:
+            validate_job_url(job_url, branch, load_config())
+    elif job_url:
+        raise ValueError('Bootstrap Test 不接受 Jenkins Job URL')
+    with _LIVE_LOCK:
+        if any(v['status']=='RUNNING' and v['kind']==kind and v['branch']==branch for v in _LIVE_JOBS.values()):
+            raise ValueError(f'{branch} 的 {kind} 测试正在运行，不能重复触发')
+        token = secrets.token_urlsafe(24)
+        _LIVE_JOBS[token] = {'status':'RUNNING','kind':kind,'branch':branch,'logs':[],
+                             'report':None,'created':__import__('time').monotonic()}
+
+    logdir=DATA/'live-tests'/'logs'
+    logdir.mkdir(parents=True,exist_ok=True)
+    logfile=logdir/(token+'.log')
+    def emit(message):
+        clean = safe_text(message)
+        with _LIVE_LOCK:
+            with logfile.open('a',encoding='utf-8') as sink:
+                sink.write(clean+'\n')
+            row = _LIVE_JOBS.get(token)
+            if row:
+                row['logs'].append(clean)
+                if len(row['logs'])>1000:
+                    row['logs'] = row['logs'][-1000:]
+
+    def work():
+        from .telemetry import set_live_sink, set_verbose
+        set_live_sink(emit)
+        set_verbose(True)
+        try:
+            if kind == 'bootstrap':
+                report = bootstrap_test(branch, emit, artifact_version=artifact_version)
+            else:
+                report = gmx_build_test(branch,country,project,settings,emit,job_url=job_url)
+        except Exception as exc:
+            emit(f'[ERROR] {type(exc).__name__}: {safe_text(str(exc))}')
+            report = {'kind':kind, 'verdict':'FAIL','branch':branch,'error':safe_text(str(exc))}
+        emit(f'[VERDICT] {report["verdict"]} · {kind} · {branch}')
+        with _LIVE_LOCK:
+            row=_LIVE_JOBS[token]
+            row['status']='DONE'
+            row['report']=report
+        # Full log is already appended per event; UI retains a short rolling tail.
+    threading.Thread(target=work,daemon=True,name=f'live-test-{kind}').start()
+    return {'id':token,'kind':kind,'status':'RUNNING'}
+
+
+def poll_live_test(token):
+    with _LIVE_LOCK:
+        row=_LIVE_JOBS.get(token)
+        if not row:
+            raise KeyError('现场测试任务不存在或服务已重启')
+        return {'status':row['status'],'kind':row['kind'],'branch':row['branch'],
+                'logs':list(row['logs']),'report':row['report']}
+
+
 def make_handler(csrf_token):
     class Handler(BaseHTTPRequestHandler):
         server_version = 'MacAppBuilder/' + __version__
@@ -463,6 +537,9 @@ def make_handler(csrf_token):
                 match = re.fullmatch(r'/api/diagnose/status/([A-Za-z0-9_-]{24,64})', p)
                 if match:
                     return self._send(poll_diagnostic(match[1]))
+                match = re.fullmatch(r'/api/live-tests/status/([A-Za-z0-9_-]{24,64})', p)
+                if match:
+                    return self._send(poll_live_test(match[1]))
                 if p == '/api/doctor':
                     return self._send(get_doctor())
                 self._failed(404, '未找到该页面')
@@ -491,6 +568,8 @@ def make_handler(csrf_token):
                 body = json.loads(self.rfile.read(length))
                 if not isinstance(body, dict):
                     raise ValueError('需要 JSON 对象')
+                if self.path == '/api/live-tests/start':
+                    return self._send(start_live_test(body), status=202)
                 if self.path == '/api/diagnose/start':
                     url = body.get('url')
                     num = body.get('build_number')

@@ -67,7 +67,7 @@ class LauncherTests(unittest.TestCase):
             data=json.loads(r.read());c.close()
             self.assertEqual(data['app'],'mac-app-builder')
             self.assertEqual(data['service'],'web-console')
-            self.assertEqual(data['version'],'0.6.9')
+            self.assertEqual(data['version'],'0.7.1')
             self.assertNotIn('csrf',data)
         finally:
             server.shutdown();server.server_close();t.join()

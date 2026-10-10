@@ -1,6 +1,11 @@
-# HSBC UK PBB — Mac APP Build Automation (v0.6.9)
+# HSBC UK PBB — Mac APP Build Automation (v0.7.1)
 
+## v0.7.1 — GMX 现场测试精准停在指定步骤
 
+- **Bootstrap Test**：输入 GMX 分支及完整 **Plugin Artifact Version**（例如 `1.3.1-alpha.1-SNAPSHOT.2`）；只在隔离 checkout 修改 `mobile-ci.json` 的 DomainModel/Journey 两个依赖，执行 `./bootstrap.sh`，核对 `mobile-ci.lock` 两个版本及 SHA256，并阻止非预期文件修改。**不 Commit，不 Push，不启动 Jenkins**。
+- **GMX Jenkins Build Test**：如有必要先执行首次普通 Build 以初始化 Job，待 `Build with Parameters` 出现后填写参数并触发第二次 Build；**检测到正式 Build Number 后立即结束测试**，输出编号与 Jenkins URL，不等 Jenkins SUCCESS，不验证上传。真正的 Jenkins 构建仍会在服务端继续执行。
+- 之前两个 Plugin/GMX **只读 Jenkins URL Test** 保留，适合在第二次 Build 最终完成后再检查 SUCCESS。
+- 整包替换更新，无需 Git Pull。旧任务数据可从旧目录的 `.appbuilder` 用 `Import Previous Data.command` 导入新目录。
 
 ## v0.6.9 — GMX URL 复制兼容和初始化说明
 

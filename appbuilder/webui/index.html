@@ -17,13 +17,14 @@
       <button class="nav" data-target="new-build"><span>◇</span> New build</button>
       <button class="nav" data-target="activity"><span>≡</span> Live activity</button>
       <button class="nav" data-target="diagnostics"><span>◎</span> Jenkins URL Test</button>
+      <button class="nav" data-target="live-tests"><span>⚙</span> GMX Live Tests</button>
       <div class="sidebar-spacer"></div>
       <div class="connection">
         <div class="status-line"><span class="pulse"></span><span>LOCAL WORKSPACE</span></div>
         <strong>localhost:8765</strong>
         <p>运行在本机 · 无外部服务</p>
       </div>
-      <div class="sidebar-foot">v0.6.9 <span>·</span> Made for macOS</div>
+      <div class="sidebar-foot">v0.7.1 <span>·</span> Made for macOS</div>
     </aside>
     <main class="main">
       <header class="topbar">
@@ -159,6 +160,52 @@
           <div class="log-heading">DIAGNOSTIC TRACE <div>仅检查现有 Build，不会重跑 Jenkins</div></div>
           <pre id="diagnose-output" class="terminal diagnose-terminal" aria-live="polite">分别粘贴 Plugin 或 GMX 的 Jenkins URL，启动 Chrome；允许手动登录，不会触发 Build。</pre>
           <p class="diag-note">优先使用指定 Build 的绿色状态图标，无法识别时再尝试短超时读取日志末行。检测 SUCCESS 仅说明 Jenkins 构建成功，不代表所有 Artifacts 或 GMX Upload 已校验。</p>
+        </section>
+        <section class="panel diagnose-panel live-tests-panel" id="live-tests">
+          <div class="panel-head"><div><span class="section-tag">ON-DEMAND · ACTUAL EXECUTION</span>
+            <h2>GMX Live Tests</h2>
+            <p>输入分支名称，单独验证本地 Bootstrap 或真实 Jenkins 构建；不经过 Plugin，不修改原 Build Task。</p>
+          </div><div class="panel-icon">⚙</div></div>
+          <div class="diagnose-split">
+            <div class="diag-site-card">
+              <h3>01 · GMX Bootstrap Test</h3>
+              <p>克隆指定 GMX 分支到新隔离目录，填写完整 Plugin Artifact Version 更新两个 mobile-ci.json 依赖，再运行真正的 ./bootstrap.sh 并验证 mobile-ci.lock。不 Push。</p>
+              <form id="bootstrap-live-form" data-kind="bootstrap" class="diagnose-form">
+                <label>GMX Branch<input name="branch" required maxlength="140" value="upload/UKPBB-203745-V8" autocomplete="off"></label>
+                <label>Plugin Artifact Version（完整版本号，必填）<input name="artifact_version" required maxlength="100" placeholder="例如 1.3.1-alpha.1-SNAPSHOT.2" autocomplete="off"></label>
+                <p class="diag-note">版本号必须与 Plugin 构建生成的两个 tar.gz 完整 Artifact Version 一致，不是简单的 1.3。</p>
+                <button class="btn btn-primary" type="submit">▶ 运行 Bootstrap Test（执行到 bootstrap 结束）</button>
+              </form>
+              <div id="bootstrap-live-result" class="diagnose-verdict">尚未执行</div>
+              <pre id="bootstrap-live-output" class="terminal diagnose-terminal" aria-live="polite">等待启动...（将自动克隆新隔离目录，不使用原 GMX 工作区）</pre>
+            </div>
+            <div class="diag-site-card">
+              <h3>02 · GMX Jenkins Build Test</h3>
+              <p>真实打开 Chrome，可人工 SSO；先普通 Build 初始化，再 Build with Parameters。第二次 Build 一旦触发并拿到编号就结束测试，不等待最终 SUCCESS。</p>
+              <form id="gmx-build-live-form" data-kind="gmx-build" class="diagnose-form">
+                <label>GMX Branch<input name="branch" required maxlength="140" value="upload/UKPBB-203745-V8" autocomplete="off"></label>
+                <label>GMX Jenkins Job URL（可选）<input name="job_url" type="url" maxlength="2048" placeholder="留空自动尝试 %2F / %252F；也可粘贴浏览器完整 Job 地址" autocomplete="off"></label>
+                <div class="diagnose-fields">
+                  <label>Country<input name="country" value="UK" maxlength="4" required></label>
+                  <label>Project<input name="project" value="PayByBank" maxlength="80" required></label>
+                  <label>BUILD_TYPE<input name="build_type" value="Develop" maxlength="100" required></label>
+                  <label>SIGNING_REPO_BRANCH<input name="signing_repo_branch" value="master" maxlength="100" required></label>
+                  <label>CUSTOM_FOLDER（留空自动生成）<input name="custom_folder" placeholder="0_A_UK_PayByBank" maxlength="100"></label>
+                </div>
+                <div class="live-checkboxes">
+                  <label><input name="sync_upload" type="checkbox" checked> SYNC_UPLOAD</label>
+                  <label><input name="skip_test" type="checkbox" checked> SKIP_TEST</label>
+                  <label><input name="force" type="checkbox" checked> FORCE</label>
+                  <label><input name="keep_alive" type="checkbox"> KEEP_ALIVE</label>
+                </div>
+                <label class="live-confirm"><input name="confirm_trigger" type="checkbox" required> 我确认要真正触发 GMX 第二次 Build（测试只确认启动，不等待完成）</label>
+                <button class="btn btn-primary" type="submit">▶ 打开 Chrome · 触发第二次 GMX Build</button>
+              </form>
+              <div id="gmx-build-live-result" class="diagnose-verdict">尚未执行 · 此测试会真实触发 Jenkins</div>
+              <pre id="gmx-build-live-output" class="terminal diagnose-terminal" aria-live="polite">等待启动...（独立测试，不进入正式 APP Build 流程）</pre>
+            </div>
+          </div>
+          <p class="diag-note">Bootstrap 会执行所选仓库分支里的脚本，可能联网下载依赖；Jenkins Test 会真实触发第二次 Build，但拿到 Build Number 后立即停止测试，不等待执行完毕。两项测试均不会 Git Push，也不会验证最终上传是否成功。测试日志位于 .appbuilder/live-tests/logs/。</p>
         </section>
         <section class="footer-info"><span>MAC APP BUILDER · LOCAL CONSOLE</span><span>Built with Python · Existing CLI engine · No cloud backend</span></section>
       </div>

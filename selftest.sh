@@ -14,16 +14,16 @@ for i in 1 2 3; do
   {
     echo "=== FINAL VERIFICATION ROUND $i ==="
     echo '$ python -m unittest discover -s tests -v'
-    "$PY" -m unittest discover -s tests -v
+    "$PY" -m unittest discover -s tests -v || exit 1
     echo "exit=0"
     echo '$ python -m compileall -q appbuilder'
-    "$PY" -m compileall -q appbuilder
+    "$PY" -m compileall -q appbuilder || exit 1
     echo "exit=0"
     echo '$ sh -n install.sh app-build selftest.sh'
-    sh -n install.sh app-build selftest.sh
+    sh -n install.sh app-build selftest.sh || exit 1
     echo "exit=0"
     echo '$ python -m appbuilder run --plugin-version 1.3 --plugin-branch develop --gmx-branch develop --country uk --project-name PayByBank --dry-run'
-    "$PY" -m appbuilder run --plugin-version 1.3 --plugin-branch develop --gmx-branch develop --country uk --project-name PayByBank --dry-run
+    "$PY" -m appbuilder run --plugin-version 1.3 --plugin-branch develop --gmx-branch develop --country uk --project-name PayByBank --dry-run || exit 1
     echo "exit=0"
   } > "$log" 2>&1 || { echo "第 $i 轮失败，请查看 $log" >&2; exit 1; }
   grep -E 'Ran [0-9]+ tests|^OK$' "$log" || true
