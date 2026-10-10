@@ -432,6 +432,24 @@ class JenkinsBrowser:
             raise NeedsAttention('CUSTOM_FOLDER 不是文本框')
         operation('PW', f'CUSTOM_FOLDER.fill({target})')
         custom.fill(target)
+        # GMX has three additional Jenkins-only flags. Web tasks can set them;
+        # CLI tasks without explicit options leave Jenkins defaults unchanged.
+        for field in ('SKIP_TEST', 'FORCE', 'KEEP_ALIVE'):
+            if field not in settings:
+                continue
+            selected = settings[field]
+            if not isinstance(selected, bool):
+                raise NeedsAttention(f'{field} 必须是布尔值')
+            control = self._find_control(field, selectors.get(field, ''))
+            if control.get_attribute('type') != 'checkbox':
+                raise NeedsAttention(f'{field} 不是复选框，拒绝提交 GMX Build')
+            operation('PW', f'{field}.{"check" if selected else "uncheck"}()')
+            if selected:
+                control.check()
+            else:
+                control.uncheck()
+            if control.is_checked() != selected:
+                raise NeedsAttention(f'{field} 参数回读校验失败')
         # CLI tasks that supply no advanced options keep remaining Jenkins defaults.
         # Web tasks provide explicit values and we verify the actual input state.
         for field in ('BUILD_TYPE', 'SIGNING_REPO_BRANCH'):
@@ -460,6 +478,10 @@ class JenkinsBrowser:
         operation('PW', '验证 SYNC_UPLOAD.is_checked() && CUSTOM_FOLDER.input_value()')
         if sync.is_checked() != should_sync or custom.input_value() != target:
             raise NeedsAttention('Jenkins 参数填写结果验证失败')
+        if entity.input_value().strip() != country:
+            raise NeedsAttention('ENTITIES 写入后为空或与选择国家不一致；禁止提交可能被禁用的 GMX Build')
+        if 'BUILD_TYPE' in settings and not str(settings['BUILD_TYPE']).strip():
+            raise NeedsAttention('BUILD_TYPE 不能为空，否则 GMX Build 会被禁用')
         print(f'[Jenkins/gmx] ENTITIES={country} SYNC_UPLOAD={str(should_sync).lower()} CUSTOM_FOLDER={target}', flush=True)
 
     def request_build(self, job_url, *, with_parameters, country='', project=''):
@@ -844,6 +866,16 @@ def ensure_bootstrap(browser: JenkinsBrowser, job_url: str, task_id: str, site: 
             browser.request_build(job_url, with_parameters=False)
             num = browser.detect_new_build(job_url, baseline)
         patch_runtime(task_id, **{key + '_number': num})
+    if site == 'gmx':
+        # GMX's first unparameterized branch-indexing build can be DISABLED
+        # ("ENTITIES or BUILD_TYPE is empty"). It is only an initialization
+        # attempt, not the real app build. Wait for the parameter form instead
+        # of polling the disabled #1 for hours or requiring it to succeed.
+        action('JENKINS', f'GMX 初始化 Build #{num}：只等待参数化入口，不将其结果当正式构建结果')
+        browser.wait_parameter_mode(job_url)
+        patch_runtime(task_id, **{key + '_completed': True,
+                                  key + '_result': 'PARAMETER_FORM_READY'})
+        return
     if not rt.get(key + '_result'):
         result, _ = browser.wait_result(job_url, num)
         patch_runtime(task_id, **{key + '_result': result})
@@ -880,6 +912,7 @@ def formal_build(browser: JenkinsBrowser, job_url, task_id, site, country='', pr
                 action('CALLBACK', f'Plugin Trigger #{num} → Callback #{child}；下一步监控 Callback')
                 console = ''
         else:
+            action('JENKINS', f'GMX 正式参数化 Build #{num}：直接监控当前编号（不采用 Plugin 的 Callback 转交模型）')
             result, console = browser.wait_result(job_url, num)
         patch_runtime(task_id, **{key + '_result': result})
     if result == 'DELEGATED' and site == 'plugin':

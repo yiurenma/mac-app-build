@@ -126,9 +126,12 @@ def form_defaults(config):
         'gmx_build_type': j.get('gmx_defaults', {}).get('BUILD_TYPE', 'Develop'),
         'gmx_signing_repo_branch': j.get('gmx_defaults', {}).get('SIGNING_REPO_BRANCH', 'master'),
         'gmx_sync_upload': j.get('gmx_defaults', {}).get('SYNC_UPLOAD', True),
+        'gmx_skip_test': j.get('gmx_defaults', {}).get('SKIP_TEST', True),
+        'gmx_force': j.get('gmx_defaults', {}).get('FORCE', True),
+        'gmx_keep_alive': j.get('gmx_defaults', {}).get('KEEP_ALIVE', False),
         'gmx_custom_folder': j.get('gmx_defaults', {}).get('CUSTOM_FOLDER', ''),
         'gmx_fields': {key: j.get('gmx_fields', {}).get(key, '') for key in
-                       ('ENTITIES', 'SYNC_UPLOAD', 'CUSTOM_FOLDER', 'BUILD_TYPE', 'SIGNING_REPO_BRANCH')},
+                       ('ENTITIES', 'SYNC_UPLOAD', 'CUSTOM_FOLDER', 'BUILD_TYPE', 'SIGNING_REPO_BRANCH', 'SKIP_TEST', 'FORCE', 'KEEP_ALIVE')},
     }
 
 
@@ -176,7 +179,7 @@ def build_preferences(body, config, country, project):
         ('build_timeout_minutes', 1, 1440), ('callback_timeout_minutes', 1, 240)):
         jenkins[key] = _integer_field(body, key, d[key], lo, hi)
     selectors = {}
-    for name in ('ENTITIES', 'SYNC_UPLOAD', 'CUSTOM_FOLDER', 'BUILD_TYPE', 'SIGNING_REPO_BRANCH'):
+    for name in ('ENTITIES', 'SYNC_UPLOAD', 'CUSTOM_FOLDER', 'BUILD_TYPE', 'SIGNING_REPO_BRANCH', 'SKIP_TEST', 'FORCE', 'KEEP_ALIVE'):
         key = 'selector_' + name.lower()
         selector = body.get(key, d['gmx_fields'][name])
         if not isinstance(selector, str) or len(selector) > 256:
@@ -195,6 +198,12 @@ def build_preferences(body, config, country, project):
     sync = body.get('gmx_sync_upload', d['gmx_sync_upload'])
     if not isinstance(sync, bool):
         raise ValueError('SYNC_UPLOAD 只能选择开启或关闭')
+    checks = {}
+    for field, key in [('SKIP_TEST', 'gmx_skip_test'), ('FORCE', 'gmx_force'), ('KEEP_ALIVE', 'gmx_keep_alive')]:
+        value = body.get(key, d[key])
+        if not isinstance(value, bool):
+            raise ValueError(f'{field} 只能选择开启或关闭')
+        checks[field] = value
     regex = body.get('upload_success_pattern', d['upload_success_pattern'])
     if not isinstance(regex, str) or len(regex) > 200:
         raise ValueError('上传成功日志正则过长')
@@ -207,7 +216,7 @@ def build_preferences(body, config, country, project):
              'upload_success_pattern': regex}
     return github, jenkins, build, {
         'BUILD_TYPE': bt, 'SIGNING_REPO_BRANCH': sr,
-        'SYNC_UPLOAD': sync, 'CUSTOM_FOLDER': custom,
+        'SYNC_UPLOAD': sync, 'CUSTOM_FOLDER': custom, **checks,
     }
 
 

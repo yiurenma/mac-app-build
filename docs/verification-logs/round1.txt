@@ -1,4 +1,206 @@
-Mac APP Builder v0.6.7 — round 1
-Ran 184 tests in 13.834s
+[DIAG] READ ONLY · PLUGIN · 不触发 Jenkins 构建，不操作 Git
+[TARGET] Job URL: https://mobile-premier01-jenkins.build-mobile.iwpb.euw2.prod.aws.cloud.hsbc/job/IWPB_Transaction_Banking/job/Domestic_Payment_and_Transfer_Mobile_Global_12824743/job/Lib/job/mobile_paybybank-ios-plugin/job/release-build/job/release_1_3_202610101332/
+[TARGET] Build Number: 2; expected=SUCCESS
+[BROWSER] 正在启动可见 Chrome；如需 SSO，请直接在该窗口人工登录，最多等待 180 秒
+[STEP 1/4] 加载指定 Jenkins Job 页面（只读）
+[HTTP] Job page=200; page=https://mobile-premier01-jenkins.build-mobile.iwpb.euw2.prod.aws.cloud.hsbc/job/IWPB_Transaction_Banking/job/Domestic_Payment_and_Transfer_Mobile_Global_12824743/job/Lib/job/mobile_paybybank-ios-plugin/job/release-build/job/release_1_3_202610101332/
+[SCAN] Build History IDs=[1, 2]
+[TARGET] 实际检查 Build #2；不使用其他编号的绿色勾
+[STEP 2/4] 读取 Build History 对应编号状态图标
+[RESULT] Build History #2: FAILURE
+[STEP 3/4] 读取当前 Build 详情页标题状态（只读）
+[HTTP] Build #2 detail=200
+[RESULT] Build #2 heading: FAILURE
+[STEP 4/4] 已通过 #2 的状态图标识别终态，跳过长 Console 日志下载
+[VERDICT] FAIL · expected=SUCCESS · actual=FAILURE
+[NEXT] 实际结果 FAILURE 不符合预期 SUCCESS；不执行任何自动构建动作。
+[TIME] elapsed=0.0s
+[DIAG] READ ONLY · PLUGIN · 不触发 Jenkins 构建，不操作 Git
+[TARGET] Job URL: https://mobile-premier01-jenkins.build-mobile.iwpb.euw2.prod.aws.cloud.hsbc/job/IWPB_Transaction_Banking/job/Domestic_Payment_and_Transfer_Mobile_Global_12824743/job/Lib/job/mobile_paybybank-ios-plugin/job/release-build/job/release_1_3_202610101332/
+[TARGET] Build Number: 2; expected=SUCCESS
+[BROWSER] 正在启动可见 Chrome；如需 SSO，请直接在该窗口人工登录，最多等待 180 秒
+[STEP 1/4] 加载指定 Jenkins Job 页面（只读）
+[HTTP] Job page=200; page=https://mobile-premier01-jenkins.build-mobile.iwpb.euw2.prod.aws.cloud.hsbc/job/IWPB_Transaction_Banking/job/Domestic_Payment_and_Transfer_Mobile_Global_12824743/job/Lib/job/mobile_paybybank-ios-plugin/job/release-build/job/release_1_3_202610101332/
+[SCAN] Build History IDs=[1, 2]
+[TARGET] 实际检查 Build #2；不使用其他编号的绿色勾
+[STEP 2/4] 读取 Build History 对应编号状态图标
+[RESULT] Build History #2: SUCCESS
+[STEP 3/4] 读取当前 Build 详情页标题状态（只读）
+[HTTP] Build #2 detail=200
+[RESULT] Build #2 heading: SUCCESS
+[STEP 4/4] 已通过 #2 的状态图标识别终态，跳过长 Console 日志下载
+[VERDICT] PASS · expected=SUCCESS · actual=SUCCESS
+[NEXT] Plugin Callback 成功后应读取两个 Artifacts，再进入 GMX；这是状态诊断，不代表产物已校验。
+[TIME] elapsed=0.0s
+[DIAG] READ ONLY · PLUGIN · 不触发 Jenkins 构建，不操作 Git
+[TARGET] Job URL: https://mobile-premier01-jenkins.build-mobile.iwpb.euw2.prod.aws.cloud.hsbc/job/IWPB_Transaction_Banking/job/Domestic_Payment_and_Transfer_Mobile_Global_12824743/job/Lib/job/mobile_paybybank-ios-plugin/job/release-build/job/release_1_3_202610101332/
+[TARGET] Build Number: 2; expected=SUCCESS
+[BROWSER] 正在启动可见 Chrome；如需 SSO，请直接在该窗口人工登录，最多等待 180 秒
+[STEP 1/4] 加载指定 Jenkins Job 页面（只读）
+[HTTP] Job page=200; page=https://mobile-premier01-jenkins.build-mobile.iwpb.euw2.prod.aws.cloud.hsbc/job/IWPB_Transaction_Banking/job/Domestic_Payment_and_Transfer_Mobile_Global_12824743/job/Lib/job/mobile_paybybank-ios-plugin/job/release-build/job/release_1_3_202610101332/
+[SCAN] Build History IDs=[1, 2]
+[TARGET] 实际检查 Build #2；不使用其他编号的绿色勾
+[STEP 2/4] 读取 Build History 对应编号状态图标
+[RESULT] Build History #2: SUCCESS
+[STEP 3/4] 读取当前 Build 详情页标题状态（只读）
+[HTTP] Build #2 detail=200
+[RESULT] Build #2 heading: FAILURE
+[CONFLICT] History=SUCCESS, Heading=FAILURE；终态冲突，不能确认
+[STEP 4/4] 已通过 #2 的状态图标识别终态，跳过长 Console 日志下载
+[VERDICT] UNKNOWN · expected=SUCCESS · actual=UNKNOWN
+[NEXT] 目前证据不足；不启动构建。检查 URL、SSO 登录状态或页面状态元素。
+[TIME] elapsed=0.0s
+[DIAG] READ ONLY · PLUGIN · 不触发 Jenkins 构建，不操作 Git
+[TARGET] Job URL: https://mobile-premier01-jenkins.build-mobile.iwpb.euw2.prod.aws.cloud.hsbc/job/IWPB_Transaction_Banking/job/Domestic_Payment_and_Transfer_Mobile_Global_12824743/job/Lib/job/mobile_paybybank-ios-plugin/job/release-build/job/release_1_3_202610101332/
+[TARGET] Build Number: 2; expected=SUCCESS
+[BROWSER] 正在启动可见 Chrome；如需 SSO，请直接在该窗口人工登录，最多等待 180 秒
+[STEP 1/4] 加载指定 Jenkins Job 页面（只读）
+[HTTP] Job page=200; page=https://mobile-premier01-jenkins.build-mobile.iwpb.euw2.prod.aws.cloud.hsbc/job/IWPB_Transaction_Banking/job/Domestic_Payment_and_Transfer_Mobile_Global_12824743/job/Lib/job/mobile_paybybank-ios-plugin/job/release-build/job/release_1_3_202610101332/
+[SCAN] Build History IDs=[1, 2]
+[TARGET] 实际检查 Build #2；不使用其他编号的绿色勾
+[STEP 2/4] 读取 Build History 对应编号状态图标
+[RESULT] Build History #2: UNKNOWN（页面无可识别专属图标）
+[STEP 3/4] 读取当前 Build 详情页标题状态（只读）
+[HTTP] Build #2 detail=200
+[RESULT] Build #2 heading: UNKNOWN
+[STEP 4/4] 图标未提供终态；短超时检查原始 consoleText 尾部
+[HTTP] consoleText=200; type=unknown; tail bytes checked=26
+[RESULT] Console Finished marker: SUCCESS
+[VERDICT] PASS · expected=SUCCESS · actual=SUCCESS
+[NEXT] Plugin Callback 成功后应读取两个 Artifacts，再进入 GMX；这是状态诊断，不代表产物已校验。
+[TIME] elapsed=0.0s
+[DIAG] READ ONLY · PLUGIN · 不触发 Jenkins 构建，不操作 Git
+[TARGET] Job URL: https://mobile-premier01-jenkins.build-mobile.iwpb.euw2.prod.aws.cloud.hsbc/job/IWPB_Transaction_Banking/job/Domestic_Payment_and_Transfer_Mobile_Global_12824743/job/Lib/job/mobile_paybybank-ios-plugin/job/release-build/job/release_1_3_202610101332/
+[TARGET] Build Number: 2; expected=SUCCESS
+[BROWSER] 正在启动可见 Chrome；如需 SSO，请直接在该窗口人工登录，最多等待 180 秒
+[STEP 1/4] 加载指定 Jenkins Job 页面（只读）
+[HTTP] Job page=404; page=https://mobile-premier01-jenkins.build-mobile.iwpb.euw2.prod.aws.cloud.hsbc/job/IWPB_Transaction_Banking/job/Domestic_Payment_and_Transfer_Mobile_Global_12824743/job/Lib/job/mobile_paybybank-ios-plugin/job/release-build/job/release_1_3_202610101332/
+[DIAG-ERROR] RuntimeError: Job 页面 HTTP 404，无法诊断
+[VERDICT] UNKNOWN：请核对内网连接、页面权限与登录状态，未触发 Build
+[TIME] elapsed=0.0s
+[DIAG] READ ONLY · GMX · 不触发 Jenkins 构建，不操作 Git
+[TARGET] Job URL: https://mobile-platform-jenkins.build-mobile.iwpb.euw2.prod.aws.cloud.hsbc/job/mobilex-global-uploads/job/global-ios-upload/job/upload%2Fauto202610101332/
+[TARGET] Build Number: 2; expected=SUCCESS
+[BROWSER] 正在启动可见 Chrome；如需 SSO，请直接在该窗口人工登录，最多等待 180 秒
+[STEP 1/4] 加载指定 Jenkins Job 页面（只读）
+[HTTP] Job page=200; page=https://mobile-platform-jenkins.build-mobile.iwpb.euw2.prod.aws.cloud.hsbc/job/mobilex-global-uploads/job/global-ios-upload/job/upload%2Fauto202610101332/
+[SCAN] Build History IDs=[2]
+[TARGET] 实际检查 Build #2；不使用其他编号的绿色勾
+[STEP 2/4] 读取 Build History 对应编号状态图标
+[RESULT] Build History #2: SUCCESS
+[STEP 3/4] 读取当前 Build 详情页标题状态（只读）
+[HTTP] Build #2 detail=200
+[RESULT] Build #2 heading: SUCCESS
+[STEP 4/4] 已通过 #2 的状态图标识别终态，跳过长 Console 日志下载
+[VERDICT] PASS · expected=SUCCESS · actual=SUCCESS
+[NEXT] GMX Build 已成功；上传是否完成还须单独校验。
+[TIME] elapsed=0.0s
+2026-10-10 07:58:05 [AUTH] plugin 诊断浏览器需要登录：请在弹出的 Chrome 窗口完成公司 SSO/MFA（最多 180 秒）
+2026-10-10 07:58:05 [AUTH] plugin 人工 SSO 已完成，继续只读检查原 Jenkins URL
+2026-10-10 07:58:05 [SHELL] $ ./bootstrap.sh  (cwd=/tmp/tmpq4xg6sd6/gmx)
+2026-10-10 07:58:05 [SHELL] 子进程输出保存至 /tmp/tmpq4xg6sd6/bootstrap.log；--verbose 时同时流式显示（已尝试隐藏凭据）
+2026-10-10 07:58:05 [SHELL] ./bootstrap.sh exit=0 elapsed=0.0s
+2026-10-10 07:58:05 [SHELL] $ ./bootstrap.sh  (cwd=/tmp/tmp1emfd5cl/gmx)
+2026-10-10 07:58:05 [SHELL] 子进程输出保存至 /tmp/tmp1emfd5cl/bootstrap.log；--verbose 时同时流式显示（已尝试隐藏凭据）
+2026-10-10 07:58:05 [SHELL] ./bootstrap.sh exit=17 elapsed=0.0s
+2026-10-10 07:58:06 [JENKINS] plugin Build #2：优先检查绿色状态勾（每 5s），日志仅作补充确认
+2026-10-10 07:58:06 [JENKINS] plugin Build #2 原始 Console 已确认: SUCCESS（无需等待页面加载）
+2026-10-10 07:58:06 [JENKINS] gmx Build #2：优先检查绿色状态勾（每 5s），日志仅作补充确认
+2026-10-10 07:58:06 [JENKINS] gmx Build #2 原始 Console 已确认: FAILURE（无需等待页面加载）
+2026-10-10 07:58:06 [JENKINS] plugin Build #2：优先检查绿色状态勾（每 5s），日志仅作补充确认
+2026-10-10 07:58:06 [JENKINS] plugin Build #2 页面标题图标确认终态: SUCCESS
+2026-10-10 07:58:06 [JENKINS] plugin Build #2：优先检查绿色状态勾（每 5s），日志仅作补充确认
+2026-10-10 07:58:06 [JENKINS] plugin Build #2 页面标题图标确认终态: SUCCESS
+2026-10-10 07:58:06 [JENKINS] plugin Build #2：优先检查绿色状态勾（每 5s），日志仅作补充确认
+2026-10-10 07:58:06 [WAIT] plugin Build #2 仍未确认终态；已等待 0s，5s 后检查状态勾
+2026-10-10 07:58:06 [JENKINS] plugin Build #2 原始 Console 已确认: FAILURE（无需等待页面加载）
+2026-10-10 07:58:06 [JENKINS] plugin Build #2：优先检查绿色状态勾（每 5s），日志仅作补充确认
+2026-10-10 07:58:06 [JENKINS] plugin Build #2：优先检查绿色状态勾（每 5s），日志仅作补充确认
+2026-10-10 07:58:06 [JENKINS] plugin Build #2 页面标题图标确认终态: FAILURE
+2026-10-10 07:58:06 [JENKINS] plugin Build #2：优先检查绿色状态勾（每 5s），日志仅作补充确认
+2026-10-10 07:58:06 [WAIT] plugin Build #2 仍未确认终态；已等待 0s，5s 后检查状态勾
+2026-10-10 07:58:06 [JENKINS] plugin Build #2 原始 Console 已确认: SUCCESS（无需等待页面加载）
+2026-10-10 07:58:06 [JENKINS] plugin Build #2：优先检查绿色状态勾（每 5s），日志仅作补充确认
+2026-10-10 07:58:06 [JENKINS] plugin Build #2 页面标题图标确认终态: FAILURE
+2026-10-10 07:58:06 [JENKINS] plugin Build #2：优先检查绿色状态勾（每 5s），日志仅作补充确认
+2026-10-10 07:58:06 [CALLBACK] plugin Build #2 已创建 Callback #3；改为监控 #3
+2026-10-10 07:58:06 [JENKINS] gmx 初始化前已有 Build: []
+2026-10-10 07:58:06 [JENKINS] GMX 初始化 Build #1：只等待参数化入口，不将其结果当正式构建结果
+2026-10-10 07:58:06 [JENKINS] gmx 正式构建前已有 Build: [1]
+2026-10-10 07:58:06 [JENKINS] GMX 正式参数化 Build #2：直接监控当前编号（不采用 Plugin 的 Callback 转交模型）
+2026-10-10 07:58:06 [JENKINS] gmx 已具有参数化入口，跳过初始化 Build
+2026-10-10 07:58:06 [JENKINS] gmx 正式构建前已有 Build: [1]
+2026-10-10 07:58:06 [JENKINS] GMX 正式参数化 Build #2：直接监控当前编号（不采用 Plugin 的 Callback 转交模型）
+2026-10-10 07:58:06 [FORM] GMX 参数设置 ENTITIES=UK SYNC_UPLOAD=true CUSTOM_FOLDER=0_A_UK_PayByBank
+[Jenkins/gmx] ENTITIES=UK SYNC_UPLOAD=true CUSTOM_FOLDER=0_A_UK_PayByBank
+2026-10-10 07:58:06 [FORM] GMX 参数设置 ENTITIES=UK SYNC_UPLOAD=false CUSTOM_FOLDER=0_A_UK_PayByBank
+[Jenkins/gmx] ENTITIES=UK SYNC_UPLOAD=false CUSTOM_FOLDER=0_A_UK_PayByBank
+2026-10-10 07:58:06 [FORM] GMX 参数设置 ENTITIES=UK SYNC_UPLOAD=true CUSTOM_FOLDER=0_A_UK_PayByBank
+[Jenkins/gmx] ENTITIES=UK SYNC_UPLOAD=true CUSTOM_FOLDER=0_A_UK_PayByBank
+[DIAG] READ ONLY · PLUGIN · 不触发 Jenkins 构建，不操作 Git
+[TARGET] Job URL: https://mobile-premier01-jenkins.build-mobile.iwpb.euw2.prod.aws.cloud.hsbc/job/IWPB_Transaction_Banking/job/Domestic_Payment_and_Transfer_Mobile_Global_12824743/job/Lib/job/mobile_paybybank-ios-plugin/job/release-build/job/release_1_3_202610101332/
+[TARGET] Build Number: 2; expected=SUCCESS
+[BROWSER] 正在启动可见 Chrome；如需 SSO，请直接在该窗口人工登录，最多等待 180 秒
+[STEP 1/4] 加载指定 Jenkins Job 页面（只读）
+[HTTP] Job page=200; page=https://mobile-premier01-jenkins.build-mobile.iwpb.euw2.prod.aws.cloud.hsbc/job/IWPB_Transaction_Banking/job/Domestic_Payment_and_Transfer_Mobile_Global_12824743/job/Lib/job/mobile_paybybank-ios-plugin/job/release-build/job/release_1_3_202610101332/
+[SCAN] Build History IDs=[1, 2]
+[TARGET] 实际检查 Build #2；不使用其他编号的绿色勾
+[STEP 2/4] 读取 Build History 对应编号状态图标
+[RESULT] Build History #2: UNKNOWN（页面无可识别专属图标）
+[DOM] 精确 Build #2 链接=1; 候选记录=0; 当前页面构建链接=2
+[HINT] 未定位到构建编号旁的状态图标；可能 Jenkins 使用未覆盖的 DOM 布局
+[STEP 3/4] 读取当前 Build 详情页标题状态（只读）
+[HTTP] Build #2 detail=200
+[RESULT] Build #2 heading: UNKNOWN
+[STEP 4/4] 图标未提供终态；短超时检查原始 consoleText 尾部
+[HTTP] consoleText=200; type=text/html; charset=utf-8; tail bytes checked=35
+[HINT] consoleText 返回 HTML 而不是普通构建日志；HTTP 200 不代表已获取完整 Console
+[RESULT] Console Finished marker: NOT FOUND
+[SNAPSHOT] 已保存现场页面截图: /tmp/tmpp4qr1_po/diagnostics/plugin/plugin-build-2-unknown.png
+[VERDICT] UNKNOWN · expected=SUCCESS · actual=UNKNOWN
+[NEXT] 目前证据不足；不启动构建。检查 URL、SSO 登录状态或页面状态元素。
+[TIME] elapsed=0.0s
+2026-10-10 07:58:07 [JENKINS] plugin Build History #2 专属图标确认终态: SUCCESS
+2026-10-10 07:58:08 [JENKINS] plugin Build History #2 专属图标确认终态: FAILURE
+2026-10-10 07:58:08 [JENKINS] plugin 正在监控 Build #2: https://ci.corp/job/p/2/
+2026-10-10 07:58:08 [WAIT] plugin Build #2 Console Output 尚未到 Finished，改查 Build 状态
+2026-10-10 07:58:08 [JENKINS] plugin Build #2 页面标题图标确认终态: FAILURE
+2026-10-10 07:58:08 [JENKINS] plugin 正在监控 Build #2: https://ci.corp/job/p/2/
+2026-10-10 07:58:08 [WAIT] plugin Build #2 Console Output 尚未到 Finished，改查 Build 状态
+2026-10-10 07:58:08 [JENKINS] plugin Build #2 页面标题图标确认终态: SUCCESS
+2026-10-10 07:58:08 [JENKINS] plugin 正在监控 Build #2: https://ci.corp/job/p/2/
+2026-10-10 07:58:08 [JENKINS] plugin Build #2 Console 最后一行确认: SUCCESS
+2026-10-10 07:58:09 [JENKINS] plugin Build History #2 专属图标确认终态: FAILURE
+2026-10-10 07:58:09 [JENKINS] plugin Build History #2 专属图标确认终态: SUCCESS
+2026-10-10 07:58:09 [JENKINS] plugin Build #2：优先检查绿色状态勾（每 5s），日志仅作补充确认
+2026-10-10 07:58:09 [JENKINS] plugin Build History #2 专属图标确认终态: SUCCESS
+2026-10-10 07:58:09 [ARTIFACT] jenkins 读取 Build #8 的产物目录
+2026-10-10 07:58:09 [ARTIFACT] jenkins 读取 Build #7 的产物目录
+2026-10-10 07:58:09 [JENKINS] plugin 正式构建前已有 Build: []
+2026-10-10 07:58:09 [CALLBACK] Plugin Trigger #1 → Callback #2；下一步监控 Callback
+2026-10-10 07:58:09 [CALLBACK] Plugin Trigger #1 → Callback #2；下一步监控 Callback
+2026-10-10 07:58:09 [JENKINS] gmx 已具有参数化入口，跳过初始化 Build
+2026-10-10 07:58:10 [JENKINS] gmx 正式构建前已有 Build: []
+2026-10-10 07:58:10 [JENKINS] GMX 正式参数化 Build #1：直接监控当前编号（不采用 Plugin 的 Callback 转交模型）
+2026-10-10 07:58:10 [JENKINS] plugin 初始化前已有 Build: []
+[plugin] 初始化构建 #1: FAILURE；等待参数化入口
+2026-10-10 07:58:10 [JENKINS] plugin 正式构建前已有 Build: [1]
+2026-10-10 07:58:10 [JENKINS] plugin 正在监控 Build #1: https://ci.corp/job/release/1/
+2026-10-10 07:58:10 [JENKINS] plugin Build #1 页面标题图标确认终态: FAILURE
+2026-10-10 07:58:10 [JENKINS] plugin 已具有参数化入口，跳过初始化 Build
+2026-10-10 07:58:10 [JENKINS] plugin 正式构建前已有 Build: []
+2026-10-10 07:58:10 [CALLBACK] Plugin Trigger #1 → Callback #2；下一步监控 Callback
+2026-10-10 07:58:10 [JENKINS] plugin 正在监控 Build #1: https://ci.corp/job/release/1/
+2026-10-10 07:58:10 [CALLBACK] plugin Build #1 已创建关联 Callback #2；切换监控 #2
+2026-10-10 07:58:10 [FORM] GMX 参数设置 ENTITIES=UK SYNC_UPLOAD=true CUSTOM_FOLDER=0_A_UK_PayByBank
+[Jenkins/gmx] ENTITIES=UK SYNC_UPLOAD=true CUSTOM_FOLDER=0_A_UK_PayByBank
+2026-10-10 07:58:10 [JENKINS] jenkins 页面入口：unknown（https://ci.corp/job/example/）
+2026-10-10 07:58:10 [BROWSER] plugin Chrome 已启动（可见窗口）
+2026-10-10 07:58:10 [AUTH] plugin 检测到登录页面，尝试自动填写账号密码
+2026-10-10 07:58:10 [BROWSER] plugin Chrome 已启动（后台模式）
+2026-10-10 07:58:10 [FORM] GMX 参数设置 ENTITIES=UK SYNC_UPLOAD=false CUSTOM_FOLDER=0_A_UK_Custom
+[Jenkins/gmx] ENTITIES=UK SYNC_UPLOAD=false CUSTOM_FOLDER=0_A_UK_Custom
+----------------------------------------------------------------------
+Ran 191 tests in 9.554s
+
 OK
-Test modes: offline unittest and Chromium DOM. No corporate Jenkins connection.

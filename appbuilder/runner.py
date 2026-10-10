@@ -252,7 +252,11 @@ def _run_unlocked(task_id):
                     num, console = formal_build(browser, params['gmx_job'], task_id, 'gmx',
                                                 country=params['country'], project=params['project'])
                     regex = conf.get('build', {}).get('upload_success_pattern', '')
-                    uploaded = 'NOT_INDEPENDENTLY_VERIFIED'
+                    syncing = params.get('gmx_parameters', {}).get('SYNC_UPLOAD', True)
+                    uploaded = ('NOT_INDEPENDENTLY_VERIFIED' if syncing
+                                else 'DOWNSTREAM_UPLOAD_NOT_VERIFIED')
+                    if not syncing:
+                        log('[GMX] SYNC_UPLOAD=false：此 Jenkins SUCCESS 不等于下游 Upload 完成，需独立核对')
                     if regex:
                         # Check actual final build console, not previously cached success.
                         if not console:

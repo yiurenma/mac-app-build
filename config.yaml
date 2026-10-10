@@ -26,13 +26,21 @@ jenkins:
   gmx_defaults:
     BUILD_TYPE: "Develop"
     SIGNING_REPO_BRANCH: "master"
-    SYNC_UPLOAD: true
+    SYNC_UPLOAD: true  # 业务要求；Jenkins 原生默认未勾选，工具会显式勾选
+    SKIP_TEST: true     # 截图中 GMX 默认已勾选
+    FORCE: true         # 截图中 GMX 默认已勾选
+    KEEP_ALIVE: false   # 截图中 GMX 默认未勾选
     CUSTOM_FOLDER: ""  # 留空按 0_A_<country>_<project> 自动生成
   # 自定义 Jenkins 字段选择器（只有自动定位失败时才需要填写）
   gmx_fields:
     ENTITIES: ""
     SYNC_UPLOAD: ""
     CUSTOM_FOLDER: ""
+    BUILD_TYPE: ""
+    SIGNING_REPO_BRANCH: ""
+    SKIP_TEST: ""
+    FORCE: ""
+    KEEP_ALIVE: ""
 
 build:
   max_parallel: 2

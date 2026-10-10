@@ -51,9 +51,10 @@ async function submitBuild(evt){evt.preventDefault();const button=$('submit-buil
    'plugin_url','gmx_url','plugin_parent','gmx_parent','browser_channel','gmx_build_type','gmx_signing_repo_branch',
    'gmx_custom_folder','discover_poll_seconds','poll_seconds','result_poll_seconds','console_settle_seconds','discover_timeout_minutes',
    'build_timeout_minutes','callback_timeout_minutes','max_changed_lines','upload_success_pattern',
-   'selector_entities','selector_sync_upload','selector_custom_folder','selector_build_type','selector_signing_repo_branch'])body[name]=data.get(name)||'';
+   'selector_entities','selector_sync_upload','selector_custom_folder','selector_build_type','selector_signing_repo_branch',
+   'selector_skip_test','selector_force','selector_keep_alive'])body[name]=data.get(name)||'';
  body.visible=form.elements.visible.checked;body.verbose=form.elements.verbose.checked;
- body.gmx_sync_upload=form.elements.gmx_sync_upload.checked;
+ for(const name of ['gmx_sync_upload','gmx_skip_test','gmx_force','gmx_keep_alive'])body[name]=form.elements[name].checked;
  button.disabled=true;button.textContent='Starting build...';$('form-message').textContent='正在检查环境并创建任务...';$('form-message').classList.remove('error');
  try{const res=await api('/api/tasks',{method:'POST',body:JSON.stringify(body)});form.elements.jenkins_password.value='';form.elements.github_token.value='';form.elements.jenkins_user.value='';$('form-message').textContent='任务已创建：'+res.task.id;toast('构建任务已启动 · '+res.task.id);await refreshDoctor();await loadTasks();setSelected(res.task.id);document.getElementById('activity').scrollIntoView({behavior:'smooth',block:'start'});}
  catch(e){$('form-message').textContent=e.message;$('form-message').classList.add('error');toast(e.message,true)}finally{button.disabled=false;button.textContent='▶   Start build  ↗';}}
@@ -81,9 +82,9 @@ function installDefaults(defaults){
       }
     }else if(key==='max_parallel'){
       f.max_parallel_display.value=String(value);
-    }else if(f[key]&&key!=='gmx_custom_folder'&&key!=='gmx_sync_upload'){
+    }else if(f[key]&&key!=='gmx_custom_folder'&&!['gmx_sync_upload','gmx_skip_test','gmx_force','gmx_keep_alive'].includes(key)){
       f[key].value=String(value);
-    }else if(key==='gmx_sync_upload')f.gmx_sync_upload.checked=Boolean(value);
+    }else if(['gmx_sync_upload','gmx_skip_test','gmx_force','gmx_keep_alive'].includes(key))f[key].checked=Boolean(value);
   }
   syncSummary();
 }

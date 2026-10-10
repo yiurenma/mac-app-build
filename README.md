@@ -1,5 +1,11 @@
-# HSBC UK PBB — Mac APP Build Automation (v0.6.7)
+# HSBC UK PBB — Mac APP Build Automation (v0.6.8)
 
+
+## v0.6.8 — GMX 参数化运行模式适配
+
+GMX Jenkins 与 Plugin 不同：首次 #1 可显示 `Build disabled: ENTITIES or BUILD_TYPE is empty`，这属于参数尚未生效的初始化，不要求成功；正式构建通过 **Build with Parameters** 触发，例如 #2 成功结束；**没有发现 Plugin 那种 Manual Trigger → Manual Callback 结构，GMX 只监控本次正式 Build**。
+
+GMX 参数页按现场截图新增 `SKIP_TEST`（默认 true）、`FORCE`（默认 true）、`KEEP_ALIVE`（默认 false）。工具仍按原业务要求显式设置 `SYNC_UPLOAD=true`（截图中 Jenkins 原生默认 false）；如果用户主动关闭，将标记下游上传尚未独立验证，不能把当前 Job SUCCESS 当成 Upload SUCCESS。所有参数都在构建前回读校验。详见 [GMX 适配说明](docs/16-v0.6.8-GMX参数化构建适配.md)。
 
 ## v0.6.7 — Plugin / GMX URL 状态测试增强
 

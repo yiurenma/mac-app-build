@@ -57,7 +57,8 @@ class DefaultsTest(unittest.TestCase):
             self.assertEqual(params['gmx_url'], body['gmx_url'])
             self.assertEqual(params['gmx_parameters'], {'BUILD_TYPE':'Release',
                 'SIGNING_REPO_BRANCH':'release/1.3','SYNC_UPLOAD':False,
-                'CUSTOM_FOLDER':'0_A_UK_Custom'})
+                'CUSTOM_FOLDER':'0_A_UK_Custom',
+                'SKIP_TEST':True,'FORCE':True,'KEEP_ALIVE':False})
             self.assertIn('plugin-jenkins.corp', params['plugin_job'])
             self.assertIn('gmx-jenkins.corp', params['gmx_job'])
             self.assertEqual(params['jenkins_settings']['discover_poll_seconds'], 15)
