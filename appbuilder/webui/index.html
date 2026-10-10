@@ -22,7 +22,7 @@
         <strong>localhost:8765</strong>
         <p>运行在本机 · 无外部服务</p>
       </div>
-      <div class="sidebar-foot">v0.6.3 <span>·</span> Made for macOS</div>
+      <div class="sidebar-foot">v0.6.4 <span>·</span> Made for macOS</div>
     </aside>
     <main class="main">
       <header class="topbar">
@@ -82,7 +82,8 @@
                   <div class="group-head group-divider"><span>D</span> JENKINS TIMING & RETRIES</div>
                   <div class="form-grid">
                     <label>新 Job 轮询间隔（秒）<input type="number" name="discover_poll_seconds" min="5" max="3600" step="1" value="10" required></label>
-                    <label>Build 状态轮询（秒）<input type="number" name="poll_seconds" min="10" max="3600" step="1" value="45" required></label>
+                    <label>Build 页面备用检查（秒）<input type="number" name="poll_seconds" min="10" max="3600" step="1" value="45" required></label>
+                    <label>构建结果快速检测（秒）<input type="number" name="result_poll_seconds" min="2" max="60" step="1" value="5" required></label>
                     <label>Console 最终日志等待（秒）<input type="number" name="console_settle_seconds" min="1" max="120" step="1" value="10" required></label>
                     <label>等待 Job 创建超时（分钟）<input type="number" name="discover_timeout_minutes" min="1" max="240" step="1" value="30" required></label>
                     <label>Build 超时（分钟）<input type="number" name="build_timeout_minutes" min="1" max="1440" step="1" value="180" required></label>

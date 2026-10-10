@@ -28,6 +28,7 @@ class DefaultsTest(unittest.TestCase):
         self.assertIn('global-ios-upload', d['gmx_parent'])
         self.assertEqual(d['discover_poll_seconds'], 10)
         self.assertEqual(d['poll_seconds'], 45)
+        self.assertEqual(d['result_poll_seconds'], 5)
         self.assertEqual(d['gmx_build_type'], 'Develop')
         self.assertEqual(d['gmx_signing_repo_branch'], 'master')
         self.assertTrue(d['gmx_sync_upload'])
@@ -40,7 +41,7 @@ class DefaultsTest(unittest.TestCase):
                     plugin_parent='https://plugin-jenkins.corp/job/release/job/',
                     gmx_parent='https://gmx-jenkins.corp/job/upload/job/',
                     browser_channel='msedge', discover_poll_seconds='15',
-                    poll_seconds='55', console_settle_seconds='20',
+                    poll_seconds='55', result_poll_seconds='3', console_settle_seconds='20',
                     gmx_build_type='Release', gmx_signing_repo_branch='release/1.3',
                     gmx_custom_folder='0_A_UK_Custom', gmx_sync_upload=False,
                     max_changed_lines='150', selector_build_type='input[name="buildType"]')
@@ -61,6 +62,7 @@ class DefaultsTest(unittest.TestCase):
             self.assertIn('gmx-jenkins.corp', params['gmx_job'])
             self.assertEqual(params['jenkins_settings']['discover_poll_seconds'], 15)
             self.assertEqual(params['jenkins_settings']['poll_seconds'], 55)
+            self.assertEqual(params['jenkins_settings']['result_poll_seconds'], 3)
             self.assertEqual(params['jenkins_settings']['gmx_fields']['BUILD_TYPE'], 'input[name="buildType"]')
             self.assertEqual(params['build_settings']['max_changed_lines'], 150)
             self.assertEqual(response['project'], 'PayByBank')
@@ -90,6 +92,7 @@ class DefaultsTest(unittest.TestCase):
         self.assertEqual(gmx['BUILD_TYPE'], 'Develop')
         self.assertTrue(gmx['SYNC_UPLOAD'])
         self.assertEqual(jenkins['poll_seconds'], 45)
+        self.assertEqual(jenkins['result_poll_seconds'], 5)
         self.assertEqual(build['max_changed_lines'], 100)
 
     def test_reject_credentials_in_urls_before_creating_tasks(self):
@@ -101,7 +104,7 @@ class DefaultsTest(unittest.TestCase):
 
     def test_reject_invalid_poll_and_regexp_and_enum(self):
         for invalid in [
-            {'poll_seconds':'2'}, {'discover_poll_seconds':'abc'},
+            {'poll_seconds':'2'}, {'result_poll_seconds':'0'}, {'discover_poll_seconds':'abc'},
             {'gmx_sync_upload':'false'}, {'browser_channel':'firefox'},
             {'upload_success_pattern':'[unclosed'},
             {'gmx_custom_folder':'../escape'},

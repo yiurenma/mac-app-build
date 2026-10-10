@@ -17,7 +17,7 @@
 
 在一台 Mac 上**并发运行多个独立**的 Plugin → GMX → Jenkins APP 打包任务。
 
-### v0.6.3 — 一键启动稳定性增强
+### v0.6.4 — 一键启动稳定性增强
 
 - 双击 `Start APP Builder.command` 时，若本地 Web Console 已运行，会**直接打开现有页面**，不会重复占用端口。
 - GitHub 暂时不可访问或 `config.yaml` 存在本地未提交的修改时，**跳过更新但继续启动 Web Console**；只有对 `run/resume --update` 的显式更新仍遵循原有严格停止策略。
@@ -44,7 +44,7 @@
 
 > **当前 v0.6 已增加独立 Web Console、安全的本地 HTTP API 与离线回归。真实 Nexus/SSO/Plugin/GMX Jenkins 仍需在公司 Mac 和企业网络中现场联调，不能把离线模拟当作端到端成功。**
 
-## v0.6.3 — 页面可编辑的默认输入参数
+## v0.6.4 — 页面可编辑的默认输入参数
 
 **New build** 的五个常用字段保留不变。展开 **高级参数 & Jenkins Defaults** 即可查看、修改：
 
@@ -55,7 +55,7 @@
 
 页面从 `config.yaml` 读取默认值，并展示自动派生的 Plugin/GMX 分支命名和 GMX 自定义目录。每个任务的实际设置写入独立的任务状态，**不会覆盖公司公用 YAML 配置，也不会影响其他正在并发运行的任务**。已有任务的 Resume 保持原任务参数。GitHub Token、Jenkins 密码只经 Mac Keychain 管理，不写入任务数据库。
 
-更多说明见 [v0.6.3 Web 参数配置手册](docs/11-v0.6.3-Web参数补齐与验证.md)。
+更多说明见 [v0.6.4 Web 参数配置手册](docs/11-v0.6.4-Web参数补齐与验证.md)。
 
 ## 0. 工作流
 
@@ -310,7 +310,7 @@ Plugin / GMX 分支 Push 后，Jenkins 可能需要时间扫描分支并创建 J
 不会在 404 页面上尝试点击 Build。
 
 
-## v0.6.3 Jenkins Callback 已成功但监控不结束
+## v0.6.4 Jenkins Callback 已成功但监控不结束
 
 - 访问 `/<build>/consoleText` 后等待控制台真正出现**末行** `Finished: SUCCESS/FAILURE/...`，不会因为页面已触发 `DOMContentLoaded` 就立刻离开。
 - 额外等待由 `jenkins.console_settle_seconds` 控制（默认 10 秒）。未加载完时仍会安全检查当前编号 Build 页面头部的结果图标，后续继续重试。
@@ -319,3 +319,14 @@ Plugin / GMX 分支 Push 后，Jenkins 可能需要时间扫描分支并创建 J
 - 如果公司 Jenkins 的自定义状态 HTML 不在受支持的头部结构中，会持续等待并记录诊断信息，不根据其他 Build 的绿标误判。
 
 真实企业 Jenkins/SSO 需要 Mac 内网联调。
+
+
+## v0.6.4 — Jenkins 构建结果快速确认（Plugin / GMX 共用）
+
+- Jenkins Build 完成后无需等待 Chrome 渲染 Console Output。由 Playwright 已登录浏览器上下文的 `context.request.get()` 直接读取当前 Build 的 `/consoleText` 原始 HTTP 响应（不是 Jenkins REST API）。
+- 默认每 **5 秒**检查 `Finished: SUCCESS/FAILURE/ABORTED/UNSTABLE/NOT_BUILT` 最后一行；已完成的 Build 通常在下一次轮询即可识别，不代表真实构建耗时缩短。
+- `poll_seconds=45` 只作为 Job 页面状态与 Callback 备用检测；新 `result_poll_seconds=5` 单独配置，也可在 Web Console 高级参数中修改。
+- 登录重定向、403、响应未完整等均不当作成功；保留当前 Build 状态图标备用识别和任务断点恢复。
+- 旧 Worker 必须退出，新 Worker 才能加载升级后的检查逻辑。
+
+详细说明见 [快速结果检测设计与验收](docs/12-v0.6.4-快速结果检测.md)。

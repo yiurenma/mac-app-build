@@ -18,6 +18,8 @@ jenkins:
   build_timeout_minutes: 180
   callback_timeout_minutes: 30
   poll_seconds: 45
+  # 最新 Build 的原始 consoleText 轮询，不依赖 Chrome DOM 渲染。
+  result_poll_seconds: 5
   # Console 打开后额外等待最终 Finished 行，避免 DOMContentLoaded 过早切走。
   console_settle_seconds: 10
   # GMX Build with Parameters 的可编辑默认值：网页自动读入。

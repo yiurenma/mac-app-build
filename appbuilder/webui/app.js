@@ -49,7 +49,7 @@ async function loadScreens(){if(!state.selected)return;const selected=state.sele
 async function submitBuild(evt){evt.preventDefault();const button=$('submit-build'),form=$('build-form');const data=new FormData(form);
  const body={};for(const name of ['plugin_branch','gmx_branch','plugin_version','country','project_name','jenkins_user','jenkins_password','github_token',
    'plugin_url','gmx_url','plugin_parent','gmx_parent','browser_channel','gmx_build_type','gmx_signing_repo_branch',
-   'gmx_custom_folder','discover_poll_seconds','poll_seconds','console_settle_seconds','discover_timeout_minutes',
+   'gmx_custom_folder','discover_poll_seconds','poll_seconds','result_poll_seconds','console_settle_seconds','discover_timeout_minutes',
    'build_timeout_minutes','callback_timeout_minutes','max_changed_lines','upload_success_pattern',
    'selector_entities','selector_sync_upload','selector_custom_folder','selector_build_type','selector_signing_repo_branch'])body[name]=data.get(name)||'';
  body.visible=form.elements.visible.checked;body.verbose=form.elements.verbose.checked;

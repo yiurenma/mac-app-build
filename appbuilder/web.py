@@ -115,6 +115,7 @@ def form_defaults(config):
         'browser_channel': j.get('browser_channel', 'chrome'),
         'discover_poll_seconds': j.get('discover_poll_seconds', 10),
         'poll_seconds': j.get('poll_seconds', 45),
+        'result_poll_seconds': j.get('result_poll_seconds', 5),
         'console_settle_seconds': j.get('console_settle_seconds', 10),
         'discover_timeout_minutes': j.get('discover_timeout_minutes', 30),
         'build_timeout_minutes': j.get('build_timeout_minutes', 180),
@@ -170,6 +171,7 @@ def build_preferences(body, config, country, project):
     jenkins['browser_channel'] = browser
     for key, lo, hi in (
         ('discover_poll_seconds', 5, 3600), ('poll_seconds', 10, 3600),
+        ('result_poll_seconds', 2, 60),
         ('console_settle_seconds', 1, 120), ('discover_timeout_minutes', 1, 240),
         ('build_timeout_minutes', 1, 1440), ('callback_timeout_minutes', 1, 240)):
         jenkins[key] = _integer_field(body, key, d[key], lo, hi)

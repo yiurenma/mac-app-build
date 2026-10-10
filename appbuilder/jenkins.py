@@ -10,7 +10,7 @@ import time
 import tempfile
 from pathlib import Path
 from urllib.parse import urlsplit, unquote
-from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
+from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout, Error as PlaywrightError
 from .auth import read_credentials, approved_login_host, submit_recognized_login
 from .versions import parse_artifacts, folder
 from .store import patch_runtime, read_state
@@ -116,6 +116,7 @@ class JenkinsBrowser:
         self.page = self.context.new_page()
         self.page.set_default_timeout(12000)
         self.poll = max(10, int(self.conf.get('poll_seconds', 45)))
+        self.result_poll = max(2, min(60, int(self.conf.get('result_poll_seconds', 5))))
         # Branch jobs are created asynchronously after a Git push. Keep this
         # discovery cadence independent from long-running Build monitoring.
         self.discover_poll = max(1, int(self.conf.get('discover_poll_seconds', 10)))
@@ -441,15 +442,110 @@ class JenkinsBrowser:
             time.sleep(self.poll)
         raise NeedsAttention(f'触发后没有发现 Build Number。可能仍在队列中，请人工确认: {job_url}')
 
+    def _heading_result(self, number):
+        """Only the numbered Build header, never old successful jobs in sidebar."""
+        selector = (
+            '#build-status-icon, #buildStatus, #build-status, .build-status-icon, '
+            '#main-panel .jenkins-build-status, #main-panel .page-headline svg, '
+            '#main-panel h1 svg, #main-panel .jenkins-build-status svg, '
+            '#main-panel .build-status svg, #main-panel .page-headline .svg-icon'
+        )
+        operation('PW', f'page.locator({selector!r}) 检查 Build #{number} 标题的状态图标')
+        icons = self.page.locator(selector)
+        for index in range(min(icons.count(), 12)):
+            info = icons.nth(index).evaluate(
+                '(el) => [el.className?.baseVal || el.className, '
+                'el.getAttribute("title"), el.getAttribute("aria-label"), '
+                'el.getAttribute("alt"), el.outerHTML.slice(0,1600)].join(" ")')
+            result = result_from_status_markup(info)
+            if result:
+                action('JENKINS', f'{self.site} Build #{number} 页面标题图标确认终态: {result}')
+                return result
+        return None
+
+    def _fast_console_result(self, build_url, number):
+        """Read raw consoleText HTTP response through this browser's cookie context.
+
+        No Jenkins REST API, no browser DOM rendering, no public credentials.
+        A 200 response can still be an INCOMPLETE running log: accept only the
+        final Finished marker. Never take an earlier SUCCESS in log history.
+        """
+        url = build_url + 'consoleText'
+        operation('PW', f'context.request.get({url}, timeout=10000) [原始日志，非页面渲染]')
+        try:
+            response = self.context.request.get(url, timeout=10000)
+            status = response.status
+            final_host = urlsplit(response.url).hostname
+            if (final_host != urlsplit(url).hostname
+                    or urlsplit(response.url).path != urlsplit(url).path):
+                action('WAIT', f'{self.site} Build #{number} 原始日志请求发生登录跳转，检查浏览器会话')
+                return None
+            if status in (401, 403):
+                raise NeedsAttention(f'{self.site} Build #{number} 原始日志 HTTP {status}，请检查 Jenkins 权限/SSO')
+            if status != 200:
+                action('WAIT', f'{self.site} Build #{number} 原始日志 HTTP {status}，使用页面状态备用检查')
+                return None
+            # HTTP response contains the server text directly, even when
+            # Chrome Console Output is still busy asynchronously rendering.
+            tail = response.text()[-30000:]
+            result = final_result_from_console(tail)
+            if result:
+                action('JENKINS', f'{self.site} Build #{number} 原始 Console 已确认: {result}（无需等待页面加载）')
+                return result, tail
+            return None
+        except (PlaywrightTimeout, PlaywrightError) as exc:
+            action('WAIT', f'{self.site} Build #{number} 原始日志暂不可读 ({type(exc).__name__})，切换备用检测')
+            return None
+
+    def _wait_result_fast(self, job_url, number, minutes=None, *, watch_callback=False):
+        """5s default result detection; slower header/callback probe as fallback."""
+        deadline = time.monotonic() + 60 * float(minutes or self.conf.get('build_timeout_minutes', 180))
+        start = time.monotonic()
+        build_url = job_url + str(number) + '/'
+        interval = max(2, min(60, int(getattr(self, 'result_poll', 5))))
+        header_interval = max(15, int(getattr(self, 'poll', 45)))
+        next_header_probe = 0
+        action('JENKINS', f'{self.site} 快速监控 Build #{number}：每 {interval}s 读取原始 Console，'
+                         f'并每 {header_interval}s 检查构建页面')
+        while time.monotonic() < deadline:
+            found = JenkinsBrowser._fast_console_result(self, build_url, number)
+            if found:
+                return found
+            now = time.monotonic()
+            if now >= next_header_probe:
+                code = self.visit(build_url)
+                if code in (401, 403):
+                    raise NeedsAttention(f'{self.site} Build #{number} 页面无访问权限 (HTTP {code})')
+                if code == 200:
+                    result = JenkinsBrowser._heading_result(self, number)
+                    if result:
+                        return result, ''
+                    if watch_callback:
+                        child = self.find_callback(job_url, number)
+                        if child is not None:
+                            action('CALLBACK', f'{self.site} Build #{number} 已创建 Callback #{child}；改为监控 #{child}')
+                            return 'DELEGATED', str(child)
+                else:
+                    action('WAIT', f'{self.site} Build #{number} 页面 HTTP {code}，继续检查原始 Console')
+                next_header_probe = time.monotonic() + header_interval
+            action('WAIT', f'{self.site} Build #{number} 尚未出现最终 Finished 标记；'
+                           f'已等待 {int(time.monotonic()-start)}s，{interval}s 后重查')
+            time.sleep(min(interval, max(0, deadline - time.monotonic())))
+        raise TimeoutError(f'{self.site} Build #{number} 结果未确认，超出构建监控时间；'
+                           f'请直接检查 {build_url}consoleText')
+
     def wait_result(self, job_url, number, minutes=None, *, watch_callback=False):
+        # Ordinary real browser contexts always have context.request. Old unit
+        # stubs can still exercise the conservative DOM-based fallback below.
+        if getattr(getattr(self, 'context', None), 'request', None) is not None:
+            return JenkinsBrowser._wait_result_fast(self, job_url, number, minutes,
+                                                    watch_callback=watch_callback)
         deadline = time.monotonic() + 60 * float(minutes or self.conf.get('build_timeout_minutes', 180))
         start = time.monotonic()
         action('JENKINS', f'{self.site} 正在监控 Build #{number}: {job_url}{number}/')
         build_url = job_url + str(number) + '/'
         while time.monotonic() < deadline:
-            # /consoleText is browser-accessible and often renders asynchronously.
-            # DOMContentLoaded DOES NOT mean the Jenkins console reached its last
-            # line. Wait for the *final* marker before navigating away.
+            # Legacy fallback if a browser request context is not available.
             code = self.visit(build_url + 'consoleText', timeout=120000)
             if code == 200:
                 remaining = max(0, deadline - time.monotonic())
@@ -465,9 +561,8 @@ class JenkinsBrowser:
                             }""",
                             timeout=int(settle * 1000), polling=500)
                     except PlaywrightTimeout:
-                        action('WAIT', f'{self.site} Build #{number} Console Output 暂未加载到 Finished，'
-                                       '转为检查 Build 页面状态')
-                operation('PW', 'page.locator(body).evaluate(最后30000字符，判定 Finished) [正文不会直接打印]')
+                        action('WAIT', f'{self.site} Build #{number} Console Output 尚未到 Finished，改查 Build 状态')
+                operation('PW', 'page.locator(body).evaluate(后30000字符) [日志正文不直接打印]')
                 end = self.page.locator('body').evaluate('(e) => e.innerText.slice(-30000)')
                 result = final_result_from_console(end)
                 if result:
@@ -475,41 +570,20 @@ class JenkinsBrowser:
                     return result, end
             elif code in (401, 403):
                 raise NeedsAttention(f'{self.site} Build #{number} Console 无权读取 (HTTP {code})')
-
-            # Console may remain incomplete/blocked even after the Build has
-            # finished. Inspect only the CURRENT build's heading/status icon;
-            # never use job history, artifact cards, or arbitrary page text.
             code = self.visit(build_url)
             if code not in (200,):
                 raise NeedsAttention(f'Build #{number} 页面 HTTP {code}')
-            selector = (
-                '#build-status-icon, #buildStatus, #build-status, .build-status-icon, '
-                '#main-panel .jenkins-build-status, #main-panel .page-headline svg, '
-                '#main-panel h1 svg, #main-panel .jenkins-build-status svg, '
-                '#main-panel .build-status svg, #main-panel .page-headline .svg-icon'
-            )
-            operation('PW', f'page.locator({selector!r}) 检查 Build #{number} 标题的状态图标')
-            icons = self.page.locator(selector)
-            for index in range(min(icons.count(), 12)):
-                info = icons.nth(index).evaluate(
-                    '(el) => [el.className?.baseVal || el.className, '
-                    'el.getAttribute("title"), el.getAttribute("aria-label"), '
-                    'el.getAttribute("alt"), el.outerHTML.slice(0,1600)].join(" ")')
-                status = result_from_status_markup(info)
-                if status:
-                    action('JENKINS', f'{self.site} Build #{number} 页面标题图标确认终态: {status}')
-                    return status, ''
+            result = JenkinsBrowser._heading_result(self, number)
+            if result:
+                return result, ''
             if watch_callback:
-                # A Plugin Trigger can delegate to an explicitly related
-                # callback. Do not treat a random newer Build as its callback.
                 child = self.find_callback(job_url, number)
                 if child is not None:
                     action('CALLBACK', f'{self.site} Build #{number} 已创建关联 Callback #{child}；切换监控 #{child}')
                     return 'DELEGATED', str(child)
-            action('WAIT', f'{self.site} Build #{number} 状态尚未确认，已等待 {int(time.monotonic()-start)}s'
-                           + ('（同时检查关联 Callback）' if watch_callback else ''))
+            action('WAIT', f'{self.site} Build #{number} 状态尚未确认，已等待 {int(time.monotonic()-start)}s')
             time.sleep(min(self.poll, max(0, deadline - time.monotonic())))
-        raise TimeoutError(f'Jenkins Build #{number} 在 {minutes or self.conf.get("build_timeout_minutes")} 分钟内未结束: {build_url}')
+        raise TimeoutError(f'Jenkins Build #{number} 在监控超时后仍未确认: {build_url}')
 
     def build_artifact_paths(self, job_url, number):
         """Traverse THIS numbered Build's Artifact browser (not Last Successful).
