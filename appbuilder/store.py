@@ -77,6 +77,21 @@ def update_task(task_id, **values):
                    (*values.values(), task_id))
 
 
+def update_task_params(task_id, *, visible=None, verbose=None):
+    """Persist per-task observation options before resuming a stopped worker."""
+    with connect() as db:
+        db.execute('BEGIN IMMEDIATE')
+        r = db.execute('SELECT params FROM tasks WHERE id=?', (task_id,)).fetchone()
+        if not r:
+            raise ValueError('任务不存在: ' + task_id)
+        params = json.loads(r['params'])
+        if visible is not None:
+            params['visible'] = bool(visible)
+        if verbose is not None:
+            params['verbose'] = bool(verbose)
+        db.execute('UPDATE tasks SET params=? WHERE id=?', (json.dumps(params), task_id))
+
+
 def task_folder(task_id):
     return DATA / 'runs' / task_id
 

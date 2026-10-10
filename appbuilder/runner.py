@@ -7,6 +7,7 @@ import re
 import subprocess
 import signal
 import time
+import threading
 from pathlib import Path
 from .config import DATA, load_config, token_or_error
 from .store import task, read_state, patch_runtime, complete, update_task, task_folder
@@ -14,6 +15,7 @@ from .gitops import credentials, clone_branch, git, changed_files, commit_and_pu
 from .verify import plugin_commit, gmx_commit
 from .edits import edit_plugin_versions, update_mobile_ci, validate_lock, ensure_lock_other_entries_unchanged, XCCONFIGS
 from .jenkins import JenkinsBrowser, ensure_bootstrap, formal_build, plugin_artifact_version, NeedsAttention
+from .telemetry import set_verbose, debug, action, operation, safe_text, is_verbose
 
 
 def log(message):
@@ -50,12 +52,38 @@ def run_bootstrap(root: Path, logfile: Path, timeout_minutes=60):
         raise FileNotFoundError(f'GMX 根目录缺少 {script}')
     if not os.access(script, os.X_OK):
         raise RuntimeError('GMX bootstrap.sh 不具备执行权限，请检查 Git 中的可执行位')
-    log('执行 GMX 根目录 ./bootstrap.sh（详情见 bootstrap.log）')
-    with logfile.open('ab') as f:
-        p = subprocess.Popen(['./bootstrap.sh'], cwd=root, stdout=f, stderr=subprocess.STDOUT,
+    action('SHELL', f'$ ./bootstrap.sh  (cwd={root})')
+    action('SHELL', f'子进程输出保存至 {logfile}；--verbose 时同时流式显示（已尝试隐藏凭据）')
+    with logfile.open('a', encoding='utf-8') as f:
+        p = subprocess.Popen(['./bootstrap.sh'], cwd=root, stdout=subprocess.PIPE,
+                             stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+                             text=True, errors='replace', bufsize=1,
                              start_new_session=True, env=os.environ.copy())
+        show_child_output = is_verbose()  # ContextVar is not inherited by Python threads.
+        def consume_output():
+            # Read in another thread so a long silent subprocess can still time out.
+            try:
+                for line in p.stdout:
+                    clean = safe_text(line.rstrip('\r\n'))
+                    f.write(clean + '\n')
+                    f.flush()
+                    if show_child_output:
+                        action('BOOTSTRAP', clean[:2000])
+            finally:
+                p.stdout.close()
+        reader = threading.Thread(target=consume_output, name='bootstrap-output', daemon=True)
+        reader.start()
+        started = time.monotonic()
         try:
-            p.wait(timeout=60 * timeout_minutes)
+            deadline = started + 60 * timeout_minutes
+            while p.poll() is None:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise subprocess.TimeoutExpired('./bootstrap.sh', 60 * timeout_minutes)
+                try:
+                    p.wait(timeout=min(15, remaining))
+                except subprocess.TimeoutExpired:
+                    action('WAIT', f'bootstrap.sh 运行 {int(time.monotonic()-started)}s; 当前日志 {logfile.stat().st_size} bytes')
         except subprocess.TimeoutExpired:
             os.killpg(p.pid, signal.SIGTERM)
             try:
@@ -64,6 +92,9 @@ def run_bootstrap(root: Path, logfile: Path, timeout_minutes=60):
                 os.killpg(p.pid, signal.SIGKILL)
                 p.wait()
             raise TimeoutError('bootstrap.sh 执行超时；请查看 bootstrap.log')
+        finally:
+            reader.join(timeout=10)
+    action('SHELL', f'./bootstrap.sh exit={p.returncode} elapsed={time.monotonic()-started:.1f}s')
     if p.returncode != 0:
         raise RuntimeError(f'bootstrap.sh 失败 (exit={p.returncode})，请查看 {logfile}')
 
@@ -97,6 +128,7 @@ def _run_unlocked(task_id):
         log('任务已经成功完成，不再执行')
         return
     params = json.loads(row['params'])
+    set_verbose(params.get('verbose', False))
     conf = load_config()
     token_or_error(conf)
     home = task_folder(task_id)
@@ -108,6 +140,7 @@ def _run_unlocked(task_id):
     max_lines = int(conf.get('build', {}).get('max_changed_lines', 100))
     update_task(task_id, status='RUNNING', pid=os.getpid(), note='')
     log(f'启动任务 {task_id}; plugin={plugin_branch}; gmx={gmx_branch}')
+    log(f'[MODE] watch=terminal-observer visible={bool(params.get("visible"))} verbose={bool(params.get("verbose"))}')
     try:
         with credentials(conf.get('github', {}).get('token_env', 'GITHUB_TOKEN')) as env:
             def plugin_checkout():
@@ -143,7 +176,7 @@ def _run_unlocked(task_id):
             def plugin_build():
                 rt = read_state(task_id)['runtime']
                 verify_pushed(plugin, plugin_branch, rt['plugin_sha'], env)
-                with JenkinsBrowser(conf, DATA, home, 'plugin') as browser:
+                with JenkinsBrowser(conf, DATA, home, 'plugin', visible=params.get('visible', False), verbose=params.get('verbose', False)) as browser:
                     ensure_bootstrap(browser, params['plugin_job'], task_id, 'plugin')
                     num, _ = formal_build(browser, params['plugin_job'], task_id, 'plugin')
                     v, artifact_build = plugin_artifact_version(browser, params['plugin_job'], num, task_id)
@@ -200,7 +233,7 @@ def _run_unlocked(task_id):
             def gmx_build():
                 rt = read_state(task_id)['runtime']
                 verify_pushed(gmx, gmx_branch, rt['gmx_sha'], env)
-                with JenkinsBrowser(conf, DATA, home, 'gmx') as browser:
+                with JenkinsBrowser(conf, DATA, home, 'gmx', visible=params.get('visible', False), verbose=params.get('verbose', False)) as browser:
                     ensure_bootstrap(browser, params['gmx_job'], task_id, 'gmx')
                     num, console = formal_build(browser, params['gmx_job'], task_id, 'gmx',
                                                 country=params['country'], project=params['project'])

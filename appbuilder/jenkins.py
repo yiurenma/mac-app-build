@@ -12,6 +12,7 @@ from urllib.parse import urlsplit, unquote
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
 from .versions import parse_artifacts, folder
 from .store import patch_runtime, read_state
+from .telemetry import action, debug, operation
 
 
 class NeedsAttention(RuntimeError):
@@ -62,9 +63,11 @@ def interactive_login(config, data_dir: Path, site: str):
 
 
 class JenkinsBrowser:
-    def __init__(self, config, data_dir: Path, task_dir: Path, site: str):
+    def __init__(self, config, data_dir: Path, task_dir: Path, site: str, *, visible=False, verbose=False):
         self.conf = config['jenkins']
         self.site = site
+        self.visible = bool(visible)
+        self.verbose = bool(verbose)
         self.task_dir = task_dir
         self.screens = task_dir / 'screenshots'
         self.screens.mkdir(parents=True, exist_ok=True)
@@ -72,13 +75,21 @@ class JenkinsBrowser:
         if not auth.exists():
             raise NeedsAttention(f'未发现 {site} Jenkins 登录态，请先运行: ./app-build login --site {site}')
         self.playwright = sync_playwright().start()
-        self.browser = self.playwright.chromium.launch(**browser_launch_options(config, headless=True))
+        launch_opts = browser_launch_options(config, headless=not self.visible)
+        if self.visible:
+            launch_opts['slow_mo'] = 300  # make browser clicks visibly observable, not a stealth run
+        operation('PW', f'chromium.launch(channel={launch_opts.get("channel", "chromium")}, headless={launch_opts["headless"]}, slow_mo={launch_opts.get("slow_mo", 0)})')
+        self.browser = self.playwright.chromium.launch(**launch_opts)
+        action('BROWSER', f'{site} Chrome 已启动（{"可见窗口" if self.visible else "后台模式"}）')
+        operation('PW', f'browser.new_context(storage_state=<本地认证文件>, accept_downloads=False)')
         self.context = self.browser.new_context(storage_state=str(auth), accept_downloads=False)
+        operation('PW', 'context.new_page()')
         self.page = self.context.new_page()
         self.page.set_default_timeout(12000)
         self.poll = max(10, int(self.conf.get('poll_seconds', 45)))
 
     def close(self):
+        operation('PW', 'context.close(); browser.close(); playwright.stop()')
         self.context.close()
         self.browser.close()
         self.playwright.stop()
@@ -89,12 +100,16 @@ class JenkinsBrowser:
     def __exit__(self, typ, val, tb):
         if typ:
             try:
+                operation('PW', f'page.screenshot({self.site}-error.png, full_page=False)')
                 self.page.screenshot(path=str(self.screens / f'{self.site}-error.png'), full_page=False)
             except Exception:
                 pass
         self.close()
 
     def visit(self, url, timeout=60000):
+        operation('PW', f'page.goto(url={url}, wait_until=domcontentloaded, timeout={timeout})')
+        started = time.monotonic()
+        debug(f'[BROWSER/{self.site}] navigate {url}')
         try:
             response = self.page.goto(url, wait_until='domcontentloaded', timeout=timeout)
         except PlaywrightTimeout as e:
@@ -106,11 +121,16 @@ class JenkinsBrowser:
             raise NeedsAttention(f'{self.site} 登录可能过期或跳转到 SSO，请重新运行 login --site {self.site}')
         if self.page.locator('input[type="password"]').count():
             raise NeedsAttention(f'{self.site} 登录已过期，请重新运行 login --site {self.site}')
-        return response.status if response else None
+        code = response.status if response else None
+        operation('PW', f'page.goto completed: HTTP={code}, elapsed={time.monotonic()-started:.1f}s, title={self.page.title()}')
+        debug(f'[BROWSER/{self.site}] HTTP {code} page={self.page.title()}')
+        return code
 
     def wait_job(self, job_url):
         timeout = 60 * float(self.conf.get('discover_timeout_minutes', 30))
         deadline = time.monotonic() + timeout
+        start = time.monotonic()
+        action('JENKINS', f'{self.site} 等待 Job 创建: {job_url}')
         while time.monotonic() < deadline:
             http = self.visit(job_url)
             if http == 200 and '404 Not Found' not in self.page.title():
@@ -118,8 +138,7 @@ class JenkinsBrowser:
                 return
             if http in (401, 403):
                 raise NeedsAttention(f'无权查看 Jenkins Job (HTTP {http}): {job_url}')
-            if http not in (200, 404):
-                print(f'[Jenkins/{self.site}] 等待 Job：HTTP {http}', flush=True)
+            action('WAIT', f'{self.site} Job 暂未就绪：HTTP {http}，已等待 {int(time.monotonic()-start)}s，{self.poll}s 后重试')
             time.sleep(self.poll)
         raise TimeoutError(f'Jenkins Job 等待超时: {job_url}')
 
@@ -127,18 +146,24 @@ class JenkinsBrowser:
         self.visit(job_url)
         # Use actionable links only. Raw page text can contain old log messages
         # like 'Build Now' and must never authorize a build click.
+        operation('PW', 'page.get_by_role(link, name=Build with Parameters).count()')
         if self.page.get_by_role('link', name=re.compile(r'Build with Parameters', re.I)).count():
-            return 'parameters'
-        if self.page.get_by_role('link', name=re.compile(r'Build Now|^Build$', re.I)).count():
-            return 'build'
-        return 'unknown'
+            detected = 'parameters'
+        elif self.page.get_by_role('link', name=re.compile(r'Build Now|^Build$', re.I)).count():
+            detected = 'build'
+        else:
+            detected = 'unknown'
+        action('JENKINS', f'{getattr(self, "site", "jenkins")} 页面入口：{detected}（{job_url}）')
+        return detected
 
     def wait_parameter_mode(self, job_url, minutes=12):
         end = time.monotonic() + minutes * 60
+        start = time.monotonic()
         while time.monotonic() < end:
             mode = self.mode(job_url)
             if mode == 'parameters':
                 return
+            action('WAIT', f'{self.site} 等待 Build with Parameters 出现，已等待 {int(time.monotonic()-start)}s')
             time.sleep(self.poll)
         raise NeedsAttention('初始化后未出现 Build with Parameters，请检查 Job 和 Jenkinsfile')
 
@@ -146,6 +171,7 @@ class JenkinsBrowser:
         # Must be job-local links: never "last successful" or jobs of other users.
         root = urlsplit(job_url)
         path = root.path.rstrip('/') + '/'
+        operation('PW', 'page.locator(a[href]).evaluate_all(hrefs) 读取本 Job 的 Build 链接')
         hrefs = self.page.locator('a[href]').evaluate_all('(els) => els.map(e => e.href)')
         numbers = set()
         for href in hrefs:
@@ -156,12 +182,17 @@ class JenkinsBrowser:
             found = re.match(r'^(\d+)(?:/|$)', trailing)
             if found:
                 numbers.add(int(found[1]))
+        operation('PW', f'筛选出 Build Numbers={sorted(numbers)}')
         return numbers
 
     def _safe_click(self, text, role):
+        operation('PW', f'page.get_by_role({role}, name=^{text}$).count()')
         loc = self.page.get_by_role(role, name=re.compile(r'^' + re.escape(text) + r'$', re.I))
         if loc.count() == 1:
+            action('CLICK', f'{self.site}: {role} {text}')
+            operation('PW', f'locator.click() site={self.site} role={role} name={text}')
             loc.click()
+            debug(f'{self.site} click {role} {text} 完成 -> {self.page.url}')
             return
         if loc.count() > 1:
             raise NeedsAttention(f'Jenkins 出现多个 {text} 控件，不自动点击')
@@ -170,20 +201,26 @@ class JenkinsBrowser:
             for css in [f'input[type="submit"][value="{text}"]', f'button:has-text("{text}")']:
                 matches = self.page.locator(css)
                 if matches.count() == 1:
+                    action('CLICK', f'{self.site}: {css}')
+                    operation('PW', f'locator({css}).click()')
                     matches.click()
+                    debug(f'{self.site} click {css} 完成 -> {self.page.url}')
                     return
         raise NeedsAttention(f'页面找不到唯一的 {role}: {text}，请查看 screenshots')
 
     def _find_control(self, field, config_css=''):
         if config_css:
+            operation('PW', f'page.locator({config_css!r}) 配置的 {field} 字段')
             chosen = self.page.locator(config_css)
             if chosen.count() != 1:
                 raise NeedsAttention(f'{field} 配置选择器匹配 {chosen.count()} 个控件（必须为1）')
             return chosen
         # Fields in Jenkins are often not connected to standard <label for>.
+        operation('PW', f'page.get_by_label({field}, exact=True).count()')
         by_label = self.page.get_by_label(field, exact=True)
         if by_label.count() == 1:
             return by_label
+        operation('PW', f'page.get_by_text({field}, exact=True).count()')
         labels = self.page.get_by_text(field, exact=True)
         if labels.count() < 1:
             raise NeedsAttention(f'未找到 Jenkins 参数 {field}，请配置 jenkins.gmx_fields.{field}')
@@ -191,6 +228,7 @@ class JenkinsBrowser:
             lab = labels.nth(i)
             for depth in range(1, 5):
                 parent = lab.locator('xpath=' + '/'.join('..' for _ in range(depth)))
+                operation('PW', f'检查 {field} 标签祖先节点 depth={depth} 的控件数量')
                 controls = parent.locator('select, input:not([type="hidden"]), textarea')
                 if controls.count() == 1:
                     return controls.first
@@ -206,30 +244,38 @@ class JenkinsBrowser:
             exact = [o for o in options if o['value'] == country or o['text'] == country]
             if len(exact) != 1:
                 raise NeedsAttention(f'ENTITIES 找不到唯一国家 {country}: {options[:40]}')
+            operation('PW', f'ENTITIES.select_option(value={exact[0]["value"]})')
             entity.select_option(value=exact[0]['value'])
         elif tag in ('input', 'textarea') and typ not in ('checkbox', 'radio'):
+            operation('PW', f'ENTITIES.fill({country})')
             entity.fill(country)
         else:
             raise NeedsAttention('ENTITIES 不是可识别的下拉框/文本框，请配置字段选择器')
         sync = self._find_control('SYNC_UPLOAD', selectors.get('SYNC_UPLOAD', ''))
         if sync.get_attribute('type') != 'checkbox':
             raise NeedsAttention('SYNC_UPLOAD 不是复选框，请检查 Jenkins 参数')
+        operation('PW', 'SYNC_UPLOAD.check()')
         sync.check()
         target = folder(country, project)
         custom = self._find_control('CUSTOM_FOLDER', selectors.get('CUSTOM_FOLDER', ''))
         if custom.evaluate('(el) => el.tagName.toLowerCase()') not in ('input', 'textarea'):
             raise NeedsAttention('CUSTOM_FOLDER 不是文本框')
+        operation('PW', f'CUSTOM_FOLDER.fill({target})')
         custom.fill(target)
+        action('FORM', f'GMX 参数设置 ENTITIES={country} SYNC_UPLOAD=true CUSTOM_FOLDER={target}')
+        operation('PW', '验证 SYNC_UPLOAD.is_checked() && CUSTOM_FOLDER.input_value()')
         if not sync.is_checked() or custom.input_value() != target:
             raise NeedsAttention('Jenkins 参数填写结果验证失败')
         # Keep BUILD_TYPE / SIGNING_REPO_BRANCH / other parameters unchanged.
         print(f'[Jenkins/gmx] ENTITIES={country} SYNC_UPLOAD=true CUSTOM_FOLDER={target}', flush=True)
 
     def request_build(self, job_url, *, with_parameters, country='', project=''):
+        action('JENKINS', f'{self.site} 准备触发 {"Build with Parameters" if with_parameters else "首次 Build"}')
         self.visit(job_url)
         before = self.build_numbers(job_url)
         if with_parameters:
             self._safe_click('Build with Parameters', 'link')
+            operation('PW', 'page.locator(form).count() 检查参数页')
             if self.page.locator('form').count() == 0:
                 raise NeedsAttention('参数化构建页面没有表单')
             if self.site == 'gmx':
@@ -238,31 +284,39 @@ class JenkinsBrowser:
             self._safe_click('Build', 'button')
         else:
             # normal Build Now; some theme labels this "Build"
+            operation('PW', 'page.get_by_role(link, name=Build Now).count()')
             if self.page.get_by_role('link', name='Build Now').count():
                 self._safe_click('Build Now', 'link')
             else:
                 self._safe_click('Build', 'link')
+        action('JENKINS', f'{self.site} 已点击 Build，等待本次 Build Number (baseline={sorted(before)})')
         return before
 
     def detect_new_build(self, job_url, baseline, minutes=12):
         deadline = time.monotonic() + minutes * 60
+        start = time.monotonic()
         while time.monotonic() < deadline:
             self.visit(job_url)
             candidates = sorted(self.build_numbers(job_url) - set(baseline))
             if len(candidates) == 1:
+                action('JENKINS', f'{self.site} 检测到本次 Build #{candidates[0]}: {job_url}{candidates[0]}/')
                 return candidates[0]
             if len(candidates) > 1:
                 raise NeedsAttention(f'发现多个新 Build {candidates}，无法确认哪个属于本次触发')
+            action('WAIT', f'{self.site} 等待新 Build Number，已等待 {int(time.monotonic()-start)}s；baseline={sorted(baseline)}')
             time.sleep(self.poll)
         raise NeedsAttention(f'触发后没有发现 Build Number。可能仍在队列中，请人工确认: {job_url}')
 
     def wait_result(self, job_url, number, minutes=None):
         deadline = time.monotonic() + 60 * float(minutes or self.conf.get('build_timeout_minutes', 180))
+        start = time.monotonic()
+        action('JENKINS', f'{self.site} 正在监控 Build #{number}: {job_url}{number}/')
         build_url = job_url + str(number) + '/'
         while time.monotonic() < deadline:
             # Browser reads Jenkins' console page, never calls Jenkins REST APIs.
             code = self.visit(build_url + 'consoleText', timeout=120000)
             if code == 200:
+                operation('PW', 'page.locator(body).evaluate(innerText 后30000字符) [正文不会直接打印]')
                 end = self.page.locator('body').evaluate('(e) => e.innerText.slice(-30000)')
                 result = final_result_from_console(end)
                 if result:
@@ -272,6 +326,7 @@ class JenkinsBrowser:
             code = self.visit(build_url)
             if code not in (200,):
                 raise NeedsAttention(f'Build #{number} 页面 HTTP {code}')
+            operation('PW', 'page.locator(#build-status-icon, .build-status-icon) 检查构建状态')
             icon = self.page.locator('#build-status-icon, .build-status-icon')
             if icon.count():
                 info = icon.first.evaluate('(el) => [el.className?.baseVal || el.className, el.getAttribute("title"), el.getAttribute("alt"), el.outerHTML.slice(0,400)].join(" ")').lower()
@@ -283,7 +338,7 @@ class JenkinsBrowser:
                     return 'FAILURE', ''
                 if 'aborted' in info or 'icon-aborted' in info:
                     return 'ABORTED', ''
-            print(f'[Jenkins/{self.site}] Build #{number} 执行中 ...', flush=True)
+            action('WAIT', f'{self.site} Build #{number} 执行中，已运行或等待 {int(time.monotonic()-start)}s')
             time.sleep(self.poll)
         raise TimeoutError(f'Jenkins Build #{number} 在 {minutes or self.conf.get("build_timeout_minutes")} 分钟内未结束: {build_url}')
 
@@ -299,6 +354,7 @@ class JenkinsBrowser:
         queue = [base]
         visited = set()
         paths = set()
+        action('ARTIFACT', f'{getattr(self, "site", "jenkins")} 读取 Build #{number} 的产物目录')
         while queue:
             url = queue.pop(0)
             if url in visited:
@@ -308,6 +364,7 @@ class JenkinsBrowser:
             visited.add(url)
             if self.visit(url) != 200:
                 continue
+            operation('PW', f'page.locator(a[href]).evaluate_all(hrefs) 读取 Artifact 路径 {url}')
             hrefs = self.page.locator('a[href]').evaluate_all('(els) => els.map(a => a.href)')
             for href in hrefs:
                 item = urlsplit(href)
@@ -323,10 +380,12 @@ class JenkinsBrowser:
                         queue.append(new_url)
                 else:
                     paths.add('build-artifact/' + tail)
+        operation('PW', f'本次 Build Artifact 文件数={len(paths)}，候选 tar.gz={[x for x in sorted(paths) if x.endswith(".tar.gz")]}')
         return sorted(paths)
 
     def find_callback(self, job_url, source_number):
         self.visit(job_url)
+        operation('PW', 'page.locator(body).inner_text() 查找本次关联的 Callback')
         text = self.page.locator('body').inner_text()
         return callback_number_from_text(text, source_number)
 
@@ -359,6 +418,7 @@ def ensure_bootstrap(browser: JenkinsBrowser, job_url: str, task_id: str, site: 
     browser.wait_job(job_url)
     mode = browser.mode(job_url)
     if mode == 'parameters':
+        action('JENKINS', f'{site} 已具有参数化入口，跳过初始化 Build')
         patch_runtime(task_id, **{key + '_completed': True})
         return
     if mode != 'build':
@@ -373,6 +433,7 @@ def ensure_bootstrap(browser: JenkinsBrowser, job_url: str, task_id: str, site: 
             # recovered by inspecting new build history; do not click twice.
             browser.visit(job_url)
             baseline = sorted(browser.build_numbers(job_url))
+            action('JENKINS', f'{site} 初始化前已有 Build: {baseline}')
             patch_runtime(task_id, **{key + '_baseline': baseline})
             browser.request_build(job_url, with_parameters=False)
             num = browser.detect_new_build(job_url, baseline)
@@ -395,6 +456,7 @@ def formal_build(browser: JenkinsBrowser, job_url, task_id, site, country='', pr
         else:
             browser.visit(job_url)
             baseline = sorted(browser.build_numbers(job_url))
+            action('JENKINS', f'{site} 正式构建前已有 Build: {baseline}')
             patch_runtime(task_id, **{key + '_baseline': baseline})
             browser.request_build(job_url, with_parameters=True, country=country, project=project)
             num = browser.detect_new_build(job_url, baseline)

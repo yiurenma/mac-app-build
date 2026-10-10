@@ -5,6 +5,8 @@ import subprocess
 from pathlib import Path
 from contextlib import contextmanager
 from tempfile import TemporaryDirectory
+import time
+from .telemetry import debug, safe_command, operation, safe_text
 
 
 @contextmanager
@@ -32,8 +34,17 @@ esac
 
 def git(args, cwd=None, env=None, capture=True):
     command = ['git', '-c', 'credential.helper=', *args]
+    started = time.monotonic()
+    debug(f'$ {safe_command(command, env)} (cwd={cwd or "."})')
     p = subprocess.run(command, cwd=cwd, env=env, text=True,
                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    operation('GIT', f'结束: git {args[0]} exit={p.returncode} elapsed={time.monotonic()-started:.1f}s')
+    if p.stdout.strip():
+        clean = safe_text(p.stdout.strip(), env)
+        if len(clean) > 8000:
+            clean = clean[:8000] + '\n... [输出过长已截断，Git 命令仍完整执行]'
+        for line in clean.splitlines():
+            operation('GIT-OUT', line[:1500])
     if p.returncode:
         # git itself should not print token; avoid echoing untrusted credential messages
         msg = p.stdout[-2500:]
@@ -146,8 +157,10 @@ def recover_pushed_commit(directory: Path, target: str, expected: set[str],
 
 def git_blob(directory: Path, rev: str, relpath: str):
     """Exact bytes: unlike git() it does not strip trailing whitespace or CRLF."""
+    operation('GIT', f'$ git show {rev}:{relpath} (cwd={directory}) [内容不回显]')
     p = subprocess.run(['git', 'show', f'{rev}:{relpath}'], cwd=directory,
                        stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    operation('GIT', f'git show exit={p.returncode} bytes={len(p.stdout)}')
     if p.returncode:
         raise RuntimeError(f'无法读取 Git 版本 {rev} 的文件 {relpath}')
     return p.stdout

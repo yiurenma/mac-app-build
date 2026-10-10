@@ -10,7 +10,7 @@ from datetime import datetime
 from pathlib import Path
 from .config import DATA, ROOT, load_config
 from .versions import validate_args, branch_names, job_urls, folder
-from .store import create_task, task, task_list, update_task, task_folder, active_count
+from .store import create_task, task, task_list, update_task, update_task_params, task_folder, active_count
 from .jenkins import interactive_login
 
 
@@ -25,9 +25,20 @@ def args_parser():
     run.add_argument('--country', default='UK')
     run.add_argument('--dry-run', action='store_true', help='仅预览，不克隆/修改/提交/触发 Jenkins')
     run.add_argument('--wait', action='store_true', help='前台运行，否则后台独立进程执行')
+    run.add_argument('--watch', action='store_true', help='后台运行但实时跟踪终端日志；Ctrl+C 仅退出观察')
+    run.add_argument('--live', action='store_true', help='完整现场模式：相当于 --watch --visible --verbose')
+    run.add_argument('--visible', action='store_true', help='显示 Playwright 操作的 Chrome 窗口（headful）')
+    run.add_argument('--verbose', action='store_true', help='逐项输出 Git 命令、浏览器动作、状态变化（隐藏凭据）')
     resume = sub.add_parser('resume', help='恢复上次未完成任务')
     resume.add_argument('task_id')
     resume.add_argument('--wait', action='store_true')
+    resume.add_argument('--watch', action='store_true', help='恢复任务后实时监控')
+    resume.add_argument('--live', action='store_true', help='恢复时启用完整现场模式')
+    resume.add_argument('--visible', action='store_true', help='恢复后显示真实浏览器')
+    resume.add_argument('--verbose', action='store_true', help='恢复后显示详细操作轨迹')
+    watch = sub.add_parser('watch', help='实时查看现有任务进度、日志和等待时间')
+    watch.add_argument('task_id')
+    watch.add_argument('--interval', type=int, default=15, help='无新日志时显示状态的间隔秒数，默认15')
     worker = sub.add_parser('worker', help=argparse.SUPPRESS)
     worker.add_argument('task_id')
     sub.add_parser('status', help='查看任务')
@@ -47,7 +58,8 @@ def create_params(a, c):
     validate_args(a.plugin_version, a.plugin_branch, a.gmx_branch, country, a.project_name)
     return {'plugin_source': a.plugin_branch, 'gmx_source': a.gmx_branch,
             'plugin_version_input': a.plugin_version, 'country': country,
-            'project': a.project_name, 'plugin_url': plugin_url, 'gmx_url': gmx_url}
+            'project': a.project_name, 'plugin_url': plugin_url, 'gmx_url': gmx_url,
+            'visible': bool(a.visible), 'verbose': bool(a.verbose)}
 
 
 def spawn(task_id, wait=False):
@@ -67,6 +79,56 @@ def spawn(task_id, wait=False):
     print(f'任务后台启动: {task_id} (PID={p.pid})\n日志: ./app-build logs {task_id} --follow')
 
 
+
+STAGES = (
+    'PLUGIN_CHECKOUT', 'PLUGIN_EDIT', 'PLUGIN_PUSH', 'PLUGIN_JENKINS',
+    'GMX_CHECKOUT', 'GMX_EDIT', 'GMX_BOOTSTRAP', 'GMX_PUSH', 'GMX_JENKINS', 'FINISHED',
+)
+
+
+def stage_indicator(stage):
+    """Workflow stage, NOT an estimated Jenkins build completion percentage."""
+    return f"{STAGES.index(stage)+1}/{len(STAGES)}" if stage in STAGES else '-/10'
+
+
+def watch_task(task_id, interval=15):
+    """Passive monitor: prints log lines plus heartbeat; never controls Jenkins."""
+    path = task_folder(task_id) / 'run.log'
+    finished = ('SUCCESS', 'FAILED', 'TIMEOUT', 'NEEDS_ATTENTION', 'INTERRUPTED')
+    last_message = time.monotonic()
+    last_stage = None
+    stream = None
+    try:
+        while True:
+            # Worker can create the log just after task creation.
+            if stream is None and path.exists():
+                stream = path.open('r', encoding='utf-8', errors='replace')
+            line = stream.readline() if stream else ''
+            if line:
+                print(line, end='', flush=True)
+                last_message = time.monotonic()
+                continue
+            row = task(task_id)
+            if row['stage'] != last_stage:
+                print(f"[WATCH] 阶段 {stage_indicator(row['stage'])} {row['stage']} status={row['status']} note={row['note']}", flush=True)
+                last_stage = row['stage']
+            if row['status'] in finished:
+                print(f"[WATCH] 任务结束: {row['status']} {row['note']}", flush=True)
+                return
+            if row['status'] == 'RUNNING' and not alive(row['pid']):
+                print('[WATCH] Worker 进程已经退出；可运行 ./app-build status / resume', flush=True)
+                return
+            if time.monotonic() - last_message >= interval:
+                print(f"[WATCH] 仍在等待：阶段 {stage_indicator(row['stage'])} {row['stage']} | status={row['status']} | 最近 {interval}s 无新日志", flush=True)
+                last_message = time.monotonic()
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print('\n[WATCH] 已退出观察，后台构建任务继续运行。', flush=True)
+    finally:
+        if stream:
+            stream.close()
+
+
 def alive(pid):
     if not pid:
         return False
@@ -82,6 +144,8 @@ def alive(pid):
 def main(argv=None):
     p = args_parser()
     a = p.parse_args(argv)
+    if a.command in ('run', 'resume') and a.live:
+        a.watch = a.visible = a.verbose = True
     if a.command == 'doctor':
         c = load_config()
         print('Python:', sys.version.split()[0], '| macOS:', sys.platform == 'darwin')
@@ -108,6 +172,8 @@ def main(argv=None):
                               'note': '预览而已：没有 Git、Jenkins、文件写入操作。正式任务时间戳由并发管理器分配。'},
                              ensure_ascii=False, indent=2))
             return
+        if a.wait and a.watch:
+            p.error('--wait 和 --watch 不能同时使用')
         if active_count() >= int(c.get('build', {}).get('max_parallel', 2)):
             p.error('并发任务已达上限，请先等待任务结束或调整 config.yaml')
         # Refuse to queue tasks that cannot read an environment token.
@@ -115,12 +181,20 @@ def main(argv=None):
         token_or_error(c)
         payload = create_task(c, params)
         spawn(payload['id'], a.wait)
+        if a.watch:
+            watch_task(payload['id'])
         return
     if a.command == 'worker':
         from .runner import run
         run(a.task_id)
         return
+    if a.command == 'watch':
+        task(a.task_id)  # verify ID even when log has not appeared yet
+        watch_task(a.task_id, interval=max(1, a.interval))
+        return
     if a.command == 'resume':
+        if a.wait and a.watch:
+            p.error('--wait 和 --watch 不能同时使用')
         r = task(a.task_id)
         if r['status'] in ('RUNNING', 'QUEUED') and alive(r['pid']):
             p.error('任务进程仍在运行，不能重复恢复')
@@ -133,7 +207,12 @@ def main(argv=None):
             p.error('并发任务已达上限')
         from .config import token_or_error
         token_or_error(load_config())
+        if a.visible or a.verbose:
+            update_task_params(a.task_id, visible=(True if a.visible else None),
+                               verbose=(True if a.verbose else None))
         spawn(a.task_id, a.wait)
+        if a.watch:
+            watch_task(a.task_id)
         return
     if a.command == 'status':
         for r in task_list():
@@ -141,9 +220,13 @@ def main(argv=None):
             if status == 'RUNNING' and not alive(r['pid']):
                 status = 'INTERRUPTED'
                 update_task(r['id'], status=status, note='进程不在运行；可执行 resume')
-            print(f"{r['id']:23s} {status:17s} {r['stage']:20s} {r['note'][:85]}")
+            print(f"{r['id']:23s} {status:17s} {stage_indicator(r['stage'])} {r['stage']:20s} {r['note'][:85]}")
         return
     if a.command == 'logs':
+        if a.follow:
+            task(a.task_id)
+            watch_task(a.task_id)
+            return
         path = task_folder(a.task_id) / 'run.log'
         if not path.exists():
             print('尚未找到日志文件（前台 --wait 运行直接显示到终端）')

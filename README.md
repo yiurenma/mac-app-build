@@ -1,4 +1,4 @@
-# HSBC UK PBB — Mac APP Build Automation (v0.3.1)
+# HSBC UK PBB — Mac APP Build Automation (v0.4.1)
 
 在一台 Mac 上**并发运行多个独立**的 Plugin → GMX → Jenkins APP 打包任务。
 每个任务有单独的 Git 克隆、时间戳、Jenkins 编号、日志和恢复状态。**没有用 Jenkins REST API**；Jenkins 操作由 Playwright 打开浏览器页面模拟人操作。
@@ -15,7 +15,7 @@
 - [内网 Jenkins/SSO 联调清单](docs/05-企业内网联调清单.md)
 - 流程图：[完整流程](diagrams/01-完整流程.svg) / [Jenkins 状态机](diagrams/02-Jenkins状态机.svg) / [多进程架构](diagrams/03-多进程架构.svg)（均有 PNG 预览及可修改 `.dot` 源码）。
 
-> **v0.3 原版经过三轮离线审查；本次 v0.3.1 Nexus 修复已增加专门测试并重新执行三轮离线回归，但尚未连接公司的 Nexus、SSO、Plugin/GMX Jenkins 真正执行打包。**
+> **v0.3 原版经过三轮离线审查；本次 v0.4.0 Nexus 修复已增加专门测试并重新执行三轮离线回归，但尚未连接公司的 Nexus、SSO、Plugin/GMX Jenkins 真正执行打包。**
 
 ## 0. 工作流
 
@@ -159,3 +159,51 @@ mac-app-builder/
 ```
 
 > 需要实机联调的位置：Jenkins Bootstrap 入口和构建结果 DOM、GMX 的 `ENTITIES` 实际控件类型、Plugin 下游 Callback 及 Artifact 链路、Mac 上 bootstrap 所需权限与工具。第一版已实现通用识别及明确的失败保护，但这些浏览器场景必须由公司内网 Jenkins 实测确认。
+
+
+## 实时监控与可视化操作（v0.4.0）
+
+之前默认后台执行任务，`logs --follow` 只会打印阶段日志；Jenkins 页面在后台浏览器里操作，所以新分支创建后界面出现 `No builds` 时无法直接判断是不是卡住。新版增加以下命令：
+
+```bash
+# 推荐：后台 Worker 继续执行，当前终端实时观察（Ctrl+C 不会停止任务）
+./app-build run --plugin-branch develop --gmx-branch develop \
+  --plugin-version 1.3 --country UK --project-name PayByBank --watch
+
+# 演示/调试模式：显示公司 Chrome 的 Jenkins 页面及详细命令轨迹
+./app-build run --plugin-branch develop --gmx-branch develop \
+  --plugin-version 1.3 --country UK --project-name PayByBank \
+  --watch --visible --verbose
+
+# 已存在任务：不改变或重复触发正在运行的 Build，只在终端旁观
+./app-build status
+./app-build watch TASK_ID
+./app-build logs TASK_ID --follow   # 兼容旧命令，现也有阶段等待心跳
+
+# 如果先前 Worker 已退出，再使用新模式恢复（不要杀正在点击 Build 的进程）
+./app-build resume TASK_ID --watch --visible --verbose
+```
+
+选项说明：
+
+| 选项 | 效果 |
+|---|---|
+| `--watch` | 实时尾随日志，空闲时每 15 秒打印当前阶段及运行状态；按 Ctrl+C 只退出观察，Worker 继续运行 |
+| `--verbose` | 打印 Git 命令和退出码、Jenkins 导航、点击控件、Build Number 等动作；按配置隐藏 Token、密码等凭据 |
+| `--visible` | Playwright 使用可见公司 Chrome 窗口操作 Jenkins；多个独立任务各有自己的 Browser Context |
+| `--wait` | 完全前台运行并直接显示日志；不能和 `--watch` 同时指定 |
+| `watch TASK_ID` | 仅观察已有任务，不会向 Jenkins 发送构建操作 |
+
+* `No builds` 只表示该 Job 暂无 Build 记录；**本次 Build 是否触发，以 Worker 日志中的 `[CLICK]`、`[JENKINS]` 和编号为准**。如长时间停在 `PLUGIN_JENKINS`，先查看 `./app-build status` 和 `./app-build watch TASK_ID`，不要手动重复触发。
+* 浏览器登录态保存在本机 `auth/*.json`；详细日志、错误截图均可能包含企业内部页面信息，请勿上传或公开。`--verbose` 不会打印 Git Token，但仍会输出项目地址及 Jenkins Job URL。
+* Mac 不在图形桌面登录或 Chrome 未安装时，`--visible` 可能失败；此时保持默认无头模式监控即可。
+* 本项目未访问企业 Jenkins 完成端到端验证，首次运行请人工监督。
+
+## 完整现场模式（v0.4.1）
+
+```bash
+./app-build run --plugin-branch develop --plugin-version 1.3 \
+  --gmx-branch develop --country UK --project-name PayByBank --live
+```
+
+`--live` 等于 `--watch --visible --verbose`：Mac 上打开真实 Chrome，终端同步报告每次 Git 命令和结果、Playwright 页面打开/定位/点击/填写、Jenkins 状态轮询，以及 `./bootstrap.sh` 输出。适合首次调试；若只看终端，加 `--watch --verbose` 而不加 `--visible`。操作流水按任务保存在 `.appbuilder/runs/TASK_ID/run.log`，依赖下载输出另外在 `bootstrap.log`。日志尽力隐藏常见凭据，但可能包含企业内部文件名、CI URL 等敏感信息，请勿外传。更多说明见 [实时监控与可见浏览器](docs/06-实时监控与可见浏览器.md)。
