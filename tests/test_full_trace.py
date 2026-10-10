@@ -40,10 +40,13 @@ class FullTraceTests(unittest.TestCase):
             script = root / 'bootstrap.sh'
             script.write_text('#!/bin/sh\necho "Resolving Nexus dependencies"\necho "token=abc123"\n', encoding='utf-8')
             script.chmod(0o755)
+            upgrade = root / 'ci-script'
+            upgrade.write_text('#!/bin/sh\necho upgrade-output\n')
+            upgrade.chmod(0o755)
             trace = io.StringIO()
             set_verbose(True)
             try:
-                with contextlib.redirect_stdout(trace):
+                with contextlib.redirect_stdout(trace), patch.dict(os.environ, {'PATH': str(root) + os.pathsep + os.environ['PATH']}):
                     run_bootstrap(root, root / 'bootstrap.log', timeout_minutes=1)
             finally:
                 set_verbose(False)

@@ -53,10 +53,18 @@ def run_bootstrap(root: Path, logfile: Path, timeout_minutes=60):
         raise FileNotFoundError(f'GMX 根目录缺少 {script}')
     if not os.access(script, os.X_OK):
         raise RuntimeError('GMX bootstrap.sh 不具备执行权限，请检查 Git 中的可执行位')
-    action('SHELL', f'$ ./bootstrap.sh  (cwd={root})')
+    _run_bootstrap_command(['ci-script', 'upgrade'], root, logfile, timeout_minutes)
+    _run_bootstrap_command(['./bootstrap.sh'], root, logfile, timeout_minutes)
+
+
+def _run_bootstrap_command(command, root: Path, logfile: Path, timeout_minutes):
+    label = ' '.join(command)
+    action('SHELL', f'$ {label}  (cwd={root})')
     action('SHELL', f'子进程输出保存至 {logfile}；--verbose 时同时流式显示（已尝试隐藏凭据）')
     with logfile.open('a', encoding='utf-8') as f:
-        p = subprocess.Popen(['./bootstrap.sh'], cwd=root, stdout=subprocess.PIPE,
+        f.write(f'$ {label}\n')
+        f.flush()
+        p = subprocess.Popen(command, cwd=root, stdout=subprocess.PIPE,
                              stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
                              text=True, errors='replace', bufsize=1,
                              start_new_session=True, env=os.environ.copy())
@@ -80,11 +88,11 @@ def run_bootstrap(root: Path, logfile: Path, timeout_minutes=60):
             while p.poll() is None:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
-                    raise subprocess.TimeoutExpired('./bootstrap.sh', 60 * timeout_minutes)
+                    raise subprocess.TimeoutExpired(label, 60 * timeout_minutes)
                 try:
                     p.wait(timeout=min(15, remaining))
                 except subprocess.TimeoutExpired:
-                    action('WAIT', f'bootstrap.sh 运行 {int(time.monotonic()-started)}s; 当前日志 {logfile.stat().st_size} bytes')
+                    action('WAIT', f'{label} 运行 {int(time.monotonic()-started)}s; 当前日志 {logfile.stat().st_size} bytes')
         except subprocess.TimeoutExpired:
             os.killpg(p.pid, signal.SIGTERM)
             try:
@@ -92,12 +100,12 @@ def run_bootstrap(root: Path, logfile: Path, timeout_minutes=60):
             except subprocess.TimeoutExpired:
                 os.killpg(p.pid, signal.SIGKILL)
                 p.wait()
-            raise TimeoutError('bootstrap.sh 执行超时；请查看 bootstrap.log')
+            raise TimeoutError(f'{label} 执行超时；请查看 {logfile}')
         finally:
             reader.join(timeout=10)
-    action('SHELL', f'./bootstrap.sh exit={p.returncode} elapsed={time.monotonic()-started:.1f}s')
+    action('SHELL', f'{label} exit={p.returncode} elapsed={time.monotonic()-started:.1f}s')
     if p.returncode != 0:
-        raise RuntimeError(f'bootstrap.sh 失败 (exit={p.returncode})，请查看 {logfile}')
+        raise RuntimeError(f'{label} 失败 (exit={p.returncode})，请查看 {logfile}')
 
 
 @contextmanager

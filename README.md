@@ -1,4 +1,8 @@
-# HSBC UK PBB — Mac APP Build Automation (v0.7.2)
+# HSBC UK PBB — Mac APP Build Automation (v0.7.3)
+
+## v0.7.3 — Bootstrap 前自动升级 ci-script
+
+正式 GMX 流程与隔离 Bootstrap Test 在原有 Bootstrap 执行段中依次执行 `ci-script upgrade`、`./bootstrap.sh`，使用同一 GMX 工作目录。升级失败立即停止；两个命令的输出进入原有日志，不增加界面操作或独立流程步骤。保留完整 Artifact 版本、lock 校验和测试不提交、不推送、不触发 Jenkins 的边界。
 
 ## v0.7.2 — GMX 复选框标签遮挡修复
 

@@ -77,7 +77,11 @@ class TestRecoveryAndIsolation(unittest.TestCase):
             script = root / 'bootstrap.sh'
             script.write_text('#!/bin/sh\npwd > where-executed.txt\n')
             script.chmod(0o755)
-            run_bootstrap(root, Path(tmp) / 'bootstrap.log', timeout_minutes=1)
+            upgrade = root / 'ci-script'
+            upgrade.write_text('#!/bin/sh\nexit 0\n')
+            upgrade.chmod(0o755)
+            with patch.dict(os.environ, {'PATH': str(root) + os.pathsep + os.environ['PATH']}):
+                run_bootstrap(root, Path(tmp) / 'bootstrap.log', timeout_minutes=1)
             self.assertEqual((root / 'where-executed.txt').read_text().strip(), str(root))
 
     def test_bootstrap_nonzero_exit_fails(self):
@@ -87,7 +91,10 @@ class TestRecoveryAndIsolation(unittest.TestCase):
             script = root / 'bootstrap.sh'
             script.write_text('#!/bin/sh\nexit 17\n')
             script.chmod(0o755)
-            with self.assertRaisesRegex(RuntimeError, r'exit=17'):
+            upgrade = root / 'ci-script'
+            upgrade.write_text('#!/bin/sh\nexit 0\n')
+            upgrade.chmod(0o755)
+            with patch.dict(os.environ, {'PATH': str(root) + os.pathsep + os.environ['PATH']}), self.assertRaisesRegex(RuntimeError, r'exit=17'):
                 run_bootstrap(root, Path(tmp) / 'bootstrap.log', timeout_minutes=1)
 
 class TestTrueSeparateProcesses(unittest.TestCase):

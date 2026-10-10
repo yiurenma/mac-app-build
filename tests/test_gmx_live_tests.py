@@ -128,8 +128,10 @@ class ExecutionFlow(unittest.TestCase):
         self.assertEqual([x['version'] for x in newdeps[:2]],[VERSION,VERSION])
         self.assertEqual(newdeps[2]['version'],'7.0')
         self.assertEqual(len(result['lock_hashes']),2)
-        self.assertEqual([x[2] for x in commands],['Git clone (read-only)','./bootstrap.sh'])
-        self.assertEqual(commands[1][0],['./bootstrap.sh'])
+        self.assertEqual([x[2] for x in commands],['Git clone (read-only)','ci-script upgrade','./bootstrap.sh'])
+        self.assertEqual(commands[1][0],['ci-script','upgrade'])
+        self.assertEqual(commands[2][0],['./bootstrap.sh'])
+        self.assertEqual(commands[1][1],commands[2][1])
         self.assertEqual(result['changed'],[' M mobile-ci.json',' M mobile-ci.lock'])
 
 
