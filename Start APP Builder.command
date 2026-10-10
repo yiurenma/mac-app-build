@@ -3,7 +3,7 @@
 set -e
 cd "$(dirname "$0")"
 echo '=========================================='
-echo ' Mac APP Builder · v0.6.1 Web Console'
+echo ' Mac APP Builder · v0.6.2 Web Console'
 echo '=========================================='
 # Reuse an already running server instead of failing with "Address already in use".
 # This module only uses Python's standard library (no install needed).

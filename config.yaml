@@ -18,6 +18,8 @@ jenkins:
   build_timeout_minutes: 180
   callback_timeout_minutes: 30
   poll_seconds: 45
+  # Console 打开后额外等待最终 Finished 行，避免 DOMContentLoaded 过早切走。
+  console_settle_seconds: 10
   # 自定义 Jenkins 字段选择器（只有自动定位失败时才需要填写）
   gmx_fields:
     ENTITIES: ""

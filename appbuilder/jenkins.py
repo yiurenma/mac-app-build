@@ -39,13 +39,15 @@ def result_from_status_markup(markup):
     build cards and sidebar icons might contain SUCCESS or FAILURE.
     """
     value = str(markup).lower()
+    # Jenkins may encode status in SVG <use href=".../status/blue.svg#blue">
+    # rather than the SVG class; ignore generic icons and unrelated page text.
     if re.search(r'icon-(?:running|progress|building|pending|queued|anime)\b|\b(?:building|running|progress)\b', value):
         return None
     for outcome, signature in (
-        ('FAILURE', r'icon-(?:failure|red)\b|build-status-(?:failure|red)\b|(?:title|aria-label|alt)=["\']failure["\']'),
-        ('ABORTED', r'icon-aborted\b|build-status-aborted\b|(?:title|aria-label|alt)=["\']aborted["\']'),
-        ('UNSTABLE', r'icon-unstable\b|build-status-unstable\b|(?:title|aria-label|alt)=["\']unstable["\']'),
-        ('SUCCESS', r'icon-(?:success|green|blue)\b|build-status-(?:success|green|blue)\b|(?:title|aria-label|alt)=["\']success["\']'),
+        ('FAILURE', r'icon-(?:failure|red)\b|build-status-(?:failure|red)\b|(?:title|aria-label|alt)=["\']failure["\']|(?:status/|status%2f)(?:red|failure)(?:\.svg|[\#/?"\'])|[\#/]failure(?:["\']|\b)'),
+        ('ABORTED', r'icon-aborted\b|build-status-aborted\b|(?:title|aria-label|alt)=["\']aborted["\']|(?:status/|status%2f)aborted(?:\.svg|[\#/?"\'])|[\#/]aborted(?:["\']|\b)'),
+        ('UNSTABLE', r'icon-(?:unstable|yellow)\b|build-status-(?:unstable|yellow)\b|(?:title|aria-label|alt)=["\']unstable["\']|(?:status/|status%2f)(?:yellow|unstable)(?:\.svg|[\#/?"\'])|[\#/]unstable(?:["\']|\b)'),
+        ('SUCCESS', r'icon-(?:success|green|blue)\b|build-status-(?:success|green|blue)\b|(?:title|aria-label|alt)=["\']success["\']|(?:status/|status%2f)(?:blue|green|success)(?:\.svg|[\#/?"\'])|[\#/]success(?:["\']|\b)'),
     ):
         if re.search(signature, value):
             return outcome
@@ -415,50 +417,68 @@ class JenkinsBrowser:
         action('JENKINS', f'{self.site} 正在监控 Build #{number}: {job_url}{number}/')
         build_url = job_url + str(number) + '/'
         while time.monotonic() < deadline:
-            # Browser reads Jenkins' console page, never calls Jenkins REST APIs.
+            # /consoleText is browser-accessible and often renders asynchronously.
+            # DOMContentLoaded DOES NOT mean the Jenkins console reached its last
+            # line. Wait for the *final* marker before navigating away.
             code = self.visit(build_url + 'consoleText', timeout=120000)
             if code == 200:
-                operation('PW', 'page.locator(body).evaluate(innerText 后30000字符) [正文不会直接打印]')
+                remaining = max(0, deadline - time.monotonic())
+                settle = min(max(1, float(self.conf.get('console_settle_seconds', 10))), remaining)
+                if settle > 0 and hasattr(self.page, 'wait_for_function'):
+                    operation('PW', f'page.wait_for_function(Finished marker at END of console, timeout={settle:g}s)')
+                    try:
+                        self.page.wait_for_function(
+                            r"""() => {
+                              const t = document.body?.innerText || document.body?.textContent || '';
+                              const last = t.trim().split(/\r?\n/).filter(s => s.trim()).pop() || '';
+                              return /^Finished:\s*(SUCCESS|FAILURE|ABORTED|UNSTABLE|NOT_BUILT)\s*$/i.test(last);
+                            }""",
+                            timeout=int(settle * 1000), polling=500)
+                    except PlaywrightTimeout:
+                        action('WAIT', f'{self.site} Build #{number} Console Output 暂未加载到 Finished，'
+                                       '转为检查 Build 页面状态')
+                operation('PW', 'page.locator(body).evaluate(最后30000字符，判定 Finished) [正文不会直接打印]')
                 end = self.page.locator('body').evaluate('(e) => e.innerText.slice(-30000)')
                 result = final_result_from_console(end)
                 if result:
-                    print(f'[Jenkins/{self.site}] Build #{number} => {result}', flush=True)
+                    action('JENKINS', f'{self.site} Build #{number} Console 最后一行确认: {result}')
                     return result, end
-            # If Jenkins consoleText is blocked, use DOM status indicator on numbered build.
+            elif code in (401, 403):
+                raise NeedsAttention(f'{self.site} Build #{number} Console 无权读取 (HTTP {code})')
+
+            # Console may remain incomplete/blocked even after the Build has
+            # finished. Inspect only the CURRENT build's heading/status icon;
+            # never use job history, artifact cards, or arbitrary page text.
             code = self.visit(build_url)
             if code not in (200,):
                 raise NeedsAttention(f'Build #{number} 页面 HTTP {code}')
-            # Jenkins 2.x modern UI uses SVG icons, while older instances use
-            # #build-status-icon / .build-status-icon. Only inspect this build's
-            # HEADER status controls; never interpret other jobs' green icons.
-            selector = ("#build-status-icon, .build-status-icon, "
-                        ".jenkins-build-status, .page-headline svg.svg-icon, "
-                        "#main-panel h1 svg.svg-icon, h1 svg.icon-success, "
-                        "h1 svg.icon-failure, h1 svg.icon-aborted, h1 svg.icon-unstable")
-            operation('PW', f'page.locator({selector!r}) 检查当前 Build 的新旧版状态图标')
+            selector = (
+                '#build-status-icon, #buildStatus, #build-status, .build-status-icon, '
+                '#main-panel .jenkins-build-status, #main-panel .page-headline svg, '
+                '#main-panel h1 svg, #main-panel .jenkins-build-status svg, '
+                '#main-panel .build-status svg, #main-panel .page-headline .svg-icon'
+            )
+            operation('PW', f'page.locator({selector!r}) 检查 Build #{number} 标题的状态图标')
             icons = self.page.locator(selector)
-            for index in range(min(icons.count(), 6)):
+            for index in range(min(icons.count(), 12)):
                 info = icons.nth(index).evaluate(
                     '(el) => [el.className?.baseVal || el.className, '
                     'el.getAttribute("title"), el.getAttribute("aria-label"), '
-                    'el.getAttribute("alt"), el.outerHTML.slice(0,700)].join(" ")')
+                    'el.getAttribute("alt"), el.outerHTML.slice(0,1600)].join(" ")')
                 status = result_from_status_markup(info)
                 if status:
-                    action('JENKINS', f'{self.site} Build #{number} 页面图标确认终态: {status}')
+                    action('JENKINS', f'{self.site} Build #{number} 页面标题图标确认终态: {status}')
                     return status, ''
             if watch_callback:
-                # Plugin release-build is a two-part Jenkins pipeline. The
-                # lightweight Manual Trigger (#1) launches a linked Manual
-                # Callback (#2). Some corporate console pages omit the final
-                # "Finished:" line, so don't keep polling #1 after the
-                # explicitly related callback is already visible.
+                # A Plugin Trigger can delegate to an explicitly related
+                # callback. Do not treat a random newer Build as its callback.
                 child = self.find_callback(job_url, number)
                 if child is not None:
                     action('CALLBACK', f'{self.site} Build #{number} 已创建关联 Callback #{child}；切换监控 #{child}')
                     return 'DELEGATED', str(child)
             action('WAIT', f'{self.site} Build #{number} 状态尚未确认，已等待 {int(time.monotonic()-start)}s'
                            + ('（同时检查关联 Callback）' if watch_callback else ''))
-            time.sleep(self.poll)
+            time.sleep(min(self.poll, max(0, deadline - time.monotonic())))
         raise TimeoutError(f'Jenkins Build #{number} 在 {minutes or self.conf.get("build_timeout_minutes")} 分钟内未结束: {build_url}')
 
     def build_artifact_paths(self, job_url, number):

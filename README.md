@@ -17,7 +17,7 @@
 
 在一台 Mac 上**并发运行多个独立**的 Plugin → GMX → Jenkins APP 打包任务。
 
-### v0.6.1 — 一键启动稳定性增强
+### v0.6.2 — 一键启动稳定性增强
 
 - 双击 `Start APP Builder.command` 时，若本地 Web Console 已运行，会**直接打开现有页面**，不会重复占用端口。
 - GitHub 暂时不可访问或 `config.yaml` 存在本地未提交的修改时，**跳过更新但继续启动 Web Console**；只有对 `run/resume --update` 的显式更新仍遵循原有严格停止策略。
@@ -294,3 +294,14 @@ Plugin / GMX 分支 Push 后，Jenkins 可能需要时间扫描分支并创建 J
 日志中的“累计等待 2s”表示已经过了 2 秒，并非每 2 秒轮询。
 超出 `discover_timeout_minutes` 后会报告最后 HTTP 状态、检查次数和目标 URL；
 不会在 404 页面上尝试点击 Build。
+
+
+## v0.6.2 Jenkins Callback 已成功但监控不结束
+
+- 访问 `/<build>/consoleText` 后等待控制台真正出现**末行** `Finished: SUCCESS/FAILURE/...`，不会因为页面已触发 `DOMContentLoaded` 就立刻离开。
+- 额外等待由 `jenkins.console_settle_seconds` 控制（默认 10 秒）。未加载完时仍会安全检查当前编号 Build 页面头部的结果图标，后续继续重试。
+- 兼容 Jenkins 使用 `<svg><use href=".../status/blue.svg#blue"></use></svg>` 而不是 `icon-success` 的构建图标。
+- 支持旧任务安全 `Resume`：不重新点击 Build；只继续监控原来已经存在的 Trigger/Callback。
+- 如果公司 Jenkins 的自定义状态 HTML 不在受支持的头部结构中，会持续等待并记录诊断信息，不根据其他 Build 的绿标误判。
+
+真实企业 Jenkins/SSO 需要 Mac 内网联调。
