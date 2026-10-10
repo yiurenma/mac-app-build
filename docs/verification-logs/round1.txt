@@ -1,5 +1,55 @@
-v0.6.5: Python unittest full suite; real Chromium DOM validation
- in 15.054s
+v0.6.6 regression round 1: 177 tests OK (offline + DOM + local HTTP)
+
+10 07:28:02 [JENKINS] plugin Build #2：优先检查绿色状态勾（每 5s），日志仅作补充确认
+2026-10-10 07:28:02 [JENKINS] plugin Build #2 页面标题图标确认终态: FAILURE
+2026-10-10 07:28:02 [JENKINS] plugin Build #2：优先检查绿色状态勾（每 5s），日志仅作补充确认
+2026-10-10 07:28:02 [WAIT] plugin Build #2 仍未确认终态；已等待 0s，5s 后检查状态勾
+2026-10-10 07:28:02 [JENKINS] plugin Build #2 原始 Console 已确认: SUCCESS（无需等待页面加载）
+2026-10-10 07:28:02 [JENKINS] plugin Build #2：优先检查绿色状态勾（每 5s），日志仅作补充确认
+2026-10-10 07:28:02 [JENKINS] plugin Build #2 页面标题图标确认终态: FAILURE
+2026-10-10 07:28:02 [JENKINS] plugin Build #2：优先检查绿色状态勾（每 5s），日志仅作补充确认
+2026-10-10 07:28:02 [CALLBACK] plugin Build #2 已创建 Callback #3；改为监控 #3
+2026-10-10 07:28:03 [JENKINS] plugin 正在监控 Build #2: https://ci.corp/job/p/2/
+2026-10-10 07:28:03 [WAIT] plugin Build #2 Console Output 尚未到 Finished，改查 Build 状态
+2026-10-10 07:28:03 [JENKINS] plugin Build #2 页面标题图标确认终态: FAILURE
+2026-10-10 07:28:03 [JENKINS] plugin 正在监控 Build #2: https://ci.corp/job/p/2/
+2026-10-10 07:28:03 [WAIT] plugin Build #2 Console Output 尚未到 Finished，改查 Build 状态
+2026-10-10 07:28:03 [JENKINS] plugin Build #2 页面标题图标确认终态: SUCCESS
+2026-10-10 07:28:03 [JENKINS] plugin 正在监控 Build #2: https://ci.corp/job/p/2/
+2026-10-10 07:28:03 [JENKINS] plugin Build #2 Console 最后一行确认: SUCCESS
+2026-10-10 07:28:04 [JENKINS] plugin Build History #2 专属图标确认终态: FAILURE
+2026-10-10 07:28:04 [JENKINS] plugin Build History #2 专属图标确认终态: SUCCESS
+2026-10-10 07:28:04 [JENKINS] plugin Build #2：优先检查绿色状态勾（每 5s），日志仅作补充确认
+2026-10-10 07:28:04 [JENKINS] plugin Build History #2 专属图标确认终态: SUCCESS
+2026-10-10 07:28:05 [ARTIFACT] jenkins 读取 Build #8 的产物目录
+2026-10-10 07:28:05 [ARTIFACT] jenkins 读取 Build #7 的产物目录
+2026-10-10 07:28:05 [JENKINS] plugin 正式构建前已有 Build: []
+2026-10-10 07:28:05 [CALLBACK] Plugin Trigger #1 → Callback #2；下一步监控 Callback
+2026-10-10 07:28:05 [CALLBACK] Plugin Trigger #1 → Callback #2；下一步监控 Callback
+2026-10-10 07:28:05 [JENKINS] gmx 已具有参数化入口，跳过初始化 Build
+2026-10-10 07:28:05 [JENKINS] gmx 正式构建前已有 Build: []
+2026-10-10 07:28:05 [JENKINS] plugin 初始化前已有 Build: []
+[plugin] 初始化构建 #1: FAILURE；等待参数化入口
+2026-10-10 07:28:05 [JENKINS] plugin 正式构建前已有 Build: [1]
+2026-10-10 07:28:05 [JENKINS] plugin 正在监控 Build #1: https://ci.corp/job/release/1/
+2026-10-10 07:28:05 [JENKINS] plugin Build #1 页面标题图标确认终态: FAILURE
+2026-10-10 07:28:05 [JENKINS] plugin 已具有参数化入口，跳过初始化 Build
+2026-10-10 07:28:05 [JENKINS] plugin 正式构建前已有 Build: []
+2026-10-10 07:28:05 [CALLBACK] Plugin Trigger #1 → Callback #2；下一步监控 Callback
+2026-10-10 07:28:05 [JENKINS] plugin 正在监控 Build #1: https://ci.corp/job/release/1/
+2026-10-10 07:28:05 [CALLBACK] plugin Build #1 已创建关联 Callback #2；切换监控 #2
+2026-10-10 07:28:05 [FORM] GMX 参数设置 ENTITIES=UK SYNC_UPLOAD=true CUSTOM_FOLDER=0_A_UK_PayByBank
+[Jenkins/gmx] ENTITIES=UK SYNC_UPLOAD=true CUSTOM_FOLDER=0_A_UK_PayByBank
+2026-10-10 07:28:05 [JENKINS] jenkins 页面入口：unknown（https://ci.corp/job/example/）
+2026-10-10 07:28:05 [BROWSER] plugin Chrome 已启动（可见窗口）
+/usr/lib/python3.13/unittest/mock.py:2247: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7fdab344a110>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+2026-10-10 07:28:05 [AUTH] plugin 检测到登录页面，尝试自动填写账号密码
+2026-10-10 07:28:05 [BROWSER] plugin Chrome 已启动（后台模式）
+2026-10-10 07:28:05 [FORM] GMX 参数设置 ENTITIES=UK SYNC_UPLOAD=false CUSTOM_FOLDER=0_A_UK_Custom
+[Jenkins/gmx] ENTITIES=UK SYNC_UPLOAD=false CUSTOM_FOLDER=0_A_UK_Custom
+----------------------------------------------------------------------
+Ran 177 tests in 8.650s
 
 OK
-

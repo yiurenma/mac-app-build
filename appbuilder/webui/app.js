@@ -87,6 +87,35 @@ function installDefaults(defaults){
   }
   syncSummary();
 }
+let currentDiagnostic=null;
+async function diagnoseJenkins(evt){
+ evt.preventDefault();const form=evt.currentTarget,out=$('diagnose-output');
+ const raw=form.elements.build_number.value.trim();
+ const body={site:form.dataset.site,url:form.elements.url.value.trim(),build_number:raw?Number(raw):null,
+   expected:form.elements.expected.value};
+ const button=form.querySelector('button[type="submit"]');
+ button.disabled=true;const label=button.textContent;button.textContent='正在启动可见 Chrome…';
+ $('diagnose-verdict').textContent=`RUNNING · ${body.site.toUpperCase()} · 允许人工登录 SSO（最长 180 秒）`;
+ $('diagnose-verdict').className='diagnose-verdict';
+ out.textContent=`[START] ${body.site.toUpperCase()} 开始只读单元测试。请查看新弹出的 Chrome，如有登录页可手动输入账号密码。\n`;
+ try{
+  const start=await api('/api/diagnose/start',{method:'POST',body:JSON.stringify(body)});
+  currentDiagnostic=start.id;
+  for(let i=0;i<240;i++){
+    const progress=await api(`/api/diagnose/status/${encodeURIComponent(start.id)}`);
+    if(currentDiagnostic!==start.id)break;
+    out.textContent=progress.logs.join('\n');out.scrollTop=out.scrollHeight;
+    if(progress.status==='DONE'){
+      const r=progress.report||{},el=$('diagnose-verdict');
+      el.textContent=`${r.verdict||'UNKNOWN'} · ${r.site?.toUpperCase()||body.site.toUpperCase()} Build #${r.build_number||'?'} · Expected ${r.expected||body.expected} · Actual ${r.actual||'UNKNOWN'}`;
+      el.className='diagnose-verdict '+String(r.verdict||'unknown').toLowerCase();
+      break;
+    }
+    await new Promise(resolve=>setTimeout(resolve,1000));
+  }
+ }catch(err){$('diagnose-verdict').textContent='ERROR · '+err.message;$('diagnose-verdict').className='diagnose-verdict fail';out.textContent+='\n[ERROR] '+err.message;}
+ finally{button.disabled=false;button.textContent=label;}
+}
 async function init(){const serverAddress=document.querySelector('.connection strong');if(serverAddress)serverAddress.textContent=window.location.host;try{const boot=await api('/api/bootstrap');state.csrf=boot.csrf;installDefaults(boot.config);$('doctor-badge').className=boot.doctor.ready?'dot-label':'dot-label bad';$('doctor-badge').textContent=boot.doctor.ready?'● Environment ready':'● Setup required';$('doctor-badge').title=boot.doctor.messages.join('\n');await loadTasks();await loadLog(true);await loadScreens();}catch(e){toast('本地服务连接失败：'+e.message,true);} }
 document.querySelectorAll('.nav').forEach(e=>e.addEventListener('click',()=>nav(e.dataset.target)));
 $('hero-start').addEventListener('click',()=>nav('new-build'));
@@ -100,6 +129,8 @@ $('build-form').addEventListener('invalid',evt=>{
   if(nested)nested.open=true;
 },true);
 $('build-form').addEventListener('submit',submitBuild);
+$('diagnose-form').addEventListener('submit',diagnoseJenkins);
+$('diagnose-gmx-form').addEventListener('submit',diagnoseJenkins);
 $('resume-build').addEventListener('click',resumeTask);
 $('refresh-tasks').addEventListener('click',loadTasks);
 $('doctor-refresh').addEventListener('click',refreshDoctor);

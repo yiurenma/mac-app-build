@@ -52,6 +52,11 @@ def args_parser():
     logs = sub.add_parser('logs', help='显示任务日志')
     logs.add_argument('task_id')
     logs.add_argument('--follow', '-f', action='store_true')
+    diag = sub.add_parser('diagnose-jenkins', help='只读诊断已有 Jenkins Build，不启动新 Build')
+    diag.add_argument('url', help='分支 Job URL 或具体的 /2/ Build URL')
+    diag.add_argument('--build-number', type=int, help='指定要测试的 Build Number，例如 2')
+    diag.add_argument('--expected', choices=['SUCCESS','FAILURE','ABORTED','UNSTABLE','NOT_BUILT'], default='SUCCESS')
+    diag.add_argument('--visible', action='store_true', default=True, help='兼容参数：诊断模式始终显示 Chrome 并允许手动 SSO 登录')
     login = sub.add_parser('login', help='手动登录 Jenkins，保存本地认证状态')
     login.add_argument('--site', choices=['plugin', 'gmx'], required=True)
     sub.add_parser('doctor', help='检查本机 Python/Git/Playwright/Token')
@@ -221,6 +226,12 @@ def main(argv=None):
         return
     if a.command == 'auth':
         setup_credentials(a)
+        return
+    if a.command == 'diagnose-jenkins':
+        from .diagnose import run_diagnosis
+        output = run_diagnosis(a.url, number=a.build_number, expected=a.expected,
+                               visible=a.visible, emit=lambda s: print(s, flush=True))
+        print('[DIAG] 完整报告：.appbuilder/diagnostics/last-result.json', flush=True)
         return
     if a.command == 'login':
         interactive_login(load_config(), DATA, a.site)

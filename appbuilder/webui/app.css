@@ -25,3 +25,28 @@
 .selectors-panel{margin-top:24px;border-top:1px dashed #365167;padding-top:18px}.selectors-panel>summary{color:#8fe0d7;font-size:11px;cursor:pointer;margin-bottom:14px}
 .selectors-panel .form-grid{margin-top:14px}
 @media(max-width:480px){.advanced-body .form-grid,.summary-grid{grid-template-columns:1fr}.advanced-body .form-grid .span-2,.summary-grid>.span-2{grid-column:auto}}
+
+/* v0.6.6 — Read-only URL diagnostics */
+.diagnose-panel{margin-top:20px;padding:25px 28px}
+.diagnose-form{display:grid;gap:16px;margin:20px 0 16px}
+.diagnose-form label{font-size:11px;color:#a3b8cf;display:flex;flex-direction:column;gap:9px;font-weight:700}
+.diagnose-form input,.diagnose-form select{background:#0e1b2d;border:1px solid #3b5368;border-radius:9px;color:#e5f1ff;padding:12px;font:12px ui-monospace,monospace;width:100%;box-sizing:border-box}
+.diagnose-fields{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.diagnose-actions{display:flex;align-items:center;flex-wrap:wrap;gap:17px}
+.diagnose-form .diag-check{flex-direction:row;align-items:center;font-size:11px;font-weight:400}
+.diagnose-form .diag-check input{width:16px;height:16px;accent-color:#76dcc5}
+.diagnose-verdict{padding:14px;border:1px solid #35556a;border-radius:9px;margin-bottom:16px;background:#192c3d;color:#bcdaea;font-size:13px;font-weight:700}
+.diagnose-verdict.pass{border-color:#4b8d78;background:#17382f;color:#9ce9c6}
+.diagnose-verdict.fail{border-color:#925368;background:#3c2331;color:#ffb9b9}
+.diagnose-verdict.unknown{border-color:#81714e;background:#352d1e;color:#ffe0a0}
+.diagnose-terminal{height:300px;overflow:auto;white-space:pre-wrap;line-height:1.9}
+.diag-note{font-size:11px;color:#92abc1;margin:17px 0 0;line-height:1.8}
+@media(max-width:690px){.diagnose-fields{grid-template-columns:1fr}.diagnose-panel{padding:19px}}
+
+/* v0.6.6: separate real-browser Plugin / GMX read-only unit tests */
+.diagnose-split{display:grid;grid-template-columns:1fr 1fr;gap:15px;margin:18px 0}
+.diag-site-card{background:#112237;border:1px solid #30485e;border-radius:12px;padding:18px}
+.diag-site-card h3{color:#e7f7ff;font-size:14px;margin:0 0 8px}
+.diag-site-card>p{font-size:11px;color:#9cb7c9;line-height:1.7;min-height:35px}
+.diag-site-card .diagnose-fields{grid-template-columns:1fr}
+@media(max-width:1100px){.diagnose-split{grid-template-columns:1fr}}

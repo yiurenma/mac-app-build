@@ -342,3 +342,31 @@ Plugin / GMX 分支 Push 后，Jenkins 可能需要时间扫描分支并创建 J
 
 > 这是 DOM 检测，尚未验证公司实际 Jenkins HTML；有些 Jenkins 主题的
 > 图标标记可能不同。无明确结果不猜测成功，也不会再触发已经创建的构建。
+
+
+## v0.6.6 — Plugin / GMX Jenkins **真实浏览器单元测试**
+
+[现场单元测试使用手册](docs/14-v0.6.6-Plugin-GMX-Jenkins现场单元测试.md)
+
+
+进入 Web Console 左侧 **Jenkins URL Test**。这里提供两个**独立测试入口**：
+
+- **Plugin Jenkins · 单元测试**：粘贴已有 Plugin 分支 Job URL 或 `/2/` Callback Build URL，指定 Build Number（例如 2）和预期 SUCCESS，点击“打开 Chrome · 测试 Plugin”。
+- **GMX Jenkins · 单元测试**：粘贴已有 GMX 分支 Job URL 或 `/2/` Build URL，指定 Build Number（例如 2）和预期 SUCCESS，点击“打开 Chrome · 测试 GMX”。
+
+两种测试都自动启动**可见的 Chrome**；如果出现公司 Jenkins SSO/MFA 登录页面，你可以直接**在弹出的 Chrome 手工输入账号密码**，不需要提前单独运行 `login`，最多等待 180 秒。测试复用正式 Worker 的 `_history_result()`（精确 Build # 对应绿色勾）和 `_heading_result()`（构建页状态图标），必要时才尝试一次短超时 `consoleText`。页面会每秒刷新真正的诊断过程，结束时打印 HTTP、Build Number、历史状态、标题状态、`PASS/FAIL/UNKNOWN`、预期结果和建议。
+
+**只读**：不点击 Build / Build with Parameters、不 clone/commit/push、不创建新任务，不更改原有任务。`PASS` 仅代表构建状态识别符合预期，不能证明 Plugin Artifacts 或 GMX 上传校验已经完成。
+
+CLI 入口同样会启动可见 Chrome 并输出诊断日志：
+
+```bash
+./app-build diagnose-jenkins 'https://<公司Plugin-Jenkins>/job/<branch>/2/' --expected SUCCESS
+./app-build diagnose-jenkins 'https://<公司GMX-Jenkins>/job/<branch>/2/' --expected SUCCESS
+```
+
+URL 必须属于 `config.yaml` 中配置的 Plugin 或 GMX Jenkins 父 Job；不会访问任意外部 URL。历史记录和截图按 site 保存到 `.appbuilder/diagnostics/plugin/` 或 `.appbuilder/diagnostics/gmx/`。
+
+### 不使用 git pull 的安装方法
+
+直接下载新的 **完整 ZIP**，解压到一个**全新目录**，不要直接覆盖或删除旧目录里的 `.appbuilder`。建议先停止旧 Web Console 和 Worker。**先解压完整新 ZIP 到不同文件夹**，在新文件夹双击 `Import Previous Data.command` 并通过 Finder 选择旧版本文件夹，自动、安全地复制旧 `.appbuilder/`（任务、Build 编号、SSO 缓存和日志）。旧文件夹不删除，新文件夹已有数据也不会被覆盖。也可以手动复制 `.appbuilder/`。如修改过 `config.yaml`，手动比对迁移配置；Keychain 凭据在 Mac 中保存，不随 ZIP 迁移。不要把 `.appbuilder` 上传到 GitHub 或发给别人。此版本的 ZIP 保留可执行的 `Start APP Builder.command`，双击即可启动。

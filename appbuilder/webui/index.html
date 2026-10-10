@@ -16,13 +16,14 @@
       <button class="nav active" data-target="overview"><span>▦</span> Overview <b>01</b></button>
       <button class="nav" data-target="new-build"><span>◇</span> New build</button>
       <button class="nav" data-target="activity"><span>≡</span> Live activity</button>
+      <button class="nav" data-target="diagnostics"><span>◎</span> Jenkins URL Test</button>
       <div class="sidebar-spacer"></div>
       <div class="connection">
         <div class="status-line"><span class="pulse"></span><span>LOCAL WORKSPACE</span></div>
         <strong>localhost:8765</strong>
         <p>运行在本机 · 无外部服务</p>
       </div>
-      <div class="sidebar-foot">v0.6.5 <span>·</span> Made for macOS</div>
+      <div class="sidebar-foot">v0.6.6 <span>·</span> Made for macOS</div>
     </aside>
     <main class="main">
       <header class="topbar">
@@ -126,6 +127,33 @@
           </article>
         </section>
         <section class="panel table-panel" id="history"><div class="panel-head history-head"><div><span class="section-tag">BUILD HISTORY</span><h2>Recent builds</h2></div><button class="ghost-button" id="refresh-tasks">↻ Refresh</button></div><div class="table-wrap"><table><thead><tr><th>BUILD / PROJECT</th><th>VERSION</th><th>PIPELINE STAGE</th><th>CREATED</th><th>STATUS</th><th></th></tr></thead><tbody id="tasks-body"><tr><td class="empty-row" colspan="6">Loading tasks...</td></tr></tbody></table></div></section>
+        <section class="panel diagnose-panel" id="diagnostics">
+          <div class="panel-head"><div><span class="section-tag">READ-ONLY · NO NEW BUILDS</span><h2>Jenkins URL Test</h2><p>Plugin 和 GMX 分别测试；自动打开 Chrome。你可以手动登录公司 SSO，状态检测结束直接在下方查看 PASS / FAIL / UNKNOWN。</p></div><div class="panel-icon">◎</div></div>
+          <div class="diagnose-split">
+            <div class="diag-site-card">
+              <h3>Plugin Jenkins · 单元测试</h3><p>自动打开 Chrome，允许人工 SSO 登录。针对指定 Trigger 或 Callback 编号检测。</p>
+              <form id="diagnose-form" data-site="plugin" class="diagnose-form">
+                <label>Plugin Jenkins URL<input name="url" type="url" required maxlength="2048" placeholder="https://…/job/release_1_3_…/2/" autocomplete="off"></label>
+                <div class="diagnose-fields"><label>Build Number（可选）<input name="build_number" type="number" min="1" max="2000000000" placeholder="例如 2"></label>
+                <label>预期结果<select name="expected"><option value="SUCCESS">SUCCESS（绿色勾）</option><option value="FAILURE">FAILURE</option><option value="ABORTED">ABORTED</option><option value="UNSTABLE">UNSTABLE</option></select></label></div>
+                <button class="btn btn-primary" type="submit">◎ 打开 Chrome · 测试 Plugin</button>
+              </form>
+            </div>
+            <div class="diag-site-card">
+              <h3>GMX Jenkins · 单元测试</h3><p>使用相同的真实 Playwright 检测逻辑，但仅检查 GMX Jenkins 现有 Build。</p>
+              <form id="diagnose-gmx-form" data-site="gmx" class="diagnose-form">
+                <label>GMX Jenkins URL<input name="url" type="url" required maxlength="2048" placeholder="https://…/job/upload%2Fauto…/2/" autocomplete="off"></label>
+                <div class="diagnose-fields"><label>Build Number（可选）<input name="build_number" type="number" min="1" max="2000000000" placeholder="例如 2"></label>
+                <label>预期结果<select name="expected"><option value="SUCCESS">SUCCESS（绿色勾）</option><option value="FAILURE">FAILURE</option><option value="ABORTED">ABORTED</option><option value="UNSTABLE">UNSTABLE</option></select></label></div>
+                <button class="btn btn-primary" type="submit">◎ 打开 Chrome · 测试 GMX</button>
+              </form>
+            </div>
+          </div>
+          <div id="diagnose-verdict" class="diagnose-verdict" aria-live="polite">尚未检测 · 只读模式</div>
+          <div class="log-heading">DIAGNOSTIC TRACE <div>仅检查现有 Build，不会重跑 Jenkins</div></div>
+          <pre id="diagnose-output" class="terminal diagnose-terminal" aria-live="polite">分别粘贴 Plugin 或 GMX 的 Jenkins URL，启动 Chrome；允许手动登录，不会触发 Build。</pre>
+          <p class="diag-note">优先使用指定 Build 的绿色状态图标，无法识别时再尝试短超时读取日志末行。检测 SUCCESS 仅说明 Jenkins 构建成功，不代表所有 Artifacts 或 GMX Upload 已校验。</p>
+        </section>
         <section class="footer-info"><span>MAC APP BUILDER · LOCAL CONSOLE</span><span>Built with Python · Existing CLI engine · No cloud backend</span></section>
       </div>
     </main>

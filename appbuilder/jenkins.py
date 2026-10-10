@@ -92,10 +92,11 @@ def interactive_login(config, data_dir: Path, site: str):
 
 
 class JenkinsBrowser:
-    def __init__(self, config, data_dir: Path, task_dir: Path, site: str, *, visible=False, verbose=False):
+    def __init__(self, config, data_dir: Path, task_dir: Path, site: str, *, visible=False, verbose=False, manual_login=False):
         self.conf = config['jenkins']
         self.site = site
         self.visible = bool(visible)
+        self.manual_login = bool(manual_login)
         self.verbose = bool(verbose)
         self.task_dir = task_dir
         self.screens = task_dir / 'screenshots'
@@ -103,7 +104,7 @@ class JenkinsBrowser:
         auth = saved_auth_path(data_dir, site)
         self.auth_path = auth
         self.credentials = read_credentials()
-        if not auth.exists() and not self.credentials:
+        if not auth.exists() and not self.credentials and not self.manual_login:
             raise NeedsAttention('尚未配置 Jenkins 登录，请在首次 run 中提供 '
                                  '--jenkins-user 和 --jenkins-password')
         self.playwright = sync_playwright().start()
@@ -158,6 +159,34 @@ class JenkinsBrowser:
             if os.path.exists(temp):
                 os.unlink(temp)
 
+    def _wait_manual_login(self, expected_url):
+        """Allow the human to complete company SSO only during an explicit test.
+
+        No form filling, secret capture or Build action. Never used by workers.
+        """
+        from .auth import approved_login_host
+        host = urlsplit(expected_url).hostname
+        extra = self.conf.get('auth_allowed_hosts', ['*.hsbc'])
+        if not approved_login_host(self.page.url, expected_url, extra):
+            raise NeedsAttention(f'{self.site} 登录跳转到未批准主机：{urlsplit(self.page.url).hostname}')
+        action('AUTH', f'{self.site} 诊断浏览器需要登录：请在弹出的 Chrome 窗口完成公司 SSO/MFA（最多 180 秒）')
+        limit = time.monotonic() + 180
+        while time.monotonic() < limit:
+            try:
+                current = urlsplit(self.page.url)
+                # Only the Jenkins host, outside its login screen, is accepted.
+                path = current.path.rstrip('/').lower()
+                on_jenkins = current.hostname == host and path not in ('/login', '/signin', '/securityrealm/commencelogin')
+                has_form = (self.page.locator('input[type="password"],input[name="j_username"],input[name="loginfmt"]').count() > 0)
+                if on_jenkins and not has_form:
+                    self._cache_login()
+                    action('AUTH', f'{self.site} 人工 SSO 已完成，继续只读检查原 Jenkins URL')
+                    return True
+            except PlaywrightError:
+                pass  # SSO navigation is in flight.
+            time.sleep(1)
+        raise NeedsAttention(f'{self.site} 诊断登录等待超过 180 秒；请在 Chrome 中完成公司 SSO 再试')
+
     def _login_if_needed(self, expected_url):
         host = urlsplit(expected_url).hostname
         redirected = urlsplit(self.page.url).hostname != host
@@ -166,6 +195,8 @@ class JenkinsBrowser:
                        or self.page.locator('input[name="loginfmt"]').count() > 0)
         if not (redirected or password_page or login_input):
             return False
+        if getattr(self, 'manual_login', False):
+            return self._wait_manual_login(expected_url)
         if not self.credentials:
             raise NeedsAttention(f'{self.site} 会话已过期且未配置 Keychain 认证；'
                                  '请用 --jenkins-user / --jenkins-password 初始化')

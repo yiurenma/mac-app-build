@@ -320,6 +320,66 @@ def get_screenshots(task_id):
                    if f.is_file() and not f.is_symlink() and IMAGE_FILE.fullmatch(f.name)])[:100]
 
 
+# Read-only URL tests are separate from build tasks. Keep latest traces in
+# memory so the page can follow SSO login and each Playwright detection step.
+_DIAG_LOCK = threading.Lock()
+_DIAG_JOBS: dict[str, dict] = {}
+
+
+def start_diagnostic(url: str, *, number=None, expected='SUCCESS', site: str):
+    from .diagnose import parse_target, run_diagnosis
+    config = load_config()
+    target = parse_target(url, config, number=number)
+    if target.site != site:
+        raise ValueError(f'URL 是 {target.site.upper()} Jenkins，请使用对应的测试入口')
+    if expected not in ('SUCCESS', 'FAILURE', 'ABORTED', 'UNSTABLE', 'NOT_BUILT'):
+        raise ValueError('预期结果无效')
+    with _DIAG_LOCK:
+        # Avoid spawning multiple live Chrome windows for the same Jenkins.
+        if any(j['site'] == site and j['status'] == 'RUNNING' for j in _DIAG_JOBS.values()):
+            raise ValueError(f'{site.upper()} Jenkins 已有正在执行的测试，请等待当前测试结束')
+        now = __import__('time').monotonic()
+        for key in list(_DIAG_JOBS):
+            if now - _DIAG_JOBS[key]['created'] > 3600 and _DIAG_JOBS[key]['status'] != 'RUNNING':
+                del _DIAG_JOBS[key]
+        token = secrets.token_urlsafe(24)
+        _DIAG_JOBS[token] = {'site': site, 'status': 'RUNNING', 'logs': [],
+                             'report': None, 'created': now}
+
+    def emit(line):
+        with _DIAG_LOCK:
+            row = _DIAG_JOBS.get(token)
+            if row:
+                row['logs'].append(safe_text(line))
+                if len(row['logs']) > 200:
+                    row['logs'] = row['logs'][-200:]
+
+    def work():
+        try:
+            report = run_diagnosis(url, number=number, expected=expected, visible=True,
+                                   config=config, emit=emit)
+        except Exception as exc:
+            emit(f'[DIAG-ERROR] {type(exc).__name__}: {safe_text(str(exc))}')
+            report = {'verdict': 'UNKNOWN', 'actual': 'UNKNOWN', 'expected': expected,
+                      'site': site, 'error': type(exc).__name__ + ': ' + safe_text(str(exc))}
+        with _DIAG_LOCK:
+            row = _DIAG_JOBS[token]
+            row['report'] = report
+            row['status'] = 'DONE'
+
+    threading.Thread(target=work, daemon=True, name=f'jenkins-diag-{site}').start()
+    return {'id': token, 'site': site, 'status': 'RUNNING'}
+
+
+def poll_diagnostic(token):
+    with _DIAG_LOCK:
+        row = _DIAG_JOBS.get(token)
+        if not row:
+            raise KeyError('诊断任务不存在或已过期')
+        return {'status': row['status'], 'site': row['site'], 'logs': list(row['logs']),
+                'report': row['report']}
+
+
 def make_handler(csrf_token):
     class Handler(BaseHTTPRequestHandler):
         server_version = 'MacAppBuilder/' + __version__
@@ -391,6 +451,9 @@ def make_handler(csrf_token):
                         return self._failed(404, '截图不存在')
                     return self._send((task_folder(m[1]) / 'screenshots' / m[2]).read_bytes(),
                                       typ='image/png')
+                match = re.fullmatch(r'/api/diagnose/status/([A-Za-z0-9_-]{24,64})', p)
+                if match:
+                    return self._send(poll_diagnostic(match[1]))
                 if p == '/api/doctor':
                     return self._send(get_doctor())
                 self._failed(404, '未找到该页面')
@@ -419,6 +482,32 @@ def make_handler(csrf_token):
                 body = json.loads(self.rfile.read(length))
                 if not isinstance(body, dict):
                     raise ValueError('需要 JSON 对象')
+                if self.path == '/api/diagnose/start':
+                    url = body.get('url')
+                    num = body.get('build_number')
+                    site = body.get('site')
+                    if not isinstance(url, str) or site not in ('plugin', 'gmx'):
+                        raise ValueError('请选择 Plugin 或 GMX 测试，并输入 Jenkins URL')
+                    if num in (None, ''):
+                        num = None
+                    elif type(num) is not int:
+                        raise ValueError('Build Number 必须为正整数')
+                    return self._send(start_diagnostic(url, number=num,
+                                      expected=body.get('expected', 'SUCCESS'), site=site), status=202)
+                if self.path == '/api/diagnose':
+                    from .diagnose import run_diagnosis
+                    raw = body.get('url')
+                    if not isinstance(raw, str):
+                        raise ValueError('请输入 Jenkins Job / Build URL')
+                    number = body.get('build_number')
+                    if number in (None, ''):
+                        number = None
+                    elif type(number) is not int:
+                        raise ValueError('Build Number 必须是整数')
+                    result = run_diagnosis(raw, number=number,
+                                           expected=body.get('expected', 'SUCCESS'),
+                                           visible=True)
+                    return self._send(result)
                 if self.path == '/api/tasks':
                     return self._send({'task': create_build(body)}, status=201)
                 m = re.fullmatch(r'/api/tasks/([^/?]+)/resume', self.path)
