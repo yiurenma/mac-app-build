@@ -82,7 +82,9 @@ class DiagnosticEvidence(unittest.TestCase):
         logs='\n'.join(report['logs'])
         self.assertIn('精确 Build #2 链接=1',logs)
         self.assertIn('type=text/html',logs)
-        self.assertIn('HTTP 200 不代表已获取完整 Console',logs)
+        # Plugin diagnostics read the full log via read_full_console(), which rejects HTML
+        # with its own message instead of the older GMX-only "HTTP 200 …" hint.
+        self.assertIn('consoleText 返回 HTML，尚未取得原始构建日志',logs)
         self.assertIn('[SNAPSHOT]',logs)
 
 class Colors(unittest.TestCase):
