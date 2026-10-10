@@ -39,7 +39,8 @@
 - [三轮审查与持续离线回归](docs/03-三轮代码审查与自测报告.md)
 - [macOS 与企业 Nexus 安装手册](docs/04-Mac与Nexus操作手册.md)
 - [内网 Jenkins/SSO 联调清单](docs/05-企业内网联调清单.md)
-- 流程图：[完整流程](diagrams/01-完整流程.svg) / [Jenkins 状态机](diagrams/02-Jenkins状态机.svg) / [多进程架构](diagrams/03-多进程架构.svg)（均有 PNG 预览及可修改 `.dot` 源码）。
+- **精致版流程图（优先查看）**：[完整构建流程](diagrams/premium/01-完整构建流程-精致版.png) / [Jenkins 自动化状态机](diagrams/premium/02-Jenkins状态机-精致版.png) / [macOS 多任务架构](diagrams/premium/03-macOS多任务架构-精致版.png)。
+- 可编辑技术版流程图：[完整流程](diagrams/01-完整流程.svg) / [Jenkins 状态机](diagrams/02-Jenkins状态机.svg) / [多进程架构](diagrams/03-多进程架构.svg)（另有 PNG 及可修改的 `.dot` 源码）。
 
 > **当前 v0.6 已增加独立 Web Console、安全的本地 HTTP API 与离线回归。真实 Nexus/SSO/Plugin/GMX Jenkins 仍需在公司 Mac 和企业网络中现场联调，不能把离线模拟当作端到端成功。**
 
