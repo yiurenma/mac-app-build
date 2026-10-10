@@ -9,7 +9,7 @@ import json
 import re
 import time
 
-from .jenkins import JenkinsBrowser, final_result_from_console
+from .jenkins import JenkinsBrowser, final_result_from_console, read_full_console
 from .config import DATA, load_config
 from .telemetry import safe_text
 from .nexus import parse_upload_metadata
@@ -170,6 +170,7 @@ def run_diagnosis(url: str, *, number: int | None = None, expected='SUCCESS', vi
             console = None
             console_code = 'SKIPPED'
             full_console = None
+            full_console_error = None
             if history and heading and history != heading:
                 # Disagreement must not become a false success.
                 actual = 'UNKNOWN'
@@ -179,25 +180,33 @@ def run_diagnosis(url: str, *, number: int | None = None, expected='SUCCESS', vi
             if not actual:
                 log('[STEP 4/4] 图标未提供终态；短超时检查原始 consoleText 尾部')
                 try:
-                    response = browser.context.request.get(build_url + 'consoleText', timeout=5000)
-                    console_code = response.status
-                    if (response.status == 200 and urlsplit(response.url).hostname == urlsplit(build_url).hostname
-                            and urlsplit(response.url).path == urlsplit(build_url).path + 'consoleText'):
-                        full_console = response.text()
-                        body = full_console[-4096:]
-                        console = final_result_from_console(body)
-                        content_type = getattr(response, 'headers', {}).get('content-type', 'unknown')
-                        log(f'[HTTP] consoleText={console_code}; type={content_type}; tail bytes checked={len(body.encode("utf-8"))}')
-                        if 'html' in content_type.lower():
-                            log('[HINT] consoleText 返回 HTML 而不是普通构建日志；HTTP 200 不代表已获取完整 Console')
+                    if target.site == 'plugin':
+                        full_console = read_full_console(browser, target.job_url, n, emit=log)
+                        console_code = 200
+                        console = final_result_from_console(full_console)
                         log(f'[RESULT] Console Finished marker: {console or "NOT FOUND"}')
                     else:
-                        log(f'[HTTP] consoleText={console_code}; redirect={urlsplit(response.url).hostname != urlsplit(build_url).hostname}')
+                        response = browser.context.request.get(build_url + 'consoleText', timeout=5000)
+                        console_code = response.status
+                        if (response.status == 200 and urlsplit(response.url).hostname == urlsplit(build_url).hostname
+                                and urlsplit(response.url).path == urlsplit(build_url).path + 'consoleText'):
+                            full_console = response.text()
+                            body = full_console[-4096:]
+                            console = final_result_from_console(body)
+                            content_type = getattr(response, 'headers', {}).get('content-type', 'unknown')
+                            log(f'[HTTP] consoleText={console_code}; type={content_type}; tail bytes checked={len(body.encode("utf-8"))}')
+                            if 'html' in content_type.lower():
+                                log('[HINT] consoleText 返回 HTML 而不是普通构建日志；HTTP 200 不代表已获取完整 Console')
+                            log(f'[RESULT] Console Finished marker: {console or "NOT FOUND"}')
+                        else:
+                            log(f'[HTTP] consoleText={console_code}; redirect={urlsplit(response.url).hostname != urlsplit(build_url).hostname}')
                 except Exception as exc:
-                    log(f'[HTTP] consoleText ERROR: {type(exc).__name__}; 无需等待长日志')
+                    if target.site == 'plugin':
+                        full_console_error = safe_text(str(exc))
+                    log(f'[HTTP] consoleText ERROR: {type(exc).__name__}; {safe_text(str(exc))}')
                 actual = console or 'UNKNOWN'
             else:
-                log('[STEP 4/4] 已通过 #'+str(n)+' 的状态图标识别终态，跳过长 Console 日志下载')
+                log('[STEP 4/4] 已通过 #'+str(n)+' 的状态图标识别终态；Plugin 制品校验仍将读取完整日志')
             if actual == 'UNKNOWN':
                 try:
                     screenshot = folder / f'{target.site}-build-{n}-unknown.png'
@@ -212,13 +221,19 @@ def run_diagnosis(url: str, *, number: int | None = None, expected='SUCCESS', vi
                 log('[ARTIFACT] 从指定 Build 的完整 Nexus upload output 提取版本和 SHA256')
                 try:
                     if full_console is None:
-                        response = browser.context.request.get(build_url + 'consoleText', timeout=20000)
-                        if response.status != 200 or urlsplit(response.url) != urlsplit(build_url + 'consoleText'):
-                            raise ValueError('指定 Build 完整日志不可读或发生登录跳转')
-                        full_console = response.text()
-                    if final_result_from_console(full_console) != 'SUCCESS':
-                        raise ValueError('日志未以 Finished: SUCCESS 结束')
-                    metadata = parse_upload_metadata(full_console)
+                        if full_console_error:
+                            raise ValueError(full_console_error)
+                        full_console = read_full_console(browser, target.job_url, n, emit=log)
+                        console_code = 200
+                    log_result = final_result_from_console(full_console)
+                    log(f'[RESULT] 完整日志结束标记={log_result or "NOT FOUND"}; 独立构建状态={actual}')
+                    # Always search the complete response. A missing marker is not
+                    # a veto when this exact build's status icon confirmed SUCCESS.
+                    metadata = parse_upload_metadata(full_console, emit=log)
+                    if log_result and log_result != 'SUCCESS':
+                        raise ValueError(f'完整日志终态={log_result}，与构建成功状态冲突')
+                    if actual != 'SUCCESS' and log_result != 'SUCCESS':
+                        raise ValueError('未独立确认当前 Build 成功，不能通过制品校验')
                     artifact_result = {'status': 'PASS', 'artifacts': [
                         {'library': name, 'version': metadata['version'], 'sha256': digest}
                         for name, digest in metadata['hashes'].items()]}

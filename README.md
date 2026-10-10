@@ -1,4 +1,12 @@
-# HSBC UK PBB — Mac APP Build Automation (v0.7.5)
+# HSBC UK PBB — Mac APP Build Automation (v0.7.6)
+
+## v0.7.6 — 完整日志读取与提取诊断
+
+Plugin 单元测试从指定 Build 下载完整 consoleText（默认 300 秒下载超时，可通过 jenkins.console_download_timeout_seconds 配置为 30–1800 秒），输出请求 URL、HTTP 状态、响应类型、完整响应字节数/行数、Nexus 分组数及 JSON 条目数。按行顺序扫描完整日志，避免为无关日志创建整份标准化副本或行列表，只缓存目标 JSON 段；不会截断到最后几千字；图标已确认当前 Build SUCCESS 时，缺少精确 Finished 末行不会阻止完整日志搜索与版本/SHA 比对。终态支持 Jenkins 时间戳和 ANSI 颜色；明确失败、状态冲突、HTML 登录响应及未完成分段日志仍不能通过。
+
+正式流程同样读取完整日志；只有本次 Artifact Build 已独立确认成功，才允许在缺少末行标记时采用其 Nexus 数据。现场截图的确切日志格式仍待复测，未声称已经读取公司日志。
+
+验证：210 项当前环境可运行测试全部通过；100.5 MB 模拟日志的全量扫描与两个 SHA 提取用时约 0.44 秒（不含网络下载）。三组 Chromium DOM 测试因环境缺少浏览器未运行。下载仍需要容纳完整响应，扫描不再反复复制整份日志；公司现场结果待复测。
 
 ## v0.7.5 — 从 Nexus 上传日志直接更新 lock
 

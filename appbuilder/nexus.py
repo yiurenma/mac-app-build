@@ -5,33 +5,87 @@ from urllib.parse import unquote, urlsplit
 from .versions import ARTIFACTS
 
 
-def upload_rows(console):
+def normalize_console(console):
     # Jenkins timestamper prefixes are outside the JSON, not part of its values.
     clean = re.sub(r'\x1b\[[0-9;]*m', '', console)
     clean = re.sub(r'(?m)^[ \t]*(?:\[\d{2}:\d{2}:\d{2}(?:\.\d+)?\]|\d{2}:\d{2}:\d{2}(?:\.\d+)?)[ \t]*', '', clean)
-    blocks = list(re.finditer(r'(?m)^[ \t]*::group::Nexus upload output[ \t]*$', clean))
-    if not blocks:
+    return clean.replace('\r\n', '\n')
+
+
+def console_lines(console):
+    """Iterate without allocating a list/copy of every line in a large log."""
+    start = 0
+    while start < len(console):
+        end = console.find('\n', start)
+        if end < 0:
+            yield console[start:]
+            return
+        yield console[start:end]
+        start = end + 1
+
+
+def upload_rows(console, emit=None):
+    result, groups = [], 0
+    buffer = None
+    depth, in_string, escaped, started = 0, False, False, False
+    for raw in console_lines(console):
+        if buffer is None:
+            # Most lines are unrelated: avoid timestamp/ANSI regex work on them.
+            if 'Nexus upload output' not in raw:
+                continue
+            if normalize_console(raw).strip() != '::group::Nexus upload output':
+                continue
+            groups += 1
+            if emit:
+                emit(f'[SEARCH] 找到 Nexus upload output 分组 #{groups}，正在读取 JSON')
+            buffer = []
+            depth, in_string, escaped, started = 0, False, False, False
+            continue
+        line = normalize_console(raw).strip()
+        if not started and not line:
+            continue
+        if not started and not line.startswith('{'):
+            raise ValueError('Nexus upload output 后不是 JSON 对象')
+        buffer.append(line)
+        for ch in line:
+            if in_string:
+                if escaped:
+                    escaped = False
+                elif ch == '\\':
+                    escaped = True
+                elif ch == '"':
+                    in_string = False
+            elif ch == '"':
+                in_string = True
+            elif ch in '{[':
+                depth += 1
+                started = True
+            elif ch in '}]':
+                depth -= 1
+        if started and depth <= 0 and not in_string:
+            try:
+                data = json.loads('\n'.join(buffer))
+            except json.JSONDecodeError as exc:
+                raise ValueError('Nexus upload output JSON 无效') from exc
+            rows = data.get('upload_results') if isinstance(data, dict) else None
+            if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
+                raise ValueError('Nexus upload output 缺少有效 upload_results 数组')
+            result.extend(rows)
+            buffer = None
+    if not groups:
         raise ValueError('当前 Plugin Build 缺少 Nexus upload output JSON')
-    result = []
-    decoder = json.JSONDecoder()
-    for block in blocks:
-        payload = clean[block.end():].lstrip()
-        try:
-            data, _ = decoder.raw_decode(payload)
-        except json.JSONDecodeError as exc:
-            raise ValueError('Nexus upload output JSON 不完整或无效') from exc
-        rows = data.get('upload_results') if isinstance(data, dict) else None
-        if not isinstance(rows, list):
-            raise ValueError('Nexus upload output 缺少 upload_results 数组')
-        if any(not isinstance(row, dict) for row in rows):
-            raise ValueError('upload_results 条目不是 JSON 对象')
-        result.extend(rows)
+    if buffer is not None:
+        raise ValueError('Nexus upload output JSON 不完整')
+    if emit:
+        emit(f'[SEARCH] 已搜索完整日志；Nexus upload output 分组={groups}')
+        emit(f'[JSON] upload_results 条目={len(result)}；按插件名筛选 .tar.gz，排除附属文件')
     return result
 
 
-def parse_upload_metadata(console):
+def parse_upload_metadata(console, emit=None):
     versions = set()
-    for row in upload_rows(console):
+    rows = upload_rows(console, emit=emit)
+    for row in rows:
         url = row.get('artifactUrl', '')
         if not isinstance(url, str):
             continue
@@ -43,12 +97,16 @@ def parse_upload_metadata(console):
     if len(versions) != 1:
         raise ValueError('Nexus 输出的两个目标 tar.gz 必须有唯一一致版本')
     version = next(iter(versions))
-    return {'version': version, 'hashes': parse_upload_hashes(console, version)}
+    return {'version': version, 'hashes': hashes_from_rows(rows, version)}
 
 
 def parse_upload_hashes(console, version):
+    return hashes_from_rows(upload_rows(console), version)
+
+
+def hashes_from_rows(rows, version):
     found = {name: set() for name in ARTIFACTS}
-    for row in upload_rows(console):
+    for row in rows:
         url = row.get('artifactUrl', '')
         if not isinstance(url, str):
             continue

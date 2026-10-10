@@ -84,7 +84,7 @@ class NexusLockTests(unittest.TestCase):
         request.get.return_value = response
         browser = SimpleNamespace(context=SimpleNamespace(request=request))
         self.assertEqual(plugin_upload_hashes(browser, 'https://jenkins.invalid/job/plugin/', 10, VERSION), HASHES)
-        request.get.assert_called_once_with(url, timeout=120000)
+        request.get.assert_called_once_with(url, timeout=300000)
         for response in [SimpleNamespace(status=200, url=url, text=lambda: console().replace('Finished: SUCCESS', 'Finished: FAILURE')),
                          SimpleNamespace(status=200, url='https://login.invalid/', text=lambda: console()),
                          SimpleNamespace(status=403, url=url, text=lambda: console())]:
@@ -113,6 +113,7 @@ class NexusLockTests(unittest.TestCase):
         job = config['jenkins']['plugin_parent'] + 'release_test/'
         calls = []
         class Browser:
+            payload = console()
             def __init__(self, *args, **kwargs):
                 self.page = SimpleNamespace(url=job)
                 self.context = SimpleNamespace(request=SimpleNamespace(get=self.get))
@@ -132,7 +133,7 @@ class NexusLockTests(unittest.TestCase):
                 return 'SUCCESS'
             def get(self, url, **kwargs):
                 calls.append(url)
-                return SimpleNamespace(status=200, url=url, text=lambda: console())
+                return SimpleNamespace(status=200, url=url, text=lambda: self.payload)
         with tempfile.TemporaryDirectory() as td, patch.object(diagnose, 'DATA', Path(td)):
             result = diagnose.run_diagnosis(job + '10/', config=config, factory=Browser, emit=lambda line: None)
             saved = json.loads((Path(td) / 'diagnostics/plugin/last-result.json').read_text())
@@ -155,9 +156,54 @@ class NexusLockTests(unittest.TestCase):
             self.assertEqual(len(report['comparisons']), 3)
             self.assertEqual([item['field'] for item in report['comparisons'] if not item['match']], [field] if field else [])
 
+        Browser.payload = 'unrelated log\n' * 100000 + console().replace('Finished: SUCCESS\n', '') + 'trailing diagnostic\n' * 100000
+        with tempfile.TemporaryDirectory() as td, patch.object(diagnose, 'DATA', Path(td)):
+            report = diagnose.run_diagnosis(job + '10/', config=config, factory=Browser,
+                                           expected_artifacts=expected, emit=lambda line: None)
+        self.assertEqual(report['verdict'], 'PASS')
+        trace = '\n'.join(report['logs'])
+        self.assertIn('Nexus upload output 分组=1', trace)
+        self.assertIn('upload_results 条目=2', trace)
+        self.assertIn('[DOWNLOAD] 完整响应已读取', trace)
+        self.assertIn('结束标记=NOT FOUND', trace)
+        self.assertNotIn('跳过长 Console', trace)
+
     def test_invalid_expectations_fail_before_browser_starts(self):
         from appbuilder.diagnose import validate_artifact_expectations
         for values in ({}, {'version': VERSION}, {'version': VERSION, 'journey_sha256': 'bad', 'domainmodel_sha256': '1' * 64}):
             with self.assertRaises(ValueError):
                 validate_artifact_expectations(values)
 
+
+    def test_timestamped_final_status_without_accepting_earlier_success(self):
+        from appbuilder.jenkins import final_result_from_console
+        for prefix in ('20:43:53 ', '[20:43:53.123] ', '\x1b[32m20:43:53 '):
+            self.assertEqual(final_result_from_console(prefix + 'Finished: SUCCESS\x1b[0m\n'), 'SUCCESS')
+        self.assertIsNone(final_result_from_console('20:43:53 Finished: SUCCESS\n20:43:54 more work'))
+
+    def test_missing_marker_requires_independent_success_in_formal_flow(self):
+        url = 'https://jenkins.invalid/job/plugin/10/consoleText'
+        payload = console().replace('Finished: SUCCESS\n', '') + 'post-build output\n'
+        request = Mock()
+        request.get.return_value = SimpleNamespace(status=200, url=url, text=lambda: payload)
+        browser = SimpleNamespace(context=SimpleNamespace(request=request))
+        with self.assertRaises(NeedsAttention):
+            plugin_upload_hashes(browser, 'https://jenkins.invalid/job/plugin/', 10, VERSION)
+        self.assertEqual(plugin_upload_hashes(browser, 'https://jenkins.invalid/job/plugin/', 10, VERSION, confirmed_success=True), HASHES)
+        request.get.return_value.text = lambda: console().replace('Finished: SUCCESS', 'Finished: FAILURE')
+        with self.assertRaises(NeedsAttention):
+            plugin_upload_hashes(browser, 'https://jenkins.invalid/job/plugin/', 10, VERSION, confirmed_success=True)
+
+    def test_html_or_partial_log_is_rejected_and_download_is_traced(self):
+        from appbuilder.jenkins import read_full_console
+        url = 'https://jenkins.invalid/job/plugin/10/consoleText'
+        request = Mock()
+        browser = SimpleNamespace(context=SimpleNamespace(request=request))
+        for headers, body in [({'content-type': 'text/html'}, '<html>login</html>'),
+                              ({'x-more-data': 'true'}, console())]:
+            request.get.return_value = SimpleNamespace(status=200, url=url, headers=headers, text=lambda: body)
+            logs = []
+            with self.assertRaises(NeedsAttention):
+                read_full_console(browser, 'https://jenkins.invalid/job/plugin/', 10, emit=logs.append)
+            self.assertTrue(any(url in line for line in logs))
+            self.assertTrue(any('bytes=' in line for line in logs))

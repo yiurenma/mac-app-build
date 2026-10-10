@@ -201,7 +201,7 @@ def _run_unlocked(task_id):
                     ensure_bootstrap(browser, params['plugin_job'], task_id, 'plugin')
                     num, _ = formal_build(browser, params['plugin_job'], task_id, 'plugin')
                     v, artifact_build = plugin_artifact_version(browser, params['plugin_job'], num, task_id)
-                    hashes = plugin_upload_hashes(browser, params['plugin_job'], artifact_build, v)
+                    hashes = plugin_upload_hashes(browser, params['plugin_job'], artifact_build, v, confirmed_success=True)
                     patch_runtime(task_id, artifact_version=v, plugin_artifact_number=artifact_build,
                                   plugin_artifact_hashes=hashes)
                     log(f'[ARTIFACT] 完整依赖版本: {v}, Build #{artifact_build}')
@@ -234,7 +234,7 @@ def _run_unlocked(task_id):
                     if not number:
                         raise NeedsAttention('缺少当前 Plugin Artifact Build 编号，禁止使用旧 SHA256')
                     with JenkinsBrowser(conf, DATA, home, 'plugin', visible=params.get('visible', False), verbose=params.get('verbose', False)) as browser:
-                        hashes = plugin_upload_hashes(browser, params['plugin_job'], number, artifact)
+                        hashes = plugin_upload_hashes(browser, params['plugin_job'], number, artifact, confirmed_success=True)
                     patch_runtime(task_id, plugin_artifact_hashes=hashes)
                 if rt.get('gmx_sha'):
                     if validate_lock(lock, artifact) != hashes:

@@ -23,11 +23,16 @@ class NeedsAttention(RuntimeError):
 
 def final_result_from_console(text):
     """Recognize only the final Jenkins console status line, not quoted log text."""
-    lines = [line.strip() for line in text.splitlines() if line.strip()]
-    if not lines:
+    end = len(text)
+    while end > 0 and text[end - 1].isspace():
+        end -= 1
+    if not end:
         return None
+    from .nexus import normalize_console
+    start = text.rfind('\n', 0, end) + 1
+    last = normalize_console(text[start:end]).strip()
     match = re.fullmatch(r'Finished:\s*(SUCCESS|FAILURE|ABORTED|UNSTABLE|NOT_BUILT)',
-                         lines[-1], re.I)
+                         last, re.I)
     return match[1].upper() if match else None
 
 
@@ -962,17 +967,52 @@ def formal_build(browser: JenkinsBrowser, job_url, task_id, site, country='', pr
     return num, console
 
 
-def plugin_upload_hashes(browser, job_url, number, version):
-    from .nexus import parse_upload_hashes
+def read_full_console(browser, job_url, number, emit=None):
+    """Download the whole numbered build log through its authenticated session."""
     url = job_url + str(number) + '/consoleText'
-    response = browser.context.request.get(url, timeout=120000)
+    def report(message):
+        if emit is None:
+            action('CONSOLE', message)
+        else:
+            emit(message)
+    report(f'[DOWNLOAD] 完整日志请求：{url}；使用浏览器登录会话，不截取日志尾部')
+    timeout = min(1800, max(30, float(getattr(browser, 'conf', {}).get('console_download_timeout_seconds', 300))))
+    report(f'[DOWNLOAD] 下载超时={timeout:g}s；请求完整日志，页面只显示提取摘要')
+    response = browser.context.request.get(url, timeout=int(timeout * 1000))
+    headers = getattr(response, 'headers', {})
+    content_type = headers.get('content-type', 'unknown')
+    report(f'[HTTP] consoleText={response.status}; type={content_type}; response URL={response.url}')
     if response.status != 200 or urlsplit(response.url) != urlsplit(url):
-        raise NeedsAttention('当前 Plugin Build 完整日志不可读，请检查 Jenkins 登录/权限')
+        raise NeedsAttention('指定 Build 完整日志不可读或发生登录跳转')
     console = response.text()
-    if final_result_from_console(console) != 'SUCCESS':
-        raise NeedsAttention('Plugin 日志尚未确认 Finished: SUCCESS，禁止使用其中的 SHA256')
+    byte_count = sum(len(console[i:i + 1048576].encode('utf-8')) for i in range(0, len(console), 1048576))
+    line_count = console.count('\n') + int(bool(console) and not console.endswith('\n'))
+    report(f'[DOWNLOAD] 完整响应已读取：bytes={byte_count}; lines={line_count}')
+    if hasattr(response, 'dispose'):
+        response.dispose()
+    if 'html' in content_type.lower() or re.match(r'\s*<(?:!doctype\s+html|html)\b', console, re.I):
+        raise NeedsAttention('consoleText 返回 HTML，尚未取得原始构建日志')
+    if headers.get('x-more-data', '').lower() == 'true':
+        raise NeedsAttention('服务器返回未完成的分段日志，禁止使用其中的制品数据')
+    if not console or console.isspace():
+        raise NeedsAttention('指定 Build 日志为空')
+    return console
+
+
+def plugin_upload_hashes(browser, job_url, number, version, *, confirmed_success=False):
+    from .nexus import parse_upload_metadata
+    console = read_full_console(browser, job_url, number)
+    result = final_result_from_console(console)
+    if result and result != 'SUCCESS':
+        raise NeedsAttention(f'Plugin 日志终态={result}，与成功构建冲突')
+    if not confirmed_success and result != 'SUCCESS':
+        raise NeedsAttention('Plugin 构建成功尚未独立确认，禁止使用其中的 SHA256')
     try:
-        return parse_upload_hashes(console, version)
+        metadata = parse_upload_metadata(
+            console, emit=lambda message: action('NEXUS', message))
+        if metadata['version'] != version:
+            raise ValueError('Nexus 上传版本与当前两个 Artifacts 版本不同')
+        return metadata['hashes']
     except ValueError as exc:
         raise NeedsAttention(str(exc)) from exc
 
