@@ -4,11 +4,15 @@ import re
 from urllib.parse import unquote, urlsplit
 from .versions import ARTIFACTS
 
+_CLOCK = r'\d{2}:\d{2}:\d{2}(?:\.\d+)?'
+_STAMP = rf'(?:\d{{4}}-\d{{2}}-\d{{2}}[T ]{_CLOCK}(?:Z|[+-]\d{{2}}:?\d{{2}})?|{_CLOCK})'
+_PREFIX = re.compile(rf'(?m)^[ \t]*(?:\[{_STAMP}\]|{_STAMP})[ \t]*')
+
 
 def normalize_console(console):
     # Jenkins timestamper prefixes are outside the JSON, not part of its values.
     clean = re.sub(r'\x1b\[[0-9;]*m', '', console)
-    clean = re.sub(r'(?m)^[ \t]*(?:\[\d{2}:\d{2}:\d{2}(?:\.\d+)?\]|\d{2}:\d{2}:\d{2}(?:\.\d+)?)[ \t]*', '', clean)
+    clean = _PREFIX.sub('', clean)
     return clean.replace('\r\n', '\n')
 
 
@@ -25,7 +29,7 @@ def console_lines(console):
 
 
 def upload_rows(console, emit=None):
-    result, groups = [], 0
+    result, groups, rejected_markers = [], 0, 0
     buffer = None
     depth, in_string, escaped, started = 0, False, False, False
     for raw in console_lines(console):
@@ -34,6 +38,7 @@ def upload_rows(console, emit=None):
             if 'Nexus upload output' not in raw:
                 continue
             if normalize_console(raw).strip() != '::group::Nexus upload output':
+                rejected_markers += 1
                 continue
             groups += 1
             if emit:
@@ -73,6 +78,8 @@ def upload_rows(console, emit=None):
             result.extend(rows)
             buffer = None
     if not groups:
+        if emit:
+            emit(f'[SEARCH] 未识别 Nexus 分组；含标题但格式不匹配的行={rejected_markers}')
         raise ValueError('当前 Plugin Build 缺少 Nexus upload output JSON')
     if buffer is not None:
         raise ValueError('Nexus upload output JSON 不完整')
@@ -114,7 +121,11 @@ def hashes_from_rows(rows, version):
         for name in ARTIFACTS:
             if basename != f'{name}-{version}.tar.gz':
                 continue
-            if row.get('version') != version:
+            # Nexus reports the release/base version while the tarball filename
+            # includes the Jenkins snapshot build suffix. Keep the exact full
+            # filename match above; only accept this known metadata convention.
+            base_version = re.sub(r'-SNAPSHOT\.[0-9]+$', '', version)
+            if row.get('version') not in (version, base_version):
                 raise ValueError(f'{name} Nexus 版本与当前 Artifact Version 不一致')
             digest = row.get('artifactSHA256')
             if not isinstance(digest, str) or not re.fullmatch(r'[a-fA-F0-9]{64}', digest):
