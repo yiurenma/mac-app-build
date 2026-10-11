@@ -81,3 +81,15 @@ Outlook 的 JXA 返回阶段、错误号及 `send_attempted`。创建邮件、�
 Outlook 账号探测分别报告集合缺失、空集合、字段校验失败及原生调用阶段，不能把这些问题直接称为未登录。包含不完整账号时不自动选择发件人；显式填写邮箱后，仅在目标账号完整且唯一、其他不完整记录可证明属于不同邮箱时继续。无法读取邮箱、目标缺 ID 或有重复候选时仍在发送前停止；不伪造账号 ID。
 
 已依据用户提供的 DevTools 结构支持 `.folder-container .folder-card`：在卡片内查找唯一可见 `.app-name`，名称精确匹配；若 title 存在，须与文字一致。点击卡片节点，不依赖 Angular 动态属性，不扩大为任意 div；隐藏、容器外、名称冲突或多候选均不盲点。离线 fixture 还原了该结构和事件监听方式；真实租户的后续 App/Share 页面仍待现场验证。
+
+### 历史版本匹配与每次查找日志
+
+目录中的唯一 App 可通过 `See all versions` 进入历史版本，再在同一卡片展开 `Show release notes`。展开内容异步加载时先等待四字段，不提前翻页；支持唯一可见的 `Next` / `Load more` 入口，取消原先只扫描前 100 张卡片的限制。字段可连续排版，`Folder Param` 可为保存的完整路径或原有目录名。Jenkins URL 的 `%2F` 与 `%252F` 保持不同，不递归解码；Jenkins Build 编号、App build 编号也不混用。
+
+只有同卡 Build URL、Build number、Folder Param、Commit SHA 全部一致才读取其已有 Share 链接。查找预算耗尽、入口歧义、没有可证明的列表终点时报告 `INCOMPLETE`，不声称不存在历史包。仅明确的版本列表结束状态可报告 `NOT_FOUND`。未核实的 query 参数继续阻塞，不删除参数或猜测版本绑定规则。卡片身份匹配与链接固定到该历史版本是两个结论：现有 `/join/` 的历史版本绑定尚未独立验证。
+
+每次查找在数据目录 `testfairy-attempts/<attempt_id>/` 写入 `trace.jsonl` 和 `evidence.json`，关联独立测试编号或正式任务编号。日志包含阶段、耗时、剩余预算、卡片比较与排除原因、翻页进展、重试和请求错误观测；请求错误不自动等同于根因。首个异常单独保留，后续错误不覆盖。页面展示简短错误、尝试编号和日志位置；日志写入失败单独报告。证据使用有限的脱敏结构，不保存整页 DOM、登录截图、网络响应或认证状态。目录权限 0700、文件权限 0600。
+
+上述历史列表交互经过离线 Chromium fixture 验证，尚未完成真实租户端到端验证。编码环境访问 `/login` 与 `/my/` 均在代理阶段失败，错误为 `net::ERR_TUNNEL_CONNECTION_FAILED`；其他云浏览器能打开公开登录页，因此不能称站点离线。本轮未取得授权登录会话，截图材料在当前执行环境下载失败，未自行查看其像素。真实版本卡片 DOM、分页终点和分享参数语义仍需现场证据验证。
+
+本轮未提交改动的完整离线回归：`python -m unittest discover -s tests -v`，433/433 通过，142.032 秒；日志 `/tmp/testfairy-full-regression.log`。新增 24 项测试（历史遍历及生命周期 13、日志实际落盘 9、独立 API 2），并增强已有 UI 断言。Python 编译、JavaScript / Shell 语法、CLI dry-run、diff 空白检查通过；未运行新 commit 的 CI，本轮未提交或推送。普通错误 URL 仅保留来源域名，只有白名单 Jenkins `build_url` 字段可保留经格式校验的原始编码路径。

@@ -148,10 +148,12 @@ class DeliveryTestAPIs(unittest.TestCase):
         with patch('appbuilder.testfairy.TestFairyBrowser') as browser:
             with self.assertRaises(ValueError):dt.start({'kind':'testfairy','request_id':'c'*32,'url':'https://other.testfairy.com/login','username':'user','password':'SECRET'})
         browser.assert_not_called()
-    def run_link_test(self,wanted):
+    def run_link_test(self,wanted,error=None,diagnostics=None):
         from test_testfairy import PARAMS,RUNTIME,expected_build
         browser=Mock();browser.page.url='https://hsbc-mobilex.testfairy.com/my?session=SECRET'
         browser.find.return_value={**expected_build(PARAMS,RUNTIME),'share_url':'https://hsbc-mobilex.testfairy.com/join/current','app_version':'3.76.0'}
+        browser.find.return_value['diagnostics']=diagnostics or {}
+        if error:browser.find.side_effect=error
         browser.__enter__=Mock(return_value=browser);browser.__exit__=Mock(return_value=False)
         body={'kind':'testfairy','request_id':'c'*32,'url':'https://hsbc-mobilex.testfairy.com/login','username':'user','password':'SECRET',
               'task_id':'202610111000-abcdef','expected_share_url':wanted}
@@ -165,6 +167,27 @@ class DeliveryTestAPIs(unittest.TestCase):
         result=self.run_link_test('https://HSBC-MOBILEX.TESTFAIRY.COM:443/join/current')
         self.assertEqual(result['status'],'MATCH')
         self.assertEqual(result['result']['final_url'],'https://hsbc-mobilex.testfairy.com/my')
+    def test_browser_failure_keeps_first_error_and_safe_log_references(self):
+        from appbuilder.jenkins import NeedsAttention
+        error=NeedsAttention('离线测试失败 SECRET user')
+        error.testfairy_diagnostics={'attempt_id':'attempt-1','log_path':'/tmp/trace.jsonl',
+            'evidence_path':'/tmp/evidence.json','first_error':{'phase':'login','type':'TimeoutError','message':'password=SECRET'},
+            'logging_error':{'type':'OSError','message':'disk unavailable'},'raw_dom':'PRIVATE'}
+        result=self.run_link_test('https://hsbc-mobilex.testfairy.com/join/current',error=error)
+        self.assertEqual(result['status'],'BLOCKED')
+        diagnostic=result['result']['diagnostics']
+        self.assertEqual(diagnostic['first_error']['stage'],'login')
+        self.assertEqual(diagnostic['first_error']['type'],'TimeoutError')
+        self.assertEqual(diagnostic['log_path'],'/tmp/trace.jsonl')
+        self.assertIn('OSError',diagnostic['logging_error'])
+        self.assertNotIn('PRIVATE',json.dumps(result))
+        self.assertNotIn('SECRET',json.dumps(result))
+
+    def test_success_exposes_trace_but_does_not_claim_version_pinning(self):
+        result=self.run_link_test('https://hsbc-mobilex.testfairy.com/join/current',diagnostics={'attempt_id':'attempt-2','log_path':'/tmp/trace.jsonl'})
+        self.assertEqual(result['result']['diagnostics']['attempt_id'],'attempt-2')
+        self.assertIn('尚未独立验证',result['result']['link_semantics'])
+
     def test_different_share_path_reports_mismatch(self):
         result=self.run_link_test('https://hsbc-mobilex.testfairy.com/join/other')
         self.assertEqual(result['status'],'MISMATCH')

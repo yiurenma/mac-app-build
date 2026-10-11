@@ -215,10 +215,12 @@ class SharedBuildUITests(unittest.TestCase):
         p.route('**/api/tasks',lambda route:route.fulfill(json={'tasks':[{'id':'202610111000-abcdef','project':'PayByBank','country':'UK','status':'FAILED','stage':'GMX_JENKINS'}]}))
         p.evaluate("state.tasks=[{id:'202610111000-abcdef',project:'PayByBank',country:'UK',status:'FAILED'}];renderTestTasks()")
         self.field('tf_test_task').select_option('202610111000-abcdef')
-        result={'id':'c'*32,'status':'MATCH','result':{'message':'分享链接匹配','expected_share_url':'https://hsbc-mobilex.testfairy.com/join/current','actual_share_url':'https://hsbc-mobilex.testfairy.com/join/current'}}
+        result={'id':'c'*32,'status':'MATCH','result':{'message':'分享链接匹配','expected_share_url':'https://hsbc-mobilex.testfairy.com/join/current','actual_share_url':'https://hsbc-mobilex.testfairy.com/join/current','diagnostics':{'attempt_id':'attempt-1','log_path':'/tmp/trace.jsonl','evidence_path':'/tmp/evidence.json','first_error':{'stage':'navigation','type':'TimeoutError','message':'timeout'},'logging_error':'OSError: disk unavailable'}}}
         with patch('appbuilder.delivery_tests.start',return_value={'id':'c'*32}) as start,patch('appbuilder.delivery_tests.poll',side_effect=lambda _:result):
             p.locator('#test-testfairy').click()
             expect(p.locator('#tf-test-result')).to_contain_text('MATCH')
+            for detail in ('attempt-1','/tmp/trace.jsonl','/tmp/evidence.json','navigation','TimeoutError','disk unavailable'):
+                expect(p.locator('#tf-test-result')).to_contain_text(detail)
             self.assertEqual(start.call_args.args[0]['task_id'],'202610111000-abcdef')
             self.assertEqual(start.call_args.args[0]['expected_share_url'],'https://hsbc-mobilex.testfairy.com/join/current')
             self.assertEqual(self.field('tf_test_password').input_value(),'')

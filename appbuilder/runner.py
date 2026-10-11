@@ -366,7 +366,7 @@ def _run_unlocked(task_id, transient_credentials=None):
                 rt = read_state(task_id)['runtime']
                 expected = expected_build(params, rt)
                 supplied = (transient_credentials or {}).get('testfairy')
-                with TestFairyBrowser(conf, DATA, params['testfairy'],
+                with TestFairyBrowser(conf, DATA, {**params['testfairy'],'correlation_id':task_id},
                                      login_credentials=supplied, visible=params.get('visible', True)) as browser:
                     app = browser.find(expected)
                 patch_runtime(task_id, testfairy_app=app)

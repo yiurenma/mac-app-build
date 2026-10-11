@@ -97,17 +97,26 @@ def expected_build(params, runtime):
     return {'build_url':root+str(number)+'/', 'number':number,'sha':sha.lower(),'folder':folder,'path':path}
 
 
+def candidate_fields(text):
+    """Extract only named identity fields; preserve original URL encoding."""
+    # Field boundaries may be inline; never combine evidence from separate cards.
+    labels=list(re.finditer(r'(?i)(?<!\w)(Build\s*number|Build\s*URL|Folder\s*Param|Commit\s*SHA)\s*[:：=]?\s*',text))
+    fields={}
+    for index,match in enumerate(labels):
+        key=re.sub(r'\s+','',match.group(1)).lower()
+        value=text[match.end():labels[index+1].start() if index+1<len(labels) else len(text)].strip().split('\n')[0].strip()
+        fields.setdefault(key,[]).append(value)
+    return {key:values[0] if len(values)==1 else '' for key,values in fields.items()}
+
+
 def parse_candidate(text, expected):
     """All identity evidence must occur in the same App card/release notes."""
-    urls=re.findall(r'https://[^\s<>"\']+',text)
-    target=expected['build_url'].rstrip('/')
-    if target not in [x.rstrip('/.,;)') for x in urls]:return None
-    def field(label):
-        m=re.search(r'(?im)^\s*'+label+r'\s*[:：=]?\s*([^\n\r]+)',text)
-        return m.group(1).strip() if m else ''
-    if field(r'Build\s*number')!=str(expected['number']):return None
-    if field(r'(?:Commit\s*SHA|CommitSHA)') .lower()!=expected['sha']:return None
-    if field(r'Folder\s*Param')!=expected['folder']:return None
+    fields=candidate_fields(text)
+    def field(key):return fields.get(key,'')
+    if field('buildurl').rstrip('/')!=expected['build_url'].rstrip('/'):return None
+    if field('buildnumber')!=str(expected['number']):return None
+    if field('commitsha').lower()!=expected['sha']:return None
+    if field('folderparam') not in (expected['folder'],expected['path']):return None
     versions=set(re.findall(r'(?<![\w.])(\d+\.\d+\.\d+(?:[-+][\w.-]+)?)\s*\((\d+)\)',text))
     if len(versions)!=1:raise NeedsAttention('匹配的 TestFairy App 版本缺失或不唯一，不能生成邮件')
     version,build=next(iter(versions))
@@ -213,24 +222,46 @@ _LOADING_STATE = r"""() => {
 
 class TestFairyBrowser:
     def __init__(self, config, data, options, *, login_credentials=None, visible=True):
+        self.data=Path(data);self.trace=None;self._phase='initialization';self._last_evidence={};self._pending={};self._network_errors=[]
         self.config=config;self.options=options;self.base=approved_target(options['login_url'],config)
         self.auth_path=Path(data)/'auth'/('testfairy-'+urlsplit(self.base).hostname+'.json')
         self.login_credentials=login_credentials or credentials(options['login_url'])
         self.visible=visible
+        from .testfairy_trace import AttemptTrace
+        self.trace=AttemptTrace(self.data,secrets=self.login_credentials or ())
+        self._find_used=False
+        self._trace_event('attempt','start',correlation_id=self.options.get('correlation_id'))
     def __enter__(self):
-        self.engine=sync_playwright().start()
+        self._trace_event('browser_start','start')
         try:
+            self.engine=sync_playwright().start()
             self.browser=self.engine.chromium.launch(**browser_launch_options(self.config,headless=not self.visible))
             args={'accept_downloads':False}
             if self.options.get('save_session') and self.auth_path.exists():args['storage_state']=str(self.auth_path)
             self.context=self.browser.new_context(**args);self.page=self.context.new_page()
             self.page.set_default_timeout(12000)
+            self._trace_event('browser_start','end')
             return self
-        except Exception:
-            if hasattr(self,'browser'):self.browser.close()
-            self.engine.stop();raise
-    def __exit__(self,*args):
-        self.context.close();self.browser.close();self.engine.stop()
+        except Exception as exc:
+            self.trace.failure('browser_start',exc)
+            for name,method in (('browser','close'),('engine','stop')):
+                resource=getattr(self,name,None)
+                if resource:
+                    try:getattr(resource,method)()
+                    except Exception as cleanup:self.trace.failure('browser_cleanup',cleanup)
+            raise self._diagnosed_error(exc,'browser_start') from exc
+    def __exit__(self,exc_type,exc,traceback):
+        if exc is not None:self.trace.failure(self._phase,exc,evidence=self._last_evidence)
+        first=None
+        for name,method in (('context','close'),('browser','close'),('engine','stop')):
+            resource=getattr(self,name,None)
+            if resource:
+                try:getattr(resource,method)()
+                except Exception as cleanup:
+                    self.trace.failure('browser_cleanup',cleanup)
+                    if first is None:first=cleanup
+        if first is not None and exc is None:raise self._diagnosed_error(first,'browser_cleanup') from first
+        return False
     def _same_origin(self):
         return urlsplit(self.page.url).netloc==urlsplit(self.base).netloc and urlsplit(self.page.url).scheme=='https'
     def login(self, expected):
@@ -251,8 +282,9 @@ class TestFairyBrowser:
                     raise NeedsAttention('TestFairy 登录提交地址不同源，停止自动填写')
                 try:
                     submitted=submit_recognized_login(self.page,*self.login_credentials)
-                except Exception:
-                    raise NeedsAttention('TestFairy 登录填写或提交失败，凭据不记录到日志') from None
+                except Exception as exc:
+                    self.trace.failure('login_submit',exc)
+                    raise NeedsAttention('TestFairy 登录填写或提交失败，凭据不记录到日志') from exc
                 if not submitted:
                     raise NeedsAttention('TestFairy 登录控件无法安全识别')
         deadline=time.monotonic()+(180 if self.visible else 25)
@@ -278,6 +310,27 @@ class TestFairyBrowser:
             self.context.storage_state(path=name);os.chmod(name,0o600);os.replace(name,self.auth_path)
         finally:
             if os.path.exists(name):os.unlink(name)
+    def _trace_event(self,stage,event,deadline=None,**fields):
+        self._phase=stage
+        if self.trace:
+            if deadline is not None:fields['remaining_seconds']=round(max(0,deadline-time.monotonic()),3)
+            self.trace.event(stage,event,**fields)
+
+    def _compare(self,text,expected,deadline,index):
+        fields=candidate_fields(text)
+        actual={'build_url':fields.get('buildurl',''),'number':fields.get('buildnumber',''),
+                'sha':fields.get('commitsha',''),'folder':fields.get('folderparam','')}
+        wanted={key:expected[key] for key in ('build_url','number','sha','folder')}
+        wanted['path']=expected['path']
+        reasons=[]
+        if actual['build_url'].rstrip('/')!=expected['build_url'].rstrip('/'):reasons.append('build_url_mismatch_or_missing')
+        if actual['number']!=str(expected['number']):reasons.append('build_number_mismatch_or_missing')
+        if actual['sha'].lower()!=expected['sha']:reasons.append('sha_mismatch_or_missing')
+        if actual['folder'] not in (expected['folder'],expected['path']):reasons.append('folder_mismatch_or_missing')
+        self._last_evidence={'expected':wanted,'actual':actual,'exclusion_reasons':reasons,'card_index':index}
+        self._trace_event('field_comparison','result',deadline,card_index=index,expected=wanted,actual=actual,exclusion_reasons=reasons)
+        return parse_candidate(text,expected)
+
     def _lookup_deadline(self):
         return time.monotonic()+max(1,min(1800,float(self.config.get('testfairy',{}).get('wait_seconds',600))))
 
@@ -293,6 +346,7 @@ class TestFairyBrowser:
         def response_received(response):
             if relevant(response.request) and response.status>=400:
                 self._network_errors.append(f'{response.request.resource_type} HTTP {response.status}')
+                if self.trace:self.trace.event('request_observation','http_error',resource_type=response.request.resource_type,status=response.status,root_cause_confirmed=False)
                 self._network_errors[:]=self._network_errors[-8:]
         def finished(request):self._pending.pop(id(request),None)
         def failed(request):
@@ -300,6 +354,7 @@ class TestFairyBrowser:
             if relevant(request):
                 code=re.search(r'net::[A-Z0-9_]+',str(request.failure))
                 self._network_errors.append(request.resource_type+' '+(code.group() if code else '请求失败'))
+                if self.trace:self.trace.event('request_observation','request_failed',resource_type=request.resource_type,error_code=code.group() if code else 'request_failed',root_cause_confirmed=False)
                 self._network_errors[:]=self._network_errors[-8:]
         self.page.on('request',request_started)
         self.page.on('response',response_received)
@@ -320,6 +375,7 @@ class TestFairyBrowser:
         return state
 
     def _lookup_failure(self,stage,state,evidence=None):
+        self._last_evidence={'state':state,'candidates':evidence}
         detail='加载超时：仍观察到加载中' if state['busy'] else ('列表已就绪但未找到目标（空列表或目录未出现）' if state['ready'] else '等待超时：加载状态不明，尚未观察到目标')
         if evidence and len(evidence['indices'])>1:detail='目录存在多个可见交互候选，无法唯一定位'
         message='TestFairy '+stage+'：'+detail
@@ -338,7 +394,8 @@ class TestFairyBrowser:
             self._lookup_failure('页面操作总等待预算已用尽',self._lookup_state())
         try:
             return action(timeout=max(1,int((deadline-time.monotonic())*1000)),**kwargs)
-        except BrowserTimeout:
+        except BrowserTimeout as exc:
+            if self.trace:self.trace.failure(self._phase,exc,evidence=self._last_evidence)
             self._lookup_failure('页面操作总等待预算已用尽',self._lookup_state())
 
     def _folder(self,path,deadline=None):
@@ -351,15 +408,18 @@ class TestFairyBrowser:
         selector=self.config.get('testfairy',{}).get('folder_selector',_FOLDER_SELECTOR)
         apps_activated=False
         for depth,label in enumerate(labels):
+            self._trace_event('directory','start',deadline,depth=depth,label=label)
             while True:
                 state=self._lookup_state()
                 evidence=self.page.evaluate(_FOLDER_CANDIDATES, {'label':label,'parents':labels[:depth],
                     'path':labels,'selector':self.config.get('testfairy',{}).get('folder_selector',_FOLDER_SELECTOR)})
                 if evidence['current']:
+                    self._trace_event('directory','end',deadline,depth=depth,reason='current_path_proven')
                     break  # breadcrumb/tree explicitly proves we are already at this path level
                 if len(evidence['indices'])==1:
                     self._lookup_action(self.page.locator(selector).nth(evidence['indices'][0]).click,deadline)
                     if not self._same_origin():raise NeedsAttention('TestFairy 目录跳转离开当前租户')
+                    self._trace_event('directory','end',deadline,depth=depth,eligible=1)
                     break
                 if depth==0 and not evidence['indices'] and not apps_activated:
                     apps=self.page.evaluate(_FOLDER_CANDIDATES, {'label':'APPS','parents':[],
@@ -373,58 +433,186 @@ class TestFairyBrowser:
                     evidence['structure']=self.page.evaluate(_FOLDER_STRUCTURE,{'label':label,'selector':selector})
                     self._lookup_failure('目录 '+label+'；已走过 '+('/'.join(labels[:depth]) or 'APPS'),state,evidence)
                 self.page.wait_for_timeout(min(200,max(1,(deadline-time.monotonic())*1000)))
+    def _node_cursor(self,node,deadline):
+        return self._lookup_action(node.evaluate,deadline,expression="""e=>{
+          const key=Symbol.for('appbuilder.testfairy.node-cursors');
+          const state=globalThis[key]||(globalThis[key]={ids:new WeakMap(),next:0,prefix:Math.random().toString(36).slice(2)});
+          if(!state.ids.has(e))state.ids.set(e,++state.next);
+          return state.prefix+':'+state.ids.get(e);
+        }""")
+
+    def _semantic_controls(self,scope,label):
+        expression=re.compile(r'^'+re.escape(label)+r'$',re.I)
+        controls=scope.get_by_role('button',name=expression).or_(scope.get_by_role('link',name=expression))
+        return [controls.nth(i) for i in range(controls.count()) if controls.nth(i).is_visible()]
+
+    def _safe_control_click(self,control,deadline):
+        href=self._lookup_action(control.get_attribute,deadline,name='href')
+        if href:
+            target=urlsplit(urljoin(self.page.url,href));base=urlsplit(self.base)
+            if target.scheme!=base.scheme or target.netloc!=base.netloc:
+                raise NeedsAttention('TestFairy 只读入口指向其他来源，未点击')
+        self._lookup_action(control.click,deadline)
+        if not self._same_origin():raise NeedsAttention('TestFairy 只读入口跳转离开允许租户')
+
+    def _existing_share(self,card,parsed,expected,deadline):
+        self._trace_event('share','start',deadline)
+        links=card.locator('a[href*="/join/"]')
+        if not links.count():
+            # Only open the existing Share view. Never Enable/Create/Save permissions.
+            share=card.get_by_role('button',name=re.compile(r'^Share$',re.I))
+            if share.count()!=1:share=card.get_by_role('link',name=re.compile(r'^Share$',re.I))
+            if share.count()!=1:raise NeedsAttention('匹配 App 的现有 Share 入口无法唯一识别')
+            if self.page.locator('[role="dialog"]:visible, dialog[open]:visible').count():
+                raise NeedsAttention('Share 前已有可见弹窗，无法证明链接归属；请关闭后再测试')
+            self._lookup_action(share.click,deadline)
+            while True:
+                state=self._lookup_state()
+                if time.monotonic()>=deadline:
+                    self._lookup_failure('Share 未出现属于当前 App 的唯一链接容器；不会从整页或其他 App 取链接',state)
+                dialog=self.page.locator('[role="dialog"]:visible, dialog[open]:visible')
+                if dialog.count()>1:raise NeedsAttention('Share 出现多个弹窗，无法唯一证明当前 App 链接归属')
+                # A newly opened unique dialog or the same verified card only; never search the page.
+                scope=dialog if dialog.count()==1 else card
+                if scope is card and (card.count()!=1 or not parse_candidate(self._lookup_action(card.inner_text,deadline),expected)):
+                    raise NeedsAttention('Share 后原 App 卡片身份已变化，不能证明链接归属')
+                links=scope.locator('a[href*="/join/"]')
+                raw=[self._lookup_action(links.nth(i).get_attribute,deadline,name='href') for i in range(links.count())]
+                raw += scope.locator('input[value*="/join/"]').evaluate_all('(xs)=>xs.map(x=>x.value)')
+                if raw:break
+                if time.monotonic()>=deadline:
+                    self._lookup_failure('Share 未出现属于当前 App 的唯一链接容器；不会从整页或其他 App 取链接',state)
+                self.page.wait_for_timeout(100)
+        else:raw=[self._lookup_action(links.nth(i).get_attribute,deadline,name='href') for i in range(links.count())]
+        urls={share_url(value,self.base) for value in raw if value}
+        if len(urls)!=1:raise NeedsAttention('未找到唯一已有分享链接；不会创建公开权限')
+        resolved=urls.pop()
+        if urlsplit(resolved).query:
+            raise NeedsAttention('实际分享链接含未知查询参数：尚无已核实的键和值规则，已阻塞；不删除、不改写、不猜版本参数')
+        parsed.update(share_url=resolved,link_semantics='existing_link_version_binding_unverified',matched_at=datetime.now(timezone.utc).isoformat())
+        self._save_session()
+        self._trace_event('share','end',deadline,link_semantics=parsed['link_semantics'])
+        return parsed
+
+    def _diagnosed_error(self,exc,phase=None):
+        stage=phase or self._phase
+        self.trace.failure(stage,exc,evidence=self._last_evidence)
+        summary=dict(self.trace.summary)
+        first=summary.get('first_error') or {}
+        message=first.get('message','查找失败').split('；目标名称只读结构')[0][:360]
+        error=NeedsAttention('TestFairy '+first.get('phase',stage)+'：'+message+'；诊断日志 '+summary['log_path'])
+        error.testfairy_diagnostics=summary
+        return error
+
     def find(self,expected):
+        if self._find_used:
+            from .testfairy_trace import AttemptTrace
+            self.trace=AttemptTrace(self.data,secrets=self.login_credentials or ())
+        self._find_used=True
+        self._trace_event('lookup','start',correlation_id=self.options.get('correlation_id'))
+        self._last_evidence={}
+        try:
+            result=self._find(expected)
+            self._trace_event('lookup','end',status='MATCHED',link_semantics=result.get('link_semantics'))
+            result['diagnostics']=dict(self.trace.summary)
+            return result
+        except Exception as exc:
+            raise self._diagnosed_error(exc) from exc
+
+    def _find(self,expected):
+        self._trace_event('login','start')
         self.login(expected)
+        self._trace_event('login','end')
         cfg=self.config.get('testfairy',{})
         deadline=self._lookup_deadline()
         self._folder(expected['path'],deadline)
         selector=cfg.get('card_selector','article, .app-card, .build-card, .version-card, [data-build-id]')
+        versions_entered=False
+        opened_notes=set()
+        advanced_pages=set()
+        transition=None
+        scanned={}
+        deduplicated=0
         while True:
             state=self._lookup_state()
+            if time.monotonic()>=deadline:self._lookup_failure('INCOMPLETE：版本查找超时，遍历完整性未经证实',state)
             cards=self.page.locator(selector)
+            # Nested wrappers cannot supply evidence belonging to multiple child cards.
+            visible=[cards.nth(i) for i in range(cards.count()) if cards.nth(i).is_visible() and not cards.nth(i).locator(selector).count()]
+            texts=[self._lookup_action(card.inner_text,deadline) for card in visible]
+            signature=tuple(self._node_cursor(card,deadline) for card in visible)
+            identities=tuple(json.dumps(candidate_fields(text),sort_keys=True) for text in texts)
+            if transition is not None and (not visible or (self.page.url,signature,identities)==transition):
+                if time.monotonic()>=deadline:self._lookup_failure('INCOMPLETE：版本切换未观察到新卡片，遍历不完整',state)
+                self._trace_event('pagination','retry',deadline,reason='no_nonempty_identity_progress',loaded=len(visible))
+                self.page.wait_for_timeout(100);continue
+            transition=None
+            self._trace_event('version_list','scan',deadline,loaded=len(visible),scanned=len(scanned),page_cursor=len(advanced_pages))
             matches=[]
-            for i in range(min(cards.count(),100)):
-                card=cards.nth(i);parsed=parse_candidate(self._lookup_action(card.inner_text,deadline),expected)
-                if parsed:matches.append((card,parsed))
-            if len(matches)>1:raise NeedsAttention('同一 GMX 构建匹配多个 TestFairy App，停止生成链接/邮件')
-            if matches:
-                card,parsed=matches[0]
-                links=card.locator('a[href*="/join/"]')
-                if not links.count():
-                    # Only open the existing Share view. Never Enable/Create/Save permissions.
-                    share=card.get_by_role('button',name=re.compile(r'^Share$',re.I))
-                    if share.count()!=1:share=card.get_by_role('link',name=re.compile(r'^Share$',re.I))
-                    if share.count()!=1:raise NeedsAttention('匹配 App 的现有 Share 入口无法唯一识别')
-                    if self.page.locator('[role="dialog"]:visible, dialog[open]:visible').count():
-                        raise NeedsAttention('Share 前已有可见弹窗，无法证明链接归属；请关闭后再测试')
-                    self._lookup_action(share.click,deadline)
+            for index,card in enumerate(visible):
+                fingerprint=(self.page.url,texts[index])
+                if fingerprint in scanned:
+                    parsed=scanned[fingerprint];deduplicated+=1
+                else:
+                    parsed=self._compare(texts[index],expected,deadline,index)
+                    scanned[fingerprint]=parsed
+                notes=self._semantic_controls(card,'Show release notes')
+                if len(notes)>1:raise NeedsAttention('INCOMPLETE：同版本卡片 Show release notes 入口不唯一')
+                note_key=signature[index]
+                if parsed is None and notes and note_key not in opened_notes:
+                    opened_notes.add(note_key)
+                    self._trace_event('release_notes','start',deadline,card_index=index)
+                    self._safe_control_click(notes[0],deadline)
+                    # Only the same card can provide its release notes; never read a global dialog.
                     while True:
-                        state=self._lookup_state()
+                        self._lookup_state()
+                        expanded=self._lookup_action(card.inner_text,deadline)
+                        fields=candidate_fields(expanded)
+                        if all(fields.get(key) for key in ('buildurl','buildnumber','commitsha','folderparam')):break
                         if time.monotonic()>=deadline:
-                            self._lookup_failure('Share 未出现属于当前 App 的唯一链接容器；不会从整页或其他 App 取链接',state)
-                        dialog=self.page.locator('[role="dialog"]:visible, dialog[open]:visible')
-                        if dialog.count()>1:raise NeedsAttention('Share 出现多个弹窗，无法唯一证明当前 App 链接归属')
-                        # A newly opened unique dialog or the same verified card only; never search the page.
-                        scope=dialog if dialog.count()==1 else card
-                        if scope is card and (card.count()!=1 or not parse_candidate(self._lookup_action(card.inner_text,deadline),expected)):
-                            raise NeedsAttention('Share 后原 App 卡片身份已变化，不能证明链接归属')
-                        links=scope.locator('a[href*="/join/"]')
-                        raw=[self._lookup_action(links.nth(i).get_attribute,deadline,name='href') for i in range(links.count())]
-                        raw += scope.locator('input[value*="/join/"]').evaluate_all('(xs)=>xs.map(x=>x.value)')
-                        if raw:break
-                        if time.monotonic()>=deadline:
-                            self._lookup_failure('Share 未出现属于当前 App 的唯一链接容器；不会从整页或其他 App 取链接',state)
-                        self.page.wait_for_timeout(100)
-                else:raw=[self._lookup_action(links.nth(i).get_attribute,deadline,name='href') for i in range(links.count())]
-                urls={share_url(value,self.base) for value in raw if value}
-                if len(urls)!=1:raise NeedsAttention('未找到唯一已有分享链接；不会创建公开权限')
-                resolved=urls.pop()
-                if urlsplit(resolved).query:
-                    raise NeedsAttention('实际分享链接含查询参数，需人工核对；不会删改参数后发送另一地址')
-                parsed.update(share_url=resolved,matched_at=datetime.now(timezone.utc).isoformat())
-                self._save_session();return parsed
-            if time.monotonic()>=deadline:self._lookup_failure('等待本次 GMX 对应 App 超时；未取最新包',state)
+                            raise NeedsAttention('INCOMPLETE：Show release notes 后未观察到同卡完整四字段；不翻页、不读取其他弹窗')
+                        self.page.wait_for_timeout(min(100,max(1,(deadline-time.monotonic())*1000)))
+                    self._trace_event('release_notes','end',deadline,card_index=index)
+                    texts[index]=expanded
+                    parsed=self._compare(expanded,expected,deadline,index)
+                    scanned[(self.page.url,expanded)]=parsed
+                if parsed:matches.append((card,parsed))
+            self._trace_event('version_list','result',deadline,loaded=len(visible),scanned=len(scanned),dedup=deduplicated,match_count=len(matches))
+            if len(matches)>1:raise NeedsAttention('同一 GMX 构建匹配多个 TestFairy App，停止生成链接/邮件')
+            if matches:return self._existing_share(*matches[0],expected,deadline)
+            identities=tuple(json.dumps(candidate_fields(text),sort_keys=True) for text in texts)
+            all_versions=[(card,control) for card in visible for control in self._semantic_controls(card,'See all versions')]
+            if not versions_entered and all_versions:
+                if len(visible)!=1 or len(all_versions)!=1:
+                    raise NeedsAttention('INCOMPLETE：目录存在多个 App 或版本入口，不能证明目标 App 归属')
+                self._trace_event('app_selection','start',deadline,app_count=len(visible),entry_count=len(all_versions))
+                transition=(self.page.url,signature,identities)
+                self._safe_control_click(all_versions[0][1],deadline)
+                self._trace_event('app_selection','end',deadline)
+                versions_entered=True;continue
+            if versions_entered:
+                next_controls=self._semantic_controls(self.page,'Next')+self._semantic_controls(self.page,'Load more')
+                enabled=[control for control in next_controls if control.is_enabled() and self._lookup_action(control.get_attribute,deadline,name='aria-disabled')!='true']
+                if len(enabled)>1:raise NeedsAttention('INCOMPLETE：多个可见翻页入口，版本遍历不完整')
+                end_markers=self.page.get_by_role('status').filter(has_text=re.compile(r'^(?:No more versions|All versions loaded)$',re.I))
+                explicit_end=sum(end_markers.nth(i).is_visible() for i in range(end_markers.count()))==1
+                if not enabled and explicit_end and not state['busy'] and not state.get('pending_requests'):
+                    self._trace_event('pagination','end',deadline,completion_evidence='explicit_status',scanned=len(scanned))
+                    raise NeedsAttention('NOT_FOUND：页面明确声明版本列表已结束，已检查卡片未匹配四字段；未取最新包')
+                if enabled:
+                    key=(self.page.url,signature,identities)
+                    if key in advanced_pages:raise NeedsAttention('INCOMPLETE：翻页重复已检查页面，版本遍历不完整')
+                    advanced_pages.add(key)
+                    self._trace_event('pagination','start',deadline,page_cursor=len(advanced_pages),reason='unique_semantic_control')
+                    transition=(self.page.url,signature,identities)
+                    self._safe_control_click(enabled[0],deadline)
+                    self._trace_event('pagination','end',deadline,page_cursor=len(advanced_pages))
+                    continue
+            if time.monotonic()>=deadline:
+                self._lookup_failure('INCOMPLETE：查找超时，当前卡片未匹配；历史版本完整性未经证实，未取最新包',state)
+            self._trace_event('version_list','retry',deadline,reason='target_not_observed_completeness_unknown',loaded=len(visible))
             self.page.wait_for_timeout(min(250,max(0,(deadline-time.monotonic())*1000)))
+
 
 
 def mail_preview(params,runtime,created):

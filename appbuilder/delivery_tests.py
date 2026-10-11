@@ -15,6 +15,26 @@ _LOCK=threading.Lock()
 _ACTIVE=set()
 
 
+def testfairy_diagnostics(value, secret=()):
+    """Expose bounded diagnostic references, never arbitrary browser state."""
+    if not isinstance(value,dict):return {}
+    def clean(item):
+        text=str(item)
+        for part in secret or ():
+            if isinstance(part,str) and part:text=text.replace(part,'[REDACTED]')
+        return safe_text(text)[:1200]
+    result={key:clean(value[key]) for key in ('attempt_id','log_path','evidence_path','logging_error')
+            if value.get(key) and isinstance(value[key],(str,int,float))}
+    first=value.get('first_error')
+    if isinstance(first,dict):
+        result['first_error']={key:clean(first[key]) for key in ('stage','type','message') if first.get(key)}
+        if first.get('phase'):result['first_error']['stage']=clean(first['phase'])
+    error=value.get('logging_error')
+    if isinstance(error,dict):
+        result['logging_error']=' · '.join(clean(error[key]) for key in ('type','message') if error.get(key))
+    return result
+
+
 def connect():
     DATA.mkdir(parents=True,exist_ok=True)
     db=sqlite3.connect(DATA/'delivery-tests.sqlite',timeout=20);db.row_factory=sqlite3.Row
@@ -117,7 +137,7 @@ def start(body):
         try:
             if kind=='testfairy':
                 from .testfairy import TestFairyBrowser
-                options={'login_url':inputs['url'],'save_session':False}
+                options={'login_url':inputs['url'],'save_session':False,'correlation_id':test_id}
                 test_config={**config,'testfairy':{**config.get('testfairy',{}),'wait_seconds':min(60,float(config.get('testfairy',{}).get('wait_seconds',60)))}}
                 with TestFairyBrowser(test_config,DATA,options,login_credentials=secret,visible=True) as browser:
                     app=browser.find(inputs['expected'])
@@ -128,7 +148,9 @@ def start(body):
                     finish(test_id,'MATCH' if matched else 'MISMATCH',{
                         'message':'已按保存的 GMX 构建提取已有分享链接，结果'+('匹配' if matched else '不匹配')+'；未启动打包或更改分享权限',
                         'requested_url':inputs['url'],'final_url':final,'expected_share_url':inputs['wanted'],
-                        'actual_share_url':actual,'task_id':inputs['task_id'],'build_url':app['build_url'],'app_version':app['app_version']})
+                        'actual_share_url':actual,'task_id':inputs['task_id'],'build_url':app['build_url'],'app_version':app['app_version'],
+                        'link_semantics':'已核对卡片构建身份；链接是否固定历史版本尚未独立验证',
+                        'diagnostics':testfairy_diagnostics(app.get('diagnostics'),secret)})
             else:
                 from .outlook import OutlookAdapter,call_diagnostic
                 adapter=OutlookAdapter();account=adapter.resolve(inputs['account'])
@@ -147,9 +169,15 @@ def start(body):
             if kind=='outlook' and hasattr(exc,'stage'):
                 from .outlook import call_diagnostic
                 diagnostic=call_diagnostic(exc)
-            finish(test_id,'BLOCKED',{'message':safe_text(str(exc)),**diagnostic})
-        except Exception:
-            finish(test_id,'ERROR',{'message':'测试未完成；请检查本机浏览器/Outlook。不会记录密码或自动重发'})
+            elif kind=='testfairy':
+                diagnostic={'diagnostics':testfairy_diagnostics(getattr(exc,'testfairy_diagnostics',None),secret)}
+            message=(testfairy_diagnostics({'first_error':{'message':str(exc)}},secret)['first_error'].get('message','测试未完成')
+                     if kind=='testfairy' and str(exc) else safe_text(str(exc)))
+            finish(test_id,'BLOCKED',{'message':message,**diagnostic})
+        except Exception as exc:
+            diagnostic=({'diagnostics':testfairy_diagnostics(getattr(exc,'testfairy_diagnostics',None),secret)}
+                        if kind=='testfairy' else {})
+            finish(test_id,'ERROR',{'message':'测试未完成；请检查本机浏览器/Outlook。不会记录密码或自动重发',**diagnostic})
         finally:
             with _LOCK:_ACTIVE.discard(test_id)
     try:threading.Thread(target=execute,daemon=True).start()

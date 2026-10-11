@@ -229,6 +229,16 @@ function renderTestTasks(){
 }
 for(const prefix of ['tf','mail'])$(prefix+'-test-form').elements[prefix+'_test_search'].addEventListener('input',renderTestTasks);
 
+function deliveryDiagnostics(result){
+ const d=result.diagnostics||{},first=d.first_error;
+ return (result.link_semantics?'\n链接范围：'+result.link_semantics:'')+
+  (d.attempt_id?'\n排障编号：'+d.attempt_id:'')+
+  (first?'\n首次错误：'+[first.stage,first.type,first.message].filter(Boolean).join(' · '):'')+
+  (d.log_path?'\n详细日志（本机）：'+d.log_path:'')+
+  (d.evidence_path?'\n脱敏证据（本机）：'+d.evidence_path:'')+
+  (d.logging_error?'\n日志保存异常：'+d.logging_error:'');
+}
+
 async function runDeliveryTest(kind){
  const f=$(kind==='testfairy'?'tf-test-form':'mail-test-form').elements,button=$(kind==='testfairy'?'test-testfairy':'test-outlook-send'),out=$(kind==='testfairy'?'tf-test-result':'mail-test-result');
  const body={kind,request_id:crypto.randomUUID()};
@@ -237,7 +247,7 @@ async function runDeliveryTest(kind){
  if(!body.task_id){out.textContent='请在本测试区选择历史构建。';return;}
  button.disabled=true;out.textContent='正在执行独立测试…';
  try{const r=await api('/api/delivery-tests/start',{method:'POST',body:JSON.stringify(body)});if(kind==='testfairy')f.tf_test_password.value='';delete body.password;
-   for(let i=0;i<360;i++){const result=await api('/api/delivery-tests/'+encodeURIComponent(r.id));out.textContent=result.status+' · '+(result.result.message||'执行中')+(result.result.final_url?'\n实际地址（已去除敏感查询参数）：'+result.result.final_url:'')+(result.result.expected_share_url?'\n预期链接：'+result.result.expected_share_url+'\n实际链接：'+result.result.actual_share_url:'')+(result.result.account?'\n发件账号：'+result.result.account:'')+(result.result.stage?'\n阶段：'+result.result.stage+' · send 调用：'+(result.result.send_attempted===true?'已调用':result.result.send_attempted===false?'未调用':'无法确认'):'')+(result.result.error_number!=null?'\n原生错误号：'+result.result.error_number:'')+(result.result.returncode!=null?'\n退出码：'+result.result.returncode:'');if(!['RUNNING','SUBMITTING'].includes(result.status))return;await new Promise(resolve=>setTimeout(resolve,1000));}
+   for(let i=0;i<360;i++){const result=await api('/api/delivery-tests/'+encodeURIComponent(r.id));out.textContent=result.status+' · '+(result.result.message||'执行中')+(result.result.final_url?'\n实际地址（已去除敏感查询参数）：'+result.result.final_url:'')+(result.result.expected_share_url?'\n预期链接：'+result.result.expected_share_url+'\n实际链接：'+result.result.actual_share_url:'')+(result.result.account?'\n发件账号：'+result.result.account:'')+(result.result.stage?'\n阶段：'+result.result.stage+' · send 调用：'+(result.result.send_attempted===true?'已调用':result.result.send_attempted===false?'未调用':'无法确认'):'')+(result.result.error_number!=null?'\n原生错误号：'+result.result.error_number:'')+(result.result.returncode!=null?'\n退出码：'+result.result.returncode:'')+deliveryDiagnostics(result.result);if(!['RUNNING','SUBMITTING'].includes(result.status))return;await new Promise(resolve=>setTimeout(resolve,1000));}
    out.textContent+='\n等待结果超时；不会自动再次发送，请核对原测试结果。';
  }catch(e){out.textContent=e.message;}finally{button.disabled=false;}
 }
