@@ -45,7 +45,7 @@ jenkins:
 build:
   # 可选工单编号；无编号时生成 AUTO-时间戳。页面和 CLI 输入优先。
   gmx_issue_key: ""
-  max_parallel: 2
+  max_parallel: 10
   timezone: "local"
   # 202610100030: 分钟精度。并发同一分钟提交，管理器会分配不同的时间戳。
   max_changed_lines: 100

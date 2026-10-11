@@ -123,7 +123,7 @@ class DefaultsTest(unittest.TestCase):
                       'discover_poll_seconds','poll_seconds','build_timeout_minutes',
                       'callback_timeout_minutes','upload_success_pattern','browser_channel'):
             self.assertIn('name="'+field+'"', html)
-            self.assertIn(field, js)
+            self.assertIn('data-build name="'+field+'"', html)
         self.assertIn('installDefaults(boot.config)', js)
         self.assertIn('if(!customFolderEdited)', js)
         self.assertNotIn('localStorage', js)

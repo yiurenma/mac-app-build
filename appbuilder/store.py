@@ -7,7 +7,7 @@ import shutil
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
-from .config import DATA
+from .config import DATA, parallel_limit
 from .versions import branch_names, job_urls
 
 
@@ -48,7 +48,7 @@ def create_task(config, params):
     with closing(connect()) as db, db:
         db.execute('BEGIN IMMEDIATE')
         running = db.execute("SELECT COUNT(*) FROM tasks WHERE status IN ('QUEUED','RUNNING')").fetchone()[0]
-        if running >= int(config.get('build', {}).get('max_parallel', 2)):
+        if running >= parallel_limit(config):
             raise RuntimeError('并发任务已达上限；请先等待当前任务完成')
         existing = {r['stamp'] for r in db.execute('SELECT stamp FROM tasks')}
         stamp = datetime.now().strftime('%Y%m%d%H%M')
@@ -89,6 +89,28 @@ def task(task_id):
 def task_list():
     with closing(connect()) as db, db:
         return [dict(r) for r in db.execute('SELECT * FROM tasks ORDER BY created DESC')]
+
+
+def reserve_resume(config, task_id):
+    """Atomically reserve a shared slot before launching a resumed worker."""
+    from .cli import alive
+    with closing(connect()) as db, db:
+        db.execute('BEGIN IMMEDIATE')
+        row = db.execute('SELECT * FROM tasks WHERE id=?', (task_id,)).fetchone()
+        if not row:
+            raise ValueError('任务不存在: ' + task_id)
+        if row['status'] == 'SUCCESS':
+            raise ValueError('任务已完成，无需恢复')
+        if row['status'] in ('QUEUED', 'RUNNING') and alive(row['pid']):
+            raise ValueError('原 Worker 仍在运行，禁止重复启动')
+        count = db.execute("SELECT COUNT(*) FROM tasks WHERE status IN ('QUEUED','RUNNING') AND id<>?",
+                           (task_id,)).fetchone()[0]
+        if count >= parallel_limit(config):
+            raise ValueError('并发任务已达到上限')
+        # The launching process owns the reservation until the worker takes it.
+        db.execute("UPDATE tasks SET status='QUEUED', pid=?, note='等待恢复 Worker' WHERE id=?",
+                   (os.getpid(), task_id))
+        return dict(row)
 
 
 def update_task(task_id, **values):

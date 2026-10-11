@@ -63,7 +63,7 @@ class WebPATTests(unittest.TestCase):
         html=(web.STATIC/'index.html').read_text()
         js=(web.STATIC/'app.js').read_text()
         self.assertIn('name="github_token" type="password"',html)
-        self.assertIn("'github_token'",js)
+        self.assertIn('data-build name="github_token"', html)
         self.assertIn("form.elements.github_token.value=''",js)
 
 if __name__=='__main__':unittest.main()

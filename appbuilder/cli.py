@@ -8,9 +8,9 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
-from .config import DATA, ROOT, load_config
+from .config import DATA, ROOT, load_config, parallel_limit
 from .versions import validate_args, branch_names, job_urls, folder, gmx_issue_key
-from .store import create_task, task, task_list, update_task, update_task_params, task_folder, active_count
+from .store import create_task, task, task_list, update_task, update_task_params, task_folder, active_count, reserve_resume
 from .jenkins import interactive_login, saved_auth_path
 from .auth import store_credentials, read_credentials, CredentialError
 
@@ -65,6 +65,12 @@ def args_parser():
     web.add_argument('--port', type=int, default=8765, help='本地页面端口（默认 8765）')
     web.add_argument('--no-open', action='store_true', help='只启动服务，不自动打开浏览器')
     web.add_argument('--update', action='store_true', help='启动前由 ./app-build 安全更新源码')
+    sched = sub.add_parser('scheduler', help='定时任务调度器（按 cron 自动创建构建）')
+    sched_sub = sched.add_subparsers(dest='scheduler_command', required=True)
+    sched_sub.add_parser('run', help='前台运行调度器（LaunchAgent 使用此命令）')
+    sched_sub.add_parser('install', help='安装并启动 macOS LaunchAgent：登录后自动运行、崩溃自动重启')
+    sched_sub.add_parser('uninstall', help='停止并移除 LaunchAgent')
+    sched_sub.add_parser('status', help='显示调度器状态与定时任务')
     auth = sub.add_parser('auth', help='仅首次保存 Jenkins 账号密码到 Mac Keychain')
     auth.add_argument('--jenkins-user', required=True)
     auth.add_argument('--jenkins-password', required=True)
@@ -226,6 +232,29 @@ def main(argv=None):
         from .web import serve
         serve(port=a.port, open_browser=not a.no_open)
         return
+    if a.command == 'scheduler':
+        from . import scheduler
+        if a.scheduler_command == 'run':
+            try:
+                scheduler.run_forever()
+            except scheduler.AlreadyRunning as exc:
+                print('[SCHEDULER] ' + str(exc), flush=True)
+                raise SystemExit(0)
+        elif a.scheduler_command == 'install':
+            path = scheduler.install()
+            print(f'[SCHEDULER] 已安装并启动 LaunchAgent：{path}', flush=True)
+            print('[SCHEDULER] 之后登录 Mac 会自动运行；日志：.appbuilder/scheduler.log', flush=True)
+        elif a.scheduler_command == 'uninstall':
+            print('[SCHEDULER] 已移除 LaunchAgent' if scheduler.uninstall() else '[SCHEDULER] 未安装 LaunchAgent', flush=True)
+        else:
+            from . import schedules
+            beat = scheduler.heartbeat_status()
+            print(f"[SCHEDULER] {'在线' if beat['online'] else '离线'} pid={beat['pid']} "
+                  f"心跳={beat['age_seconds']}s 前", flush=True)
+            for row in schedules.list_schedules():
+                print(f"{row['id']} {'启用' if row['enabled'] else '停用'} {row['cron']:<16s} "
+                      f"下次={row['next_run'] or '-'} {row['name']}", flush=True)
+        return
     if a.command == 'auth':
         setup_credentials(a)
         return
@@ -253,7 +282,7 @@ def main(argv=None):
             p.error('--wait 和 --watch 不能同时使用')
         setup_credentials(a)
         doctor_check(c, strict=True)
-        if active_count() >= int(c.get('build', {}).get('max_parallel', 2)):
+        if active_count() >= parallel_limit(c):
             p.error('并发任务已达上限，请先等待任务结束或调整 config.yaml')
         # Refuse to queue tasks that cannot read an environment token.
         from .config import token_or_error
@@ -284,14 +313,19 @@ def main(argv=None):
             return
         if r['status'] in ('RUNNING', 'QUEUED') and not alive(r['pid']):
             update_task(r['id'], status='INTERRUPTED', note='先前的 Worker 进程已退出')
-        if active_count() >= int(load_config().get('build', {}).get('max_parallel', 2)):
+        if active_count() >= parallel_limit(load_config()):
             p.error('并发任务已达上限')
         from .config import token_or_error
         token_or_error(load_config())
         if a.visible or a.verbose:
             update_task_params(a.task_id, visible=(True if a.visible else None),
                                verbose=(True if a.verbose else None))
-        spawn(a.task_id, a.wait)
+        previous = reserve_resume(load_config(), a.task_id)
+        try:
+            spawn(a.task_id, a.wait)
+        except Exception:
+            update_task(a.task_id, status=previous['status'], pid=previous['pid'], note=previous['note'])
+            raise
         if a.watch:
             watch_task(a.task_id)
         return

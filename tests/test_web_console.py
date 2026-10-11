@@ -178,6 +178,7 @@ class WebLogicTests(unittest.TestCase):
              patch.object(web,'token_or_error',return_value='dummy'),\
              patch.object(web,'update_task_params') as update,\
              patch.object(web,'create_task') as create,\
+             patch.object(web,'reserve_resume',return_value=row) as reserve,\
              patch.object(cli,'spawn') as spawn:
             result=web.resume_build(row['id'],{'visible':True,'verbose':True})
             create.assert_not_called()

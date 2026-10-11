@@ -1,20 +1,36 @@
 === FINAL VERIFICATION ROUND 3 ===
 $ python -m unittest discover -s tests -v
-test_live_bootstrap_upgrade_failure_blocks_bootstrap_and_lock_check (test_bootstrap_upgrade.BootstrapUpgradeTests.test_live_bootstrap_upgrade_failure_blocks_bootstrap_and_lock_check) ... ok
-test_upgrade_failure_blocks_bootstrap (test_bootstrap_upgrade.BootstrapUpgradeTests.test_upgrade_failure_blocks_bootstrap) ... 2026-10-10 05:03:35 [SHELL] $ ci-script --upgrade  (cwd=/tmp/tmpelq6lbu4)
-2026-10-10 05:03:35 [SHELL] 子进程输出保存至 /tmp/tmpelq6lbu4/bootstrap.log；--verbose 时同时流式显示（已尝试隐藏凭据）
-2026-10-10 05:03:35 [SHELL] ci-script --upgrade exit=23 elapsed=0.0s
+test_upgrade_failure_blocks_bootstrap (test_bootstrap_upgrade.BootstrapUpgradeTests.test_upgrade_failure_blocks_bootstrap) ... 2026-10-11 06:20:55 [SHELL] $ ci-script --upgrade  (cwd=/tmp/tmpozjfulow)
+2026-10-11 06:20:55 [SHELL] 子进程输出保存至 /tmp/tmpozjfulow/bootstrap.log；--verbose 时同时流式显示（已尝试隐藏凭据）
+2026-10-11 06:20:55 [SHELL] ci-script --upgrade exit=23 elapsed=0.0s
 ok
-test_upgrade_runs_first_in_same_directory_with_upgrade_argument (test_bootstrap_upgrade.BootstrapUpgradeTests.test_upgrade_runs_first_in_same_directory_with_upgrade_argument) ... 2026-10-10 05:03:35 [SHELL] $ ci-script --upgrade  (cwd=/tmp/tmp9knmgsr2)
-2026-10-10 05:03:35 [SHELL] 子进程输出保存至 /tmp/tmp9knmgsr2/bootstrap.log；--verbose 时同时流式显示（已尝试隐藏凭据）
-2026-10-10 05:03:35 [SHELL] ci-script --upgrade exit=0 elapsed=0.0s
-2026-10-10 05:03:35 [SHELL] $ ./bootstrap.sh  (cwd=/tmp/tmp9knmgsr2)
-2026-10-10 05:03:35 [SHELL] 子进程输出保存至 /tmp/tmp9knmgsr2/bootstrap.log；--verbose 时同时流式显示（已尝试隐藏凭据）
-2026-10-10 05:03:35 [SHELL] ./bootstrap.sh exit=0 elapsed=0.0s
+test_upgrade_runs_first_in_same_directory_with_upgrade_argument (test_bootstrap_upgrade.BootstrapUpgradeTests.test_upgrade_runs_first_in_same_directory_with_upgrade_argument) ... 2026-10-11 06:20:55 [SHELL] $ ci-script --upgrade  (cwd=/tmp/tmp4vq0wkws)
+2026-10-11 06:20:55 [SHELL] 子进程输出保存至 /tmp/tmp4vq0wkws/bootstrap.log；--verbose 时同时流式显示（已尝试隐藏凭据）
+2026-10-11 06:20:55 [SHELL] ci-script --upgrade exit=0 elapsed=0.0s
+2026-10-11 06:20:55 [SHELL] $ ./bootstrap.sh  (cwd=/tmp/tmp4vq0wkws)
+2026-10-11 06:20:55 [SHELL] 子进程输出保存至 /tmp/tmp4vq0wkws/bootstrap.log；--verbose 时同时流式显示（已尝试隐藏凭据）
+2026-10-11 06:20:55 [SHELL] ./bootstrap.sh exit=0 elapsed=0.0s
 ok
+test_enterprise_paging_and_public_github_endpoint (test_branch_picker.BranchPickerTests.test_enterprise_paging_and_public_github_endpoint) ... ok
+test_error_messages_do_not_echo_auth_or_upstream_body (test_branch_picker.BranchPickerTests.test_error_messages_do_not_echo_auth_or_upstream_body) ... ok
+test_missing_local_token_has_actionable_error (test_branch_picker.BranchPickerTests.test_missing_local_token_has_actionable_error) ... ok
+test_untrusted_hosts_invalid_urls_and_paging_fail_before_token_lookup (test_branch_picker.BranchPickerTests.test_untrusted_hosts_invalid_urls_and_paging_fail_before_token_lookup) ... ok
 test_invalid_channel (test_browser_channel.TestBrowserChannel.test_invalid_channel) ... ok
 test_managed_chrome (test_browser_channel.TestBrowserChannel.test_managed_chrome) ... ok
 test_mirrored_chromium (test_browser_channel.TestBrowserChannel.test_mirrored_chromium) ... ok
+test_day_and_weekday_both_restricted_use_or (test_cron.CronParseTests.test_day_and_weekday_both_restricted_use_or) ... ok
+test_every_n_minutes_and_hourly_macro (test_cron.CronParseTests.test_every_n_minutes_and_hourly_macro) ... ok
+test_impossible_date_returns_none (test_cron.CronParseTests.test_impossible_date_returns_none) ... ok
+test_invalid_expressions_rejected (test_cron.CronParseTests.test_invalid_expressions_rejected) ... ok
+test_latest_due_collapses_missed_runs_to_the_most_recent (test_cron.CronParseTests.test_latest_due_collapses_missed_runs_to_the_most_recent) ... ok
+test_lists_ranges_steps_and_month_names (test_cron.CronParseTests.test_lists_ranges_steps_and_month_names) ... ok
+test_minimum_interval (test_cron.CronParseTests.test_minimum_interval) ... ok
+test_month_and_year_rollover (test_cron.CronParseTests.test_month_and_year_rollover) ... ok
+test_next_runs_preview_is_increasing (test_cron.CronParseTests.test_next_runs_preview_is_increasing) ... ok
+test_strictly_after_even_on_exact_match (test_cron.CronParseTests.test_strictly_after_even_on_exact_match) ... ok
+test_sunday_is_zero_or_seven (test_cron.CronParseTests.test_sunday_is_zero_or_seven) ... ok
+test_weekday_range_skips_weekend (test_cron.CronParseTests.test_weekday_range_skips_weekend) ... ok
+test_latest_due_after_more_than_ten_thousand_occurrences (test_cron.LongOfflineTests.test_latest_due_after_more_than_ten_thousand_occurrences) ... ok
 test_never_overwrites_existing_tasks (test_data_migration.ZIPReplacementTests.test_never_overwrites_existing_tasks) ... ok
 test_old_folder_must_have_data (test_data_migration.ZIPReplacementTests.test_old_folder_must_have_data) ... ok
 test_previous_state_copied_without_deleting_source (test_data_migration.ZIPReplacementTests.test_previous_state_copied_without_deleting_source) ... ok
@@ -31,12 +47,16 @@ test_exact_build_number_does_not_use_build_one (test_diagnose_jenkins.DiagLogic.
 [STEP 3/4] 读取当前 Build 详情页标题状态（只读）
 [HTTP] Build #2 detail=200
 [RESULT] Build #2 heading: FAILURE
-[STEP 4/4] 已通过 #2 的状态图标识别终态，跳过长 Console 日志下载
-[VERDICT] FAIL · expected=SUCCESS · actual=FAILURE
+[STEP 4/4] 已通过 #2 的状态图标识别终态；Plugin 制品校验仍将读取完整日志
+[ARTIFACT] 从指定 Build 的完整 Nexus upload output 提取版本和 SHA256
+[DOWNLOAD] 完整日志请求：https://mobile-premier01-jenkins.build-mobile.iwpb.euw2.prod.aws.cloud.hsbc/job/IWPB_Transaction_Banking/job/Domestic_Payment_and_Transfer_Mobile_Global_12824743/job/Lib/job/mobile_paybybank-ios-plugin/job/release-build/job/release_1_3_202610101332/2/consoleText；使用浏览器登录会话，不截取日志尾部
+[DOWNLOAD] 下载超时=300s；请求完整日志，页面只显示提取摘要
+[ARTIFACT] FAIL · Should skip long console
+[VERDICT] FAIL · status=FAIL · expected=SUCCESS · actual=FAILURE
 [NEXT] 实际结果 FAILURE 不符合预期 SUCCESS；不执行任何自动构建动作。
 [TIME] elapsed=0.0s
 ok
-test_existing_build_2_success_without_console_or_build (test_diagnose_jenkins.DiagLogic.test_existing_build_2_success_without_console_or_build) ... [DIAG] READ ONLY · PLUGIN · 不触发 Jenkins 构建，不操作 Git
+test_existing_build_2_success_with_separate_artifact_result (test_diagnose_jenkins.DiagLogic.test_existing_build_2_success_with_separate_artifact_result) ... [DIAG] READ ONLY · PLUGIN · 不触发 Jenkins 构建，不操作 Git
 [TARGET] Job URL: https://mobile-premier01-jenkins.build-mobile.iwpb.euw2.prod.aws.cloud.hsbc/job/IWPB_Transaction_Banking/job/Domestic_Payment_and_Transfer_Mobile_Global_12824743/job/Lib/job/mobile_paybybank-ios-plugin/job/release-build/job/release_1_3_202610101332/
 [TARGET] Build Number: 2; expected=SUCCESS
 [BROWSER] 正在启动可见 Chrome；如需 SSO，请直接在该窗口人工登录，最多等待 180 秒
@@ -49,8 +69,12 @@ test_existing_build_2_success_without_console_or_build (test_diagnose_jenkins.Di
 [STEP 3/4] 读取当前 Build 详情页标题状态（只读）
 [HTTP] Build #2 detail=200
 [RESULT] Build #2 heading: SUCCESS
-[STEP 4/4] 已通过 #2 的状态图标识别终态，跳过长 Console 日志下载
-[VERDICT] PASS · expected=SUCCESS · actual=SUCCESS
+[STEP 4/4] 已通过 #2 的状态图标识别终态；Plugin 制品校验仍将读取完整日志
+[ARTIFACT] 从指定 Build 的完整 Nexus upload output 提取版本和 SHA256
+[DOWNLOAD] 完整日志请求：https://mobile-premier01-jenkins.build-mobile.iwpb.euw2.prod.aws.cloud.hsbc/job/IWPB_Transaction_Banking/job/Domestic_Payment_and_Transfer_Mobile_Global_12824743/job/Lib/job/mobile_paybybank-ios-plugin/job/release-build/job/release_1_3_202610101332/2/consoleText；使用浏览器登录会话，不截取日志尾部
+[DOWNLOAD] 下载超时=300s；请求完整日志，页面只显示提取摘要
+[ARTIFACT] FAIL · Should skip long console
+[VERDICT] PASS · status=PASS · expected=SUCCESS · actual=SUCCESS
 [NEXT] Plugin Callback 成功后应读取两个 Artifacts，再进入 GMX；这是状态诊断，不代表产物已校验。
 [TIME] elapsed=0.0s
 ok
@@ -68,8 +92,12 @@ test_history_versus_heading_disagreement_not_pass (test_diagnose_jenkins.DiagLog
 [HTTP] Build #2 detail=200
 [RESULT] Build #2 heading: FAILURE
 [CONFLICT] History=SUCCESS, Heading=FAILURE；终态冲突，不能确认
-[STEP 4/4] 已通过 #2 的状态图标识别终态，跳过长 Console 日志下载
-[VERDICT] UNKNOWN · expected=SUCCESS · actual=UNKNOWN
+[STEP 4/4] 已通过 #2 的状态图标识别终态；Plugin 制品校验仍将读取完整日志
+[ARTIFACT] 从指定 Build 的完整 Nexus upload output 提取版本和 SHA256
+[DOWNLOAD] 完整日志请求：https://mobile-premier01-jenkins.build-mobile.iwpb.euw2.prod.aws.cloud.hsbc/job/IWPB_Transaction_Banking/job/Domestic_Payment_and_Transfer_Mobile_Global_12824743/job/Lib/job/mobile_paybybank-ios-plugin/job/release-build/job/release_1_3_202610101332/2/consoleText；使用浏览器登录会话，不截取日志尾部
+[DOWNLOAD] 下载超时=300s；请求完整日志，页面只显示提取摘要
+[ARTIFACT] FAIL · Should skip long console
+[VERDICT] UNKNOWN · status=UNKNOWN · expected=SUCCESS · actual=UNKNOWN
 [NEXT] 目前证据不足；不启动构建。检查 URL、SSO 登录状态或页面状态元素。
 [TIME] elapsed=0.0s
 ok
@@ -87,9 +115,16 @@ test_no_history_no_heading_checks_console_once (test_diagnose_jenkins.DiagLogic.
 [HTTP] Build #2 detail=200
 [RESULT] Build #2 heading: UNKNOWN
 [STEP 4/4] 图标未提供终态；短超时检查原始 consoleText 尾部
-[HTTP] consoleText=200; type=unknown; tail bytes checked=26
+[DOWNLOAD] 完整日志请求：https://mobile-premier01-jenkins.build-mobile.iwpb.euw2.prod.aws.cloud.hsbc/job/IWPB_Transaction_Banking/job/Domestic_Payment_and_Transfer_Mobile_Global_12824743/job/Lib/job/mobile_paybybank-ios-plugin/job/release-build/job/release_1_3_202610101332/2/consoleText；使用浏览器登录会话，不截取日志尾部
+[DOWNLOAD] 下载超时=300s；请求完整日志，页面只显示提取摘要
+[HTTP] consoleText=200; type=unknown; response URL=https://mobile-premier01-jenkins.build-mobile.iwpb.euw2.prod.aws.cloud.hsbc/job/IWPB_Transaction_Banking/job/Domestic_Payment_and_Transfer_Mobile_Global_12824743/job/Lib/job/mobile_paybybank-ios-plugin/job/release-build/job/release_1_3_202610101332/2/consoleText
+[DOWNLOAD] 完整响应已读取：bytes=26; lines=2
 [RESULT] Console Finished marker: SUCCESS
-[VERDICT] PASS · expected=SUCCESS · actual=SUCCESS
+[ARTIFACT] 从指定 Build 的完整 Nexus upload output 提取版本和 SHA256
+[RESULT] 完整日志结束标记=SUCCESS; 独立构建状态=SUCCESS
+[SEARCH] 未识别 Nexus 分组；含标题但格式不匹配的行=0
+[ARTIFACT] FAIL · 当前 Plugin Build 缺少 Nexus upload output JSON
+[VERDICT] PASS · status=PASS · expected=SUCCESS · actual=SUCCESS
 [NEXT] Plugin Callback 成功后应读取两个 Artifacts，再进入 GMX；这是状态诊断，不代表产物已校验。
 [TIME] elapsed=0.0s
 ok
@@ -122,8 +157,8 @@ test_copied_gmx_double_encoded_url_diagnostic_readonly (test_diagnose_jenkins.UR
 [STEP 3/4] 读取当前 Build 详情页标题状态（只读）
 [HTTP] Build #2 detail=200
 [RESULT] Build #2 heading: SUCCESS
-[STEP 4/4] 已通过 #2 的状态图标识别终态，跳过长 Console 日志下载
-[VERDICT] PASS · expected=SUCCESS · actual=SUCCESS
+[STEP 4/4] 已通过 #2 的状态图标识别终态；Plugin 制品校验仍将读取完整日志
+[VERDICT] PASS · status=PASS · expected=SUCCESS · actual=SUCCESS
 [NEXT] GMX Build 已成功；上传是否完成还须单独校验。
 [TIME] elapsed=0.0s
 ok
@@ -152,67 +187,67 @@ test_diagnosis_always_uses_visible_chrome_and_manual_login (test_diagnostic_brow
 [STEP 3/4] 读取当前 Build 详情页标题状态（只读）
 [HTTP] Build #2 detail=200
 [RESULT] Build #2 heading: SUCCESS
-[STEP 4/4] 已通过 #2 的状态图标识别终态，跳过长 Console 日志下载
-[VERDICT] PASS · expected=SUCCESS · actual=SUCCESS
+[STEP 4/4] 已通过 #2 的状态图标识别终态；Plugin 制品校验仍将读取完整日志
+[VERDICT] PASS · status=PASS · expected=SUCCESS · actual=SUCCESS
 [NEXT] GMX Build 已成功；上传是否完成还须单独校验。
 [TIME] elapsed=0.0s
 ok
-test_manual_login_waits_without_credentials_or_click (test_diagnostic_browser_entry.ManualLogin.test_manual_login_waits_without_credentials_or_click) ... 2026-10-10 05:03:36 [AUTH] plugin 诊断浏览器需要登录：请在弹出的 Chrome 窗口完成公司 SSO/MFA（最多 180 秒）
-2026-10-10 05:03:36 [AUTH] plugin 人工 SSO 已完成，继续只读检查原 Jenkins URL
+test_manual_login_waits_without_credentials_or_click (test_diagnostic_browser_entry.ManualLogin.test_manual_login_waits_without_credentials_or_click) ... 2026-10-11 06:20:56 [AUTH] plugin 诊断浏览器需要登录：请在弹出的 Chrome 窗口完成公司 SSO/MFA（最多 180 秒）
+2026-10-11 06:20:56 [AUTH] plugin 人工 SSO 已完成，继续只读检查原 Jenkins URL
 ok
 test_reject_unapproved_login_host (test_diagnostic_browser_entry.ManualLogin.test_reject_unapproved_login_host) ... ok
 test_configurable_token_env_reaches_askpass (test_enterprise_and_resume.TestNexusAndTokenSafety.test_configurable_token_env_reaches_askpass) ... ok
 test_installer_no_default_public_browser_or_pip_upgrade (test_enterprise_and_resume.TestNexusAndTokenSafety.test_installer_no_default_public_browser_or_pip_upgrade) ... ok
 test_missing_configured_env_is_blocked (test_enterprise_and_resume.TestNexusAndTokenSafety.test_missing_configured_env_is_blocked) ... ok
 test_missing_token_guides_to_enterprise_github (test_enterprise_and_resume.TestNexusAndTokenSafety.test_missing_token_guides_to_enterprise_github) ... ok
-test_bootstrap_is_executed_in_its_own_gmx_directory (test_enterprise_and_resume.TestRecoveryAndIsolation.test_bootstrap_is_executed_in_its_own_gmx_directory) ... 2026-10-10 05:03:36 [SHELL] $ ci-script --upgrade  (cwd=/tmp/tmp2wvz3k4b/gmx)
-2026-10-10 05:03:36 [SHELL] 子进程输出保存至 /tmp/tmp2wvz3k4b/bootstrap.log；--verbose 时同时流式显示（已尝试隐藏凭据）
-2026-10-10 05:03:36 [SHELL] ci-script --upgrade exit=0 elapsed=0.0s
-2026-10-10 05:03:36 [SHELL] $ ./bootstrap.sh  (cwd=/tmp/tmp2wvz3k4b/gmx)
-2026-10-10 05:03:36 [SHELL] 子进程输出保存至 /tmp/tmp2wvz3k4b/bootstrap.log；--verbose 时同时流式显示（已尝试隐藏凭据）
-2026-10-10 05:03:36 [SHELL] ./bootstrap.sh exit=0 elapsed=0.0s
+test_bootstrap_is_executed_in_its_own_gmx_directory (test_enterprise_and_resume.TestRecoveryAndIsolation.test_bootstrap_is_executed_in_its_own_gmx_directory) ... 2026-10-11 06:20:56 [SHELL] $ ci-script --upgrade  (cwd=/tmp/tmpprqid25g/gmx)
+2026-10-11 06:20:56 [SHELL] 子进程输出保存至 /tmp/tmpprqid25g/bootstrap.log；--verbose 时同时流式显示（已尝试隐藏凭据）
+2026-10-11 06:20:56 [SHELL] ci-script --upgrade exit=0 elapsed=0.0s
+2026-10-11 06:20:56 [SHELL] $ ./bootstrap.sh  (cwd=/tmp/tmpprqid25g/gmx)
+2026-10-11 06:20:56 [SHELL] 子进程输出保存至 /tmp/tmpprqid25g/bootstrap.log；--verbose 时同时流式显示（已尝试隐藏凭据）
+2026-10-11 06:20:56 [SHELL] ./bootstrap.sh exit=0 elapsed=0.0s
 ok
-test_bootstrap_nonzero_exit_fails (test_enterprise_and_resume.TestRecoveryAndIsolation.test_bootstrap_nonzero_exit_fails) ... 2026-10-10 05:03:36 [SHELL] $ ci-script --upgrade  (cwd=/tmp/tmpjrf3lldl/gmx)
-2026-10-10 05:03:36 [SHELL] 子进程输出保存至 /tmp/tmpjrf3lldl/bootstrap.log；--verbose 时同时流式显示（已尝试隐藏凭据）
-2026-10-10 05:03:36 [SHELL] ci-script --upgrade exit=0 elapsed=0.0s
-2026-10-10 05:03:36 [SHELL] $ ./bootstrap.sh  (cwd=/tmp/tmpjrf3lldl/gmx)
-2026-10-10 05:03:36 [SHELL] 子进程输出保存至 /tmp/tmpjrf3lldl/bootstrap.log；--verbose 时同时流式显示（已尝试隐藏凭据）
-2026-10-10 05:03:36 [SHELL] ./bootstrap.sh exit=17 elapsed=0.0s
+test_bootstrap_nonzero_exit_fails (test_enterprise_and_resume.TestRecoveryAndIsolation.test_bootstrap_nonzero_exit_fails) ... 2026-10-11 06:20:56 [SHELL] $ ci-script --upgrade  (cwd=/tmp/tmpyo6g6ww5/gmx)
+2026-10-11 06:20:56 [SHELL] 子进程输出保存至 /tmp/tmpyo6g6ww5/bootstrap.log；--verbose 时同时流式显示（已尝试隐藏凭据）
+2026-10-11 06:20:56 [SHELL] ci-script --upgrade exit=0 elapsed=0.0s
+2026-10-11 06:20:56 [SHELL] $ ./bootstrap.sh  (cwd=/tmp/tmpyo6g6ww5/gmx)
+2026-10-11 06:20:56 [SHELL] 子进程输出保存至 /tmp/tmpyo6g6ww5/bootstrap.log；--verbose 时同时流式显示（已尝试隐藏凭据）
+2026-10-11 06:20:56 [SHELL] ./bootstrap.sh exit=17 elapsed=0.0s
 ok
 test_failed_task_state_creation_not_inserted (test_enterprise_and_resume.TestRecoveryAndIsolation.test_failed_task_state_creation_not_inserted) ... ok
 test_per_task_lease_blocks_second_worker (test_enterprise_and_resume.TestRecoveryAndIsolation.test_per_task_lease_blocks_second_worker) ... ok
 test_two_distinct_workers_hold_leases_concurrently (test_enterprise_and_resume.TestTrueSeparateProcesses.test_two_distinct_workers_hold_leases_concurrently)
 Real subprocesses, not merely two task objects in one process. ... ok
-test_callback_success_identified_from_raw_http_no_dom (test_fast_jenkins_results.FastResultTests.test_callback_success_identified_from_raw_http_no_dom) ... 2026-10-10 05:03:36 [JENKINS] plugin Build #2：优先检查绿色状态勾（每 5s），日志仅作补充确认
-2026-10-10 05:03:36 [JENKINS] plugin Build #2 原始 Console 已确认: SUCCESS（无需等待页面加载）
+test_callback_success_identified_from_raw_http_no_dom (test_fast_jenkins_results.FastResultTests.test_callback_success_identified_from_raw_http_no_dom) ... 2026-10-11 06:20:56 [JENKINS] plugin Build #2：优先检查绿色状态勾（每 5s），日志仅作补充确认
+2026-10-11 06:20:56 [JENKINS] plugin Build #2 原始 Console 已确认: SUCCESS（无需等待页面加载）
 ok
-test_gmx_failure_uses_same_fast_detector (test_fast_jenkins_results.FastResultTests.test_gmx_failure_uses_same_fast_detector) ... 2026-10-10 05:03:36 [JENKINS] gmx Build #2：优先检查绿色状态勾（每 5s），日志仅作补充确认
-2026-10-10 05:03:36 [JENKINS] gmx Build #2 原始 Console 已确认: FAILURE（无需等待页面加载）
+test_gmx_failure_uses_same_fast_detector (test_fast_jenkins_results.FastResultTests.test_gmx_failure_uses_same_fast_detector) ... 2026-10-11 06:20:56 [JENKINS] gmx Build #2：优先检查绿色状态勾（每 5s），日志仅作补充确认
+2026-10-11 06:20:56 [JENKINS] gmx Build #2 原始 Console 已确认: FAILURE（无需等待页面加载）
 ok
-test_header_fallback_when_raw_console_is_incomplete (test_fast_jenkins_results.FastResultTests.test_header_fallback_when_raw_console_is_incomplete) ... 2026-10-10 05:03:36 [JENKINS] plugin Build #2：优先检查绿色状态勾（每 5s），日志仅作补充确认
-2026-10-10 05:03:36 [JENKINS] plugin Build #2 页面标题图标确认终态: SUCCESS
+test_header_fallback_when_raw_console_is_incomplete (test_fast_jenkins_results.FastResultTests.test_header_fallback_when_raw_console_is_incomplete) ... 2026-10-11 06:20:56 [JENKINS] plugin Build #2：优先检查绿色状态勾（每 5s），日志仅作补充确认
+2026-10-11 06:20:56 [JENKINS] plugin Build #2 页面标题图标确认终态: SUCCESS
 ok
-test_nonterminal_http_404_can_fallback_to_build_page_status (test_fast_jenkins_results.FastResultTests.test_nonterminal_http_404_can_fallback_to_build_page_status) ... 2026-10-10 05:03:36 [JENKINS] plugin Build #2：优先检查绿色状态勾（每 5s），日志仅作补充确认
-2026-10-10 05:03:36 [JENKINS] plugin Build #2 页面标题图标确认终态: SUCCESS
+test_nonterminal_http_404_can_fallback_to_build_page_status (test_fast_jenkins_results.FastResultTests.test_nonterminal_http_404_can_fallback_to_build_page_status) ... 2026-10-11 06:20:56 [JENKINS] plugin Build #2：优先检查绿色状态勾（每 5s），日志仅作补充确认
+2026-10-11 06:20:56 [JENKINS] plugin Build #2 页面标题图标确认终态: SUCCESS
 ok
-test_previous_success_in_nonterminal_console_is_not_accepted (test_fast_jenkins_results.FastResultTests.test_previous_success_in_nonterminal_console_is_not_accepted) ... 2026-10-10 05:03:36 [JENKINS] plugin Build #2：优先检查绿色状态勾（每 5s），日志仅作补充确认
-2026-10-10 05:03:36 [WAIT] plugin Build #2 仍未确认终态；已等待 0s，5s 后检查状态勾
-2026-10-10 05:03:36 [JENKINS] plugin Build #2 原始 Console 已确认: FAILURE（无需等待页面加载）
+test_previous_success_in_nonterminal_console_is_not_accepted (test_fast_jenkins_results.FastResultTests.test_previous_success_in_nonterminal_console_is_not_accepted) ... 2026-10-11 06:20:56 [JENKINS] plugin Build #2：优先检查绿色状态勾（每 5s），日志仅作补充确认
+2026-10-11 06:20:56 [WAIT] plugin Build #2 仍未确认终态；已等待 0s，5s 后检查状态勾
+2026-10-11 06:20:56 [JENKINS] plugin Build #2 原始 Console 已确认: FAILURE（无需等待页面加载）
 ok
-test_raw_console_403_fails_fast (test_fast_jenkins_results.FastResultTests.test_raw_console_403_fails_fast) ... 2026-10-10 05:03:36 [JENKINS] plugin Build #2：优先检查绿色状态勾（每 5s），日志仅作补充确认
+test_raw_console_403_fails_fast (test_fast_jenkins_results.FastResultTests.test_raw_console_403_fails_fast) ... 2026-10-11 06:20:56 [JENKINS] plugin Build #2：优先检查绿色状态勾（每 5s），日志仅作补充确认
 ok
-test_request_timeout_does_not_claim_success (test_fast_jenkins_results.FastResultTests.test_request_timeout_does_not_claim_success) ... 2026-10-10 05:03:36 [JENKINS] plugin Build #2：优先检查绿色状态勾（每 5s），日志仅作补充确认
-2026-10-10 05:03:36 [JENKINS] plugin Build #2 页面标题图标确认终态: FAILURE
+test_request_timeout_does_not_claim_success (test_fast_jenkins_results.FastResultTests.test_request_timeout_does_not_claim_success) ... 2026-10-11 06:20:56 [JENKINS] plugin Build #2：优先检查绿色状态勾（每 5s），日志仅作补充确认
+2026-10-11 06:20:56 [JENKINS] plugin Build #2 页面标题图标确认终态: FAILURE
 ok
-test_running_console_then_finishes_with_five_second_poll (test_fast_jenkins_results.FastResultTests.test_running_console_then_finishes_with_five_second_poll) ... 2026-10-10 05:03:36 [JENKINS] plugin Build #2：优先检查绿色状态勾（每 5s），日志仅作补充确认
-2026-10-10 05:03:36 [WAIT] plugin Build #2 仍未确认终态；已等待 0s，5s 后检查状态勾
-2026-10-10 05:03:36 [JENKINS] plugin Build #2 原始 Console 已确认: SUCCESS（无需等待页面加载）
+test_running_console_then_finishes_with_five_second_poll (test_fast_jenkins_results.FastResultTests.test_running_console_then_finishes_with_five_second_poll) ... 2026-10-11 06:20:56 [JENKINS] plugin Build #2：优先检查绿色状态勾（每 5s），日志仅作补充确认
+2026-10-11 06:20:56 [WAIT] plugin Build #2 仍未确认终态；已等待 0s，5s 后检查状态勾
+2026-10-11 06:20:56 [JENKINS] plugin Build #2 原始 Console 已确认: SUCCESS（无需等待页面加载）
 ok
-test_sso_redirect_not_confused_with_console (test_fast_jenkins_results.FastResultTests.test_sso_redirect_not_confused_with_console) ... 2026-10-10 05:03:36 [JENKINS] plugin Build #2：优先检查绿色状态勾（每 5s），日志仅作补充确认
-2026-10-10 05:03:36 [JENKINS] plugin Build #2 页面标题图标确认终态: FAILURE
+test_sso_redirect_not_confused_with_console (test_fast_jenkins_results.FastResultTests.test_sso_redirect_not_confused_with_console) ... 2026-10-11 06:20:56 [JENKINS] plugin Build #2：优先检查绿色状态勾（每 5s），日志仅作补充确认
+2026-10-11 06:20:56 [JENKINS] plugin Build #2 页面标题图标确认终态: FAILURE
 ok
-test_trigger_callback_fallback_still_works (test_fast_jenkins_results.FastResultTests.test_trigger_callback_fallback_still_works) ... 2026-10-10 05:03:36 [JENKINS] plugin Build #2：优先检查绿色状态勾（每 5s），日志仅作补充确认
-2026-10-10 05:03:36 [CALLBACK] plugin Build #2 已创建 Callback #3；改为监控 #3
+test_trigger_callback_fallback_still_works (test_fast_jenkins_results.FastResultTests.test_trigger_callback_fallback_still_works) ... 2026-10-11 06:20:56 [JENKINS] plugin Build #2：优先检查绿色状态勾（每 5s），日志仅作补充确认
+2026-10-11 06:20:56 [CALLBACK] plugin Build #2 已创建 Callback #3；改为监控 #3
 ok
 test_bootstrap_stream_output_and_exit_code (test_full_trace.FullTraceTests.test_bootstrap_stream_output_and_exit_code) ... ok
 test_click_trace_mentions_locator_click (test_full_trace.FullTraceTests.test_click_trace_mentions_locator_click) ... ok
@@ -222,42 +257,49 @@ test_url_token_and_header_redaction (test_full_trace.FullTraceTests.test_url_tok
 test_blocks_hook_modifications (test_gitops.TestSafeCommit.test_blocks_hook_modifications) ... ok
 test_blocks_unexpected_changes (test_gitops.TestSafeCommit.test_blocks_unexpected_changes) ... ok
 test_safe_commit_and_remote_verify (test_gitops.TestSafeCommit.test_safe_commit_and_remote_verify) ... ok
-test_disabled_first_build_skip_long_poll_and_watch_formal_two (test_gmx_job_modes.GMXBuildState.test_disabled_first_build_skip_long_poll_and_watch_formal_two) ... 2026-10-10 05:03:37 [JENKINS] gmx 初始化前已有 Build: []
-2026-10-10 05:03:37 [JENKINS] GMX 初始化 Build #1：只等待参数化入口，不将其结果当正式构建结果
-2026-10-10 05:03:37 [JENKINS] gmx 正式构建前已有 Build: [1]
-2026-10-10 05:03:37 [JENKINS] GMX 正式参数化 Build #2：直接监控当前编号（不采用 Plugin 的 Callback 转交模型）
+test_cli_develop_allows_missing_issue (test_gmx_branch_rules.BranchRulesTests.test_cli_develop_allows_missing_issue) ... ok
+test_issue_unambiguous_and_valid_when_supplied (test_gmx_branch_rules.BranchRulesTests.test_issue_unambiguous_and_valid_when_supplied) ... ok
+test_no_issue_generates_short_compliant_target (test_gmx_branch_rules.BranchRulesTests.test_no_issue_generates_short_compliant_target) ... ok
+test_published_or_conflicting_targets_never_renamed (test_gmx_branch_rules.BranchRulesTests.test_published_or_conflicting_targets_never_renamed) ... ok
+test_resume_preserves_commit_and_stages_and_recovers_interrupted_rename (test_gmx_branch_rules.BranchRulesTests.test_resume_preserves_commit_and_stages_and_recovers_interrupted_rename) ... 2026-10-11 06:20:57 [REPAIR] GMX 分支 upload/auto202610110620 -> upload/UKPBB-203745-auto202610110620；保留已有 Commit 和已完成阶段
+2026-10-11 06:20:57 [REPAIR] GMX 分支 upload/auto202610110620 -> upload/UKPBB-203745-auto202610110620；保留已有 Commit 和已完成阶段
+2026-10-11 06:20:57 [REPAIR] GMX 分支 upload/auto202610110620 -> upload/AUTO-202610110620；保留已有 Commit 和已完成阶段
+2026-10-11 06:20:57 [REPAIR] GMX 分支 upload/auto202610110620 -> upload/AUTO-202610110620；保留已有 Commit 和已完成阶段
 ok
-test_job_already_has_parameters_no_bootstrap_one (test_gmx_job_modes.GMXBuildState.test_job_already_has_parameters_no_bootstrap_one) ... 2026-10-10 05:03:37 [JENKINS] gmx 已具有参数化入口，跳过初始化 Build
-2026-10-10 05:03:37 [JENKINS] gmx 正式构建前已有 Build: [1]
-2026-10-10 05:03:37 [JENKINS] GMX 正式参数化 Build #2：直接监控当前编号（不采用 Plugin 的 Callback 转交模型）
+test_disabled_first_build_skip_long_poll_and_watch_formal_two (test_gmx_job_modes.GMXBuildState.test_disabled_first_build_skip_long_poll_and_watch_formal_two) ... 2026-10-11 06:20:57 [JENKINS] gmx 初始化前已有 Build: []
+2026-10-11 06:20:57 [JENKINS] GMX 初始化 Build #1：只等待参数化入口，不将其结果当正式构建结果
+2026-10-11 06:20:57 [JENKINS] gmx 正式构建前已有 Build: [1]
+2026-10-11 06:20:57 [JENKINS] GMX 正式参数化 Build #2：直接监控当前编号（不采用 Plugin 的 Callback 转交模型）
 ok
-test_never_start_parameterized_gmx_before_bootstrap_is_ready (test_gmx_job_modes.GMXBuildState.test_never_start_parameterized_gmx_before_bootstrap_is_ready) ... 2026-10-10 05:03:37 [JENKINS] gmx 初始化前已有 Build: []
-2026-10-10 05:03:37 [JENKINS] GMX 初始化 Build #1：只等待参数化入口，不将其结果当正式构建结果
+test_job_already_has_parameters_no_bootstrap_one (test_gmx_job_modes.GMXBuildState.test_job_already_has_parameters_no_bootstrap_one) ... 2026-10-11 06:20:57 [JENKINS] gmx 已具有参数化入口，跳过初始化 Build
+2026-10-11 06:20:57 [JENKINS] gmx 正式构建前已有 Build: [1]
+2026-10-11 06:20:57 [JENKINS] GMX 正式参数化 Build #2：直接监控当前编号（不采用 Plugin 的 Callback 转交模型）
 ok
-test_cli_does_not_change_optional_jenkins_defaults (test_gmx_job_modes.ParamChecks.test_cli_does_not_change_optional_jenkins_defaults) ... 2026-10-10 05:03:37 [FORM] GMX 参数设置 ENTITIES=UK SYNC_UPLOAD=true CUSTOM_FOLDER=0_A_UK_PayByBank
+test_never_start_parameterized_gmx_before_bootstrap_is_ready (test_gmx_job_modes.GMXBuildState.test_never_start_parameterized_gmx_before_bootstrap_is_ready) ... 2026-10-11 06:20:57 [JENKINS] gmx 初始化前已有 Build: []
+2026-10-11 06:20:57 [JENKINS] GMX 初始化 Build #1：只等待参数化入口，不将其结果当正式构建结果
+ok
+test_cli_does_not_change_optional_jenkins_defaults (test_gmx_job_modes.ParamChecks.test_cli_does_not_change_optional_jenkins_defaults) ... 2026-10-11 06:20:57 [FORM] GMX 参数设置 ENTITIES=UK SYNC_UPLOAD=true CUSTOM_FOLDER=0_A_UK_PayByBank
 [Jenkins/gmx] ENTITIES=UK SYNC_UPLOAD=true CUSTOM_FOLDER=0_A_UK_PayByBank
 ok
-test_gmx_can_override_javascript_task_flags (test_gmx_job_modes.ParamChecks.test_gmx_can_override_javascript_task_flags) ... 2026-10-10 05:03:37 [FORM] GMX 参数设置 ENTITIES=UK SYNC_UPLOAD=false CUSTOM_FOLDER=0_A_UK_PayByBank
+test_gmx_can_override_javascript_task_flags (test_gmx_job_modes.ParamChecks.test_gmx_can_override_javascript_task_flags) ... 2026-10-11 06:20:57 [FORM] GMX 参数设置 ENTITIES=UK SYNC_UPLOAD=false CUSTOM_FOLDER=0_A_UK_PayByBank
 [Jenkins/gmx] ENTITIES=UK SYNC_UPLOAD=false CUSTOM_FOLDER=0_A_UK_PayByBank
 ok
-test_gmx_eight_fields_include_required_flags_and_sync_overrides_ui_default (test_gmx_job_modes.ParamChecks.test_gmx_eight_fields_include_required_flags_and_sync_overrides_ui_default) ... 2026-10-10 05:03:37 [FORM] GMX 参数设置 ENTITIES=UK SYNC_UPLOAD=true CUSTOM_FOLDER=0_A_UK_PayByBank
+test_gmx_eight_fields_include_required_flags_and_sync_overrides_ui_default (test_gmx_job_modes.ParamChecks.test_gmx_eight_fields_include_required_flags_and_sync_overrides_ui_default) ... 2026-10-11 06:20:57 [FORM] GMX 参数设置 ENTITIES=UK SYNC_UPLOAD=true CUSTOM_FOLDER=0_A_UK_PayByBank
 [Jenkins/gmx] ENTITIES=UK SYNC_UPLOAD=true CUSTOM_FOLDER=0_A_UK_PayByBank
 ok
 test_invalid_extra_flags_web_rejected (test_gmx_job_modes.ParamChecks.test_invalid_extra_flags_web_rejected) ... ok
 test_reject_wrong_type_checkbox_before_submit (test_gmx_job_modes.ParamChecks.test_reject_wrong_type_checkbox_before_submit) ... ok
 test_accepts_screenshot_branch (test_gmx_live_tests.BranchValidation.test_accepts_screenshot_branch) ... ok
 test_both_jenkins_url_encodings (test_gmx_live_tests.BranchValidation.test_both_jenkins_url_encodings) ... ok
-test_full_plugin_artifact_version_required (test_gmx_live_tests.BranchValidation.test_full_plugin_artifact_version_required) ... ok
 test_invalid_job_url_rejected_before_thread_spawn (test_gmx_live_tests.BranchValidation.test_invalid_job_url_rejected_before_thread_spawn) ... ok
 test_parameters (test_gmx_live_tests.BranchValidation.test_parameters) ... ok
 test_real_build_cannot_start_without_explicit_checkbox (test_gmx_live_tests.BranchValidation.test_real_build_cannot_start_without_explicit_checkbox) ... ok
 test_reject_malicious_and_non_gmx (test_gmx_live_tests.BranchValidation.test_reject_malicious_and_non_gmx) ... ok
+test_removed_bootstrap_test_is_rejected (test_gmx_live_tests.BranchValidation.test_removed_bootstrap_test_is_rejected) ... ok
 test_already_parameterized_skips_first_build (test_gmx_live_tests.ExecutionFlow.test_already_parameterized_skips_first_build) ... ok
-test_bootstrap_isolated_path_and_lock_version (test_gmx_live_tests.ExecutionFlow.test_bootstrap_isolated_path_and_lock_version) ... ok
 test_existing_initialization_must_not_repeat_build (test_gmx_live_tests.ExecutionFlow.test_existing_initialization_must_not_repeat_build) ... ok
 test_first_plain_build_then_parameterized_build (test_gmx_live_tests.ExecutionFlow.test_first_plain_build_then_parameterized_build) ... ok
 test_unknown_mode_refuses_to_click (test_gmx_live_tests.ExecutionFlow.test_unknown_mode_refuses_to_click) ... ok
-test_background_bootstrap_streams_and_finishes_without_build (test_gmx_live_tests.LiveWebIntegration.test_background_bootstrap_streams_and_finishes_without_build) ... ok
 test_http_rejects_jenkins_trigger_without_confirmation (test_gmx_live_tests.LiveWebIntegration.test_http_rejects_jenkins_trigger_without_confirmation) ... ok
 test_ui_and_api_contract (test_gmx_live_tests.LiveWebIntegration.test_ui_and_api_contract) ... ok
 test_css_palette (test_jenkins_actual_dom_fallback.Colors.test_css_palette) ... ok
@@ -277,102 +319,186 @@ test_unknown_explains_dom_mismatch_and_html_console_without_build (test_jenkins_
 [HTTP] Build #2 detail=200
 [RESULT] Build #2 heading: UNKNOWN
 [STEP 4/4] 图标未提供终态；短超时检查原始 consoleText 尾部
-[HTTP] consoleText=200; type=text/html; charset=utf-8; tail bytes checked=35
-[HINT] consoleText 返回 HTML 而不是普通构建日志；HTTP 200 不代表已获取完整 Console
-[RESULT] Console Finished marker: NOT FOUND
-[SNAPSHOT] 已保存现场页面截图: /tmp/tmprmv1mwp9/diagnostics/plugin/plugin-build-2-unknown.png
-[VERDICT] UNKNOWN · expected=SUCCESS · actual=UNKNOWN
+[DOWNLOAD] 完整日志请求：https://mobile-premier01-jenkins.build-mobile.iwpb.euw2.prod.aws.cloud.hsbc/job/IWPB_Transaction_Banking/job/Domestic_Payment_and_Transfer_Mobile_Global_12824743/job/Lib/job/mobile_paybybank-ios-plugin/job/release-build/job/release_1_3_202610101332/2/consoleText；使用浏览器登录会话，不截取日志尾部
+[DOWNLOAD] 下载超时=300s；请求完整日志，页面只显示提取摘要
+[HTTP] consoleText=200; type=text/html; charset=utf-8; response URL=https://mobile-premier01-jenkins.build-mobile.iwpb.euw2.prod.aws.cloud.hsbc/job/IWPB_Transaction_Banking/job/Domestic_Payment_and_Transfer_Mobile_Global_12824743/job/Lib/job/mobile_paybybank-ios-plugin/job/release-build/job/release_1_3_202610101332/2/consoleText
+[DOWNLOAD] 完整响应已读取：bytes=35; lines=1
+[HTTP] consoleText ERROR: NeedsAttention; consoleText 返回 HTML，尚未取得原始构建日志
+[SNAPSHOT] 已保存现场页面截图: /tmp/tmp1rz2oc9y/diagnostics/plugin/plugin-build-2-unknown.png
+[ARTIFACT] 从指定 Build 的完整 Nexus upload output 提取版本和 SHA256
+[ARTIFACT] FAIL · consoleText 返回 HTML，尚未取得原始构建日志
+[VERDICT] UNKNOWN · status=UNKNOWN · expected=SUCCESS · actual=UNKNOWN
 [NEXT] 目前证据不足；不启动构建。检查 URL、SSO 登录状态或页面状态元素。
 [TIME] elapsed=0.0s
 ok
-test_modern_builds_sidebar_green_tick_of_exact_2 (test_jenkins_actual_dom_fallback.RealThemeUnknownRegression.test_modern_builds_sidebar_green_tick_of_exact_2) ... 2026-10-10 05:03:38 [JENKINS] plugin Build History #2 专属图标确认终态: SUCCESS
+test_modern_builds_sidebar_green_tick_of_exact_2 (test_jenkins_actual_dom_fallback.RealThemeUnknownRegression.test_modern_builds_sidebar_green_tick_of_exact_2) ... 2026-10-11 06:20:59 [JENKINS] plugin Build History #2 专属图标确认终态: SUCCESS
 ok
 test_modern_sidebar_gray_running_2_still_unknown (test_jenkins_actual_dom_fallback.RealThemeUnknownRegression.test_modern_sidebar_gray_running_2_still_unknown) ... ok
-test_modern_sidebar_red_2_after_green_1_not_success (test_jenkins_actual_dom_fallback.RealThemeUnknownRegression.test_modern_sidebar_red_2_after_green_1_not_success) ... 2026-10-10 05:03:38 [JENKINS] plugin Build History #2 专属图标确认终态: FAILURE
+test_modern_sidebar_red_2_after_green_1_not_success (test_jenkins_actual_dom_fallback.RealThemeUnknownRegression.test_modern_sidebar_red_2_after_green_1_not_success) ... 2026-10-11 06:20:59 [JENKINS] plugin Build History #2 专属图标确认终态: FAILURE
 ok
 test_page_with_multiple_build_links_never_uses_parent_1_icon (test_jenkins_actual_dom_fallback.RealThemeUnknownRegression.test_page_with_multiple_build_links_never_uses_parent_1_icon) ... ok
 test_progress_bar_greens_do_not_count (test_jenkins_actual_dom_fallback.RealThemeUnknownRegression.test_progress_bar_greens_do_not_count) ... ok
 test_already_selected_does_not_toggle (test_jenkins_checkbox_labels.CheckboxLabels.test_already_selected_does_not_toggle) ... ok
-test_covering_attached_label_checks_and_unchecks_exact_input (test_jenkins_checkbox_labels.CheckboxLabels.test_covering_attached_label_checks_and_unchecks_exact_input) ... 2026-10-10 05:03:40 [FORM] SYNC_UPLOAD 使用该复选框的关联标签设置勾选状态
-2026-10-10 05:03:42 [FORM] SYNC_UPLOAD 使用该复选框的关联标签设置勾选状态
+test_covering_attached_label_checks_and_unchecks_exact_input (test_jenkins_checkbox_labels.CheckboxLabels.test_covering_attached_label_checks_and_unchecks_exact_input) ... 2026-10-11 06:21:04 [FORM] SYNC_UPLOAD 使用该复选框的关联标签设置勾选状态
+2026-10-11 06:21:06 [FORM] SYNC_UPLOAD 使用该复选框的关联标签设置勾选状态
 ok
 test_disabled_checkbox_is_never_changed (test_jenkins_checkbox_labels.CheckboxLabels.test_disabled_checkbox_is_never_changed) ... ok
-test_hidden_input_uses_unique_standard_associated_label (test_jenkins_checkbox_labels.CheckboxLabels.test_hidden_input_uses_unique_standard_associated_label) ... 2026-10-10 05:03:46 [FORM] FORCE 使用该复选框的关联标签设置勾选状态
+test_hidden_input_uses_unique_standard_associated_label (test_jenkins_checkbox_labels.CheckboxLabels.test_hidden_input_uses_unique_standard_associated_label) ... 2026-10-11 06:21:10 [FORM] FORCE 使用该复选框的关联标签设置勾选状态
 ok
 test_unrelated_overlay_is_not_clicked (test_jenkins_checkbox_labels.CheckboxLabels.test_unrelated_overlay_is_not_clicked) ... ok
-test_failure_heading_takes_precedence_when_console_unavailable (test_jenkins_console_loading.ConsoleLoadingTests.test_failure_heading_takes_precedence_when_console_unavailable) ... 2026-10-10 05:03:49 [JENKINS] plugin 正在监控 Build #2: https://ci.corp/job/p/2/
-2026-10-10 05:03:49 [WAIT] plugin Build #2 Console Output 尚未到 Finished，改查 Build 状态
-2026-10-10 05:03:49 [JENKINS] plugin Build #2 页面标题图标确认终态: FAILURE
+test_failure_heading_takes_precedence_when_console_unavailable (test_jenkins_console_loading.ConsoleLoadingTests.test_failure_heading_takes_precedence_when_console_unavailable) ... 2026-10-11 06:21:13 [JENKINS] plugin 正在监控 Build #2: https://ci.corp/job/p/2/
+2026-10-11 06:21:13 [WAIT] plugin Build #2 Console Output 尚未到 Finished，改查 Build 状态
+2026-10-11 06:21:13 [JENKINS] plugin Build #2 页面标题图标确认终态: FAILURE
 ok
-test_fallback_to_build_heading_svg_status_when_console_incomplete (test_jenkins_console_loading.ConsoleLoadingTests.test_fallback_to_build_heading_svg_status_when_console_incomplete) ... 2026-10-10 05:03:49 [JENKINS] plugin 正在监控 Build #2: https://ci.corp/job/p/2/
-2026-10-10 05:03:49 [WAIT] plugin Build #2 Console Output 尚未到 Finished，改查 Build 状态
-2026-10-10 05:03:49 [JENKINS] plugin Build #2 页面标题图标确认终态: SUCCESS
+test_fallback_to_build_heading_svg_status_when_console_incomplete (test_jenkins_console_loading.ConsoleLoadingTests.test_fallback_to_build_heading_svg_status_when_console_incomplete) ... 2026-10-11 06:21:13 [JENKINS] plugin 正在监控 Build #2: https://ci.corp/job/p/2/
+2026-10-11 06:21:13 [WAIT] plugin Build #2 Console Output 尚未到 Finished，改查 Build 状态
+2026-10-11 06:21:13 [JENKINS] plugin Build #2 页面标题图标确认终态: SUCCESS
 ok
-test_late_finished_marker_read_before_navigating_away (test_jenkins_console_loading.ConsoleLoadingTests.test_late_finished_marker_read_before_navigating_away) ... 2026-10-10 05:03:49 [JENKINS] plugin 正在监控 Build #2: https://ci.corp/job/p/2/
-2026-10-10 05:03:49 [JENKINS] plugin Build #2 Console 最后一行确认: SUCCESS
+test_late_finished_marker_read_before_navigating_away (test_jenkins_console_loading.ConsoleLoadingTests.test_late_finished_marker_read_before_navigating_away) ... 2026-10-11 06:21:13 [JENKINS] plugin 正在监控 Build #2: https://ci.corp/job/p/2/
+2026-10-11 06:21:13 [JENKINS] plugin Build #2 Console 最后一行确认: SUCCESS
 ok
 test_no_false_positive_for_running_build_with_old_success_log (test_jenkins_console_loading.ConsoleLoadingTests.test_no_false_positive_for_running_build_with_old_success_log) ... ok
 test_running_icon_must_not_be_inferred_successful_from_title (test_jenkins_console_loading.ConsoleLoadingTests.test_running_icon_must_not_be_inferred_successful_from_title) ... ok
 test_svg_icons_without_status_are_not_success (test_jenkins_console_loading.ConsoleLoadingTests.test_svg_icons_without_status_are_not_success) ... ok
 test_build_link_from_another_job_cannot_supply_status (test_jenkins_green_tick.JenkinsGreenTickDOMTests.test_build_link_from_another_job_cannot_supply_status) ... ok
-test_failure_of_exact_build (test_jenkins_green_tick.JenkinsGreenTickDOMTests.test_failure_of_exact_build) ... 2026-10-10 05:03:49 [JENKINS] plugin Build History #2 专属图标确认终态: FAILURE
+test_failure_of_exact_build (test_jenkins_green_tick.JenkinsGreenTickDOMTests.test_failure_of_exact_build) ... 2026-10-11 06:21:14 [JENKINS] plugin Build History #2 专属图标确认终态: FAILURE
 ok
 test_no_outcome_from_plain_check_without_status_semantics (test_jenkins_green_tick.JenkinsGreenTickDOMTests.test_no_outcome_from_plain_check_without_status_semantics) ... ok
-test_only_exact_build_2_green_tick_counts (test_jenkins_green_tick.JenkinsGreenTickDOMTests.test_only_exact_build_2_green_tick_counts) ... 2026-10-10 05:03:49 [JENKINS] plugin Build History #2 专属图标确认终态: SUCCESS
+test_only_exact_build_2_green_tick_counts (test_jenkins_green_tick.JenkinsGreenTickDOMTests.test_only_exact_build_2_green_tick_counts) ... 2026-10-11 06:21:14 [JENKINS] plugin Build History #2 专属图标确认终态: SUCCESS
 ok
 test_previous_build_1_green_does_not_mark_running_2_successful (test_jenkins_green_tick.JenkinsGreenTickDOMTests.test_previous_build_1_green_does_not_mark_running_2_successful) ... ok
 test_recognizes_newer_status_success_class (test_jenkins_green_tick.JenkinsGreenTickDOMTests.test_recognizes_newer_status_success_class) ... ok
-test_visible_tick_stops_without_downloading_console (test_jenkins_green_tick.JenkinsGreenTickDOMTests.test_visible_tick_stops_without_downloading_console) ... 2026-10-10 05:03:49 [JENKINS] plugin Build #2：优先检查绿色状态勾（每 5s），日志仅作补充确认
-2026-10-10 05:03:49 [JENKINS] plugin Build History #2 专属图标确认终态: SUCCESS
+test_visible_tick_stops_without_downloading_console (test_jenkins_green_tick.JenkinsGreenTickDOMTests.test_visible_tick_stops_without_downloading_console) ... 2026-10-11 06:21:15 [JENKINS] plugin Build #2：优先检查绿色状态勾（每 5s），日志仅作补充确认
+2026-10-11 06:21:15 [JENKINS] plugin Build History #2 专属图标确认终态: SUCCESS
 ok
 test_403_stops_without_retry (test_jenkins_job_polling.TestJobDiscoveryPolling.test_403_stops_without_retry) ... ok
 test_404_then_created_checks_every_ten_seconds (test_jenkins_job_polling.TestJobDiscoveryPolling.test_404_then_created_checks_every_ten_seconds) ... ok
 test_persistent_404_times_out_without_click (test_jenkins_job_polling.TestJobDiscoveryPolling.test_persistent_404_times_out_without_click) ... ok
-test_callback_source_relation (test_jenkins_offline.TestArtifactCrawl.test_callback_source_relation) ... ok
-test_crawl_never_follows_cross_job_links (test_jenkins_offline.TestArtifactCrawl.test_crawl_never_follows_cross_job_links) ... 2026-10-10 05:03:49 [ARTIFACT] jenkins 读取 Build #8 的产物目录
-ok
-test_walks_nested_artifact_directories_only_for_exact_build (test_jenkins_offline.TestArtifactCrawl.test_walks_nested_artifact_directories_only_for_exact_build) ... 2026-10-10 05:03:49 [ARTIFACT] jenkins 读取 Build #7 的产物目录
-ok
 test_accepts_only_last_status_line (test_jenkins_offline.TestConsoleStatus.test_accepts_only_last_status_line) ... ok
-test_failed_callback_does_not_advance_to_gmx (test_jenkins_offline.TestExistingTaskCallbackRecovery.test_failed_callback_does_not_advance_to_gmx) ... 2026-10-10 05:03:49 [JENKINS] plugin 正式构建前已有 Build: []
-2026-10-10 05:03:49 [CALLBACK] Plugin Trigger #1 → Callback #2；下一步监控 Callback
+test_failed_callback_does_not_advance_to_gmx (test_jenkins_offline.TestExistingTaskCallbackRecovery.test_failed_callback_does_not_advance_to_gmx) ... 2026-10-11 06:21:15 [JENKINS] plugin 正式构建前已有 Build: []
+2026-10-11 06:21:15 [CALLBACK] Plugin Trigger #1 → Callback #2；下一步监控 Callback
 ok
 test_resume_old_running_trigger_build_without_clicking_again (test_jenkins_offline.TestExistingTaskCallbackRecovery.test_resume_old_running_trigger_build_without_clicking_again)
-Observed on Mac: #1 trigger and #2 callback exist while worker watches #1. ... 2026-10-10 05:03:49 [CALLBACK] Plugin Trigger #1 → Callback #2；下一步监控 Callback
+Observed on Mac: #1 trigger and #2 callback exist while worker watches #1. ... 2026-10-11 06:21:15 [CALLBACK] Plugin Trigger #1 → Callback #2；下一步监控 Callback
+2026-10-11 06:21:15 [NEXUS] [SEARCH] 找到 Nexus upload output 分组 #1，正在读取 JSON
+2026-10-11 06:21:15 [NEXUS] [SEARCH] 已搜索完整日志；Nexus upload output 分组=1
+2026-10-11 06:21:15 [NEXUS] [JSON] upload_results 条目=2；按插件名筛选 .tar.gz，排除附属文件
 ok
-test_gmx_parameters_passed_once (test_jenkins_offline.TestJenkinsStateMachine.test_gmx_parameters_passed_once) ... 2026-10-10 05:03:49 [JENKINS] gmx 已具有参数化入口，跳过初始化 Build
-2026-10-10 05:03:49 [JENKINS] gmx 正式构建前已有 Build: []
-2026-10-10 05:03:49 [JENKINS] GMX 正式参数化 Build #1：直接监控当前编号（不采用 Plugin 的 Callback 转交模型）
+test_gmx_parameters_passed_once (test_jenkins_offline.TestJenkinsStateMachine.test_gmx_parameters_passed_once) ... 2026-10-11 06:21:15 [JENKINS] gmx 已具有参数化入口，跳过初始化 Build
+2026-10-11 06:21:15 [JENKINS] gmx 正式构建前已有 Build: []
+2026-10-11 06:21:15 [JENKINS] GMX 正式参数化 Build #1：直接监控当前编号（不采用 Plugin 的 Callback 转交模型）
 ok
-test_init_failure_then_formal_success_no_duplicate_on_resume (test_jenkins_offline.TestJenkinsStateMachine.test_init_failure_then_formal_success_no_duplicate_on_resume) ... 2026-10-10 05:03:49 [JENKINS] plugin 初始化前已有 Build: []
+test_init_failure_then_formal_success_no_duplicate_on_resume (test_jenkins_offline.TestJenkinsStateMachine.test_init_failure_then_formal_success_no_duplicate_on_resume) ... 2026-10-11 06:21:15 [JENKINS] plugin 初始化前已有 Build: []
 [plugin] 初始化构建 #1: FAILURE；等待参数化入口
-2026-10-10 05:03:49 [JENKINS] plugin 正式构建前已有 Build: [1]
+2026-10-11 06:21:15 [JENKINS] plugin 正式构建前已有 Build: [1]
 ok
-test_failure_status_takes_precedence_over_callback (test_jenkins_offline.TestLinkedPluginBuild.test_failure_status_takes_precedence_over_callback) ... 2026-10-10 05:03:49 [JENKINS] plugin 正在监控 Build #1: https://ci.corp/job/release/1/
-2026-10-10 05:03:49 [JENKINS] plugin Build #1 页面标题图标确认终态: FAILURE
+test_failure_status_takes_precedence_over_callback (test_jenkins_offline.TestLinkedPluginBuild.test_failure_status_takes_precedence_over_callback) ... 2026-10-11 06:21:15 [JENKINS] plugin 正在监控 Build #1: https://ci.corp/job/release/1/
+2026-10-11 06:21:15 [JENKINS] plugin Build #1 页面标题图标确认终态: FAILURE
 ok
-test_live_trigger_hands_off_to_linked_callback_and_resumes_without_click (test_jenkins_offline.TestLinkedPluginBuild.test_live_trigger_hands_off_to_linked_callback_and_resumes_without_click) ... 2026-10-10 05:03:49 [JENKINS] plugin 已具有参数化入口，跳过初始化 Build
-2026-10-10 05:03:49 [JENKINS] plugin 正式构建前已有 Build: []
-2026-10-10 05:03:49 [CALLBACK] Plugin Trigger #1 → Callback #2；下一步监控 Callback
+test_live_trigger_hands_off_to_linked_callback_and_resumes_without_click (test_jenkins_offline.TestLinkedPluginBuild.test_live_trigger_hands_off_to_linked_callback_and_resumes_without_click) ... 2026-10-11 06:21:15 [JENKINS] plugin 已具有参数化入口，跳过初始化 Build
+2026-10-11 06:21:15 [JENKINS] plugin 正式构建前已有 Build: []
+2026-10-11 06:21:15 [CALLBACK] Plugin Trigger #1 → Callback #2；下一步监控 Callback
+2026-10-11 06:21:15 [NEXUS] [SEARCH] 找到 Nexus upload output 分组 #1，正在读取 JSON
+2026-10-11 06:21:15 [NEXUS] [SEARCH] 已搜索完整日志；Nexus upload output 分组=1
+2026-10-11 06:21:15 [NEXUS] [JSON] upload_results 条目=2；按插件名筛选 .tar.gz，排除附属文件
 ok
 test_modern_jenkins_svg_header_icons_not_other_text (test_jenkins_offline.TestLinkedPluginBuild.test_modern_jenkins_svg_header_icons_not_other_text) ... ok
-test_wait_result_switches_when_related_callback_is_visible (test_jenkins_offline.TestLinkedPluginBuild.test_wait_result_switches_when_related_callback_is_visible) ... 2026-10-10 05:03:49 [JENKINS] plugin 正在监控 Build #1: https://ci.corp/job/release/1/
-2026-10-10 05:03:49 [CALLBACK] plugin Build #1 已创建关联 Callback #2；切换监控 #2
+test_wait_result_switches_when_related_callback_is_visible (test_jenkins_offline.TestLinkedPluginBuild.test_wait_result_switches_when_related_callback_is_visible) ... 2026-10-11 06:21:15 [JENKINS] plugin 正在监控 Build #1: https://ci.corp/job/release/1/
+2026-10-11 06:21:15 [CALLBACK] plugin Build #1 已创建关联 Callback #2；切换监控 #2
 ok
-test_gmx_changes_only_three_controls (test_jenkins_offline.TestParameterControls.test_gmx_changes_only_three_controls) ... 2026-10-10 05:03:49 [FORM] GMX 参数设置 ENTITIES=UK SYNC_UPLOAD=true CUSTOM_FOLDER=0_A_UK_PayByBank
+test_gmx_changes_only_three_controls (test_jenkins_offline.TestParameterControls.test_gmx_changes_only_three_controls) ... 2026-10-11 06:21:15 [FORM] GMX 参数设置 ENTITIES=UK SYNC_UPLOAD=true CUSTOM_FOLDER=0_A_UK_PayByBank
 [Jenkins/gmx] ENTITIES=UK SYNC_UPLOAD=true CUSTOM_FOLDER=0_A_UK_PayByBank
 ok
-test_nonactionable_text_does_not_authorize_build (test_jenkins_offline.TestParameterControls.test_nonactionable_text_does_not_authorize_build) ... 2026-10-10 05:03:49 [JENKINS] jenkins 页面入口：unknown（https://ci.corp/job/example/）
+test_nonactionable_text_does_not_authorize_build (test_jenkins_offline.TestParameterControls.test_nonactionable_text_does_not_authorize_build) ... 2026-10-11 06:21:15 [JENKINS] jenkins 页面入口：unknown（https://ci.corp/job/example/）
+ok
+test_callback_source_relation (test_jenkins_offline.TestPluginArtifactFromLog.test_callback_source_relation) ... ok
+test_failed_log_result_is_rejected (test_jenkins_offline.TestPluginArtifactFromLog.test_failed_log_result_is_rejected) ... 2026-10-11 06:21:15 [NEXUS] [SEARCH] 找到 Nexus upload output 分组 #1，正在读取 JSON
+2026-10-11 06:21:15 [NEXUS] [SEARCH] 已搜索完整日志；Nexus upload output 分组=1
+2026-10-11 06:21:15 [NEXUS] [JSON] upload_results 条目=2；按插件名筛选 .tar.gz，排除附属文件
+ok
+test_falls_back_to_callback_log_when_source_build_has_no_upload_output (test_jenkins_offline.TestPluginArtifactFromLog.test_falls_back_to_callback_log_when_source_build_has_no_upload_output) ... 2026-10-11 06:21:15 [NEXUS] [SEARCH] 未识别 Nexus 分组；含标题但格式不匹配的行=0
+2026-10-11 06:21:15 [NEXUS] [SEARCH] 找到 Nexus upload output 分组 #1，正在读取 JSON
+2026-10-11 06:21:15 [NEXUS] [SEARCH] 已搜索完整日志；Nexus upload output 分组=1
+2026-10-11 06:21:15 [NEXUS] [JSON] upload_results 条目=2；按插件名筛选 .tar.gz，排除附属文件
+ok
+test_missing_upload_output_everywhere_needs_attention (test_jenkins_offline.TestPluginArtifactFromLog.test_missing_upload_output_everywhere_needs_attention) ... 2026-10-11 06:21:15 [NEXUS] [SEARCH] 未识别 Nexus 分组；含标题但格式不匹配的行=0
+ok
+test_version_and_sha_come_from_source_build_log_without_artifact_pages (test_jenkins_offline.TestPluginArtifactFromLog.test_version_and_sha_come_from_source_build_log_without_artifact_pages) ... 2026-10-11 06:21:15 [NEXUS] [SEARCH] 找到 Nexus upload output 分组 #1，正在读取 JSON
+2026-10-11 06:21:15 [NEXUS] [SEARCH] 已搜索完整日志；Nexus upload output 分组=1
+2026-10-11 06:21:15 [NEXUS] [JSON] upload_results 条目=2；按插件名筛选 .tar.gz，排除附属文件
 ok
 test_cli_accepts_live_flags (test_live_observation.LiveFlags.test_cli_accepts_live_flags) ... ok
 test_git_debug_prints_command_without_token (test_live_observation.LiveFlags.test_git_debug_prints_command_without_token) ... ok
 test_resume_option_parse (test_live_observation.LiveFlags.test_resume_option_parse) ... ok
 test_sanitize_token_url_credentials_and_query (test_live_observation.LiveFlags.test_sanitize_token_url_credentials_and_query) ... ok
 test_stored_resume_flags_persist (test_live_observation.LiveFlags.test_stored_resume_flags_persist) ... ok
-test_visible_launch_uses_chrome_not_headless (test_live_observation.LiveFlags.test_visible_launch_uses_chrome_not_headless) ... 2026-10-10 05:03:49 [BROWSER] plugin Chrome 已启动（可见窗口）
+test_visible_launch_uses_chrome_not_headless (test_live_observation.LiveFlags.test_visible_launch_uses_chrome_not_headless) ... 2026-10-11 06:21:15 [BROWSER] plugin Chrome 已启动（可见窗口）
 ok
 test_watch_does_not_spawn_or_call_jenkins (test_live_observation.LiveFlags.test_watch_does_not_spawn_or_call_jenkins) ... ok
 test_watch_log_file_created_late (test_live_observation.LiveFlags.test_watch_log_file_created_late) ... ok
+test_final_result_uses_same_timestamp_normalization (test_nexus_field_format.FieldFormatTests.test_final_result_uses_same_timestamp_normalization) ... ok
+test_marker_echo_not_accepted (test_nexus_field_format.FieldFormatTests.test_marker_echo_not_accepted) ... ok
+test_raw_console_timestamp_variants (test_nexus_field_format.FieldFormatTests.test_raw_console_timestamp_variants) ... ok
+test_screenshot_base_version_and_full_tarball_version (test_nexus_field_format.FieldFormatTests.test_screenshot_base_version_and_full_tarball_version) ... ok
+test_unrecognized_marker_has_actionable_diagnostic (test_nexus_field_format.FieldFormatTests.test_unrecognized_marker_has_actionable_diagnostic) ... ok
+test_wrong_base_version_still_rejected (test_nexus_field_format.FieldFormatTests.test_wrong_base_version_still_rejected) ... ok
+test_wrong_full_version_still_rejected (test_nexus_field_format.FieldFormatTests.test_wrong_full_version_still_rejected) ... ok
+test_commit_with_valid_but_wrong_checksum_is_rejected (test_nexus_lock.NexusLockTests.test_commit_with_valid_but_wrong_checksum_is_rejected) ... ok
+test_exact_lock_edit_preserves_other_bytes_and_maps_hashes (test_nexus_lock.NexusLockTests.test_exact_lock_edit_preserves_other_bytes_and_maps_hashes) ... ok
+test_full_current_build_log_is_read_and_success_required (test_nexus_lock.NexusLockTests.test_full_current_build_log_is_read_and_success_required) ... 2026-10-11 06:21:15 [CONSOLE] [DOWNLOAD] 完整日志请求：https://jenkins.invalid/job/plugin/10/consoleText；使用浏览器登录会话，不截取日志尾部
+2026-10-11 06:21:15 [CONSOLE] [DOWNLOAD] 下载超时=300s；请求完整日志，页面只显示提取摘要
+2026-10-11 06:21:15 [CONSOLE] [HTTP] consoleText=200; type=unknown; response URL=https://jenkins.invalid/job/plugin/10/consoleText
+2026-10-11 06:21:15 [CONSOLE] [DOWNLOAD] 完整响应已读取：bytes=40981; lines=40018
+2026-10-11 06:21:15 [NEXUS] [SEARCH] 找到 Nexus upload output 分组 #1，正在读取 JSON
+2026-10-11 06:21:15 [NEXUS] [SEARCH] 已搜索完整日志；Nexus upload output 分组=1
+2026-10-11 06:21:15 [NEXUS] [JSON] upload_results 条目=2；按插件名筛选 .tar.gz，排除附属文件
+2026-10-11 06:21:15 [CONSOLE] [DOWNLOAD] 完整日志请求：https://jenkins.invalid/job/plugin/10/consoleText；使用浏览器登录会话，不截取日志尾部
+2026-10-11 06:21:15 [CONSOLE] [DOWNLOAD] 下载超时=300s；请求完整日志，页面只显示提取摘要
+2026-10-11 06:21:15 [CONSOLE] [HTTP] consoleText=200; type=unknown; response URL=https://jenkins.invalid/job/plugin/10/consoleText
+2026-10-11 06:21:15 [CONSOLE] [DOWNLOAD] 完整响应已读取：bytes=981; lines=18
+2026-10-11 06:21:15 [CONSOLE] [DOWNLOAD] 完整日志请求：https://jenkins.invalid/job/plugin/10/consoleText；使用浏览器登录会话，不截取日志尾部
+2026-10-11 06:21:15 [CONSOLE] [DOWNLOAD] 下载超时=300s；请求完整日志，页面只显示提取摘要
+2026-10-11 06:21:15 [CONSOLE] [HTTP] consoleText=200; type=unknown; response URL=https://login.invalid/
+2026-10-11 06:21:15 [CONSOLE] [DOWNLOAD] 完整日志请求：https://jenkins.invalid/job/plugin/10/consoleText；使用浏览器登录会话，不截取日志尾部
+2026-10-11 06:21:15 [CONSOLE] [DOWNLOAD] 下载超时=300s；请求完整日志，页面只显示提取摘要
+2026-10-11 06:21:15 [CONSOLE] [HTTP] consoleText=403; type=unknown; response URL=https://jenkins.invalid/job/plugin/10/consoleText
+ok
+test_html_or_partial_log_is_rejected_and_download_is_traced (test_nexus_lock.NexusLockTests.test_html_or_partial_log_is_rejected_and_download_is_traced) ... ok
+test_icon_diagnostic_reports_version_and_each_checksum_readonly (test_nexus_lock.NexusLockTests.test_icon_diagnostic_reports_version_and_each_checksum_readonly) ... ok
+test_invalid_expectations_fail_before_browser_starts (test_nexus_lock.NexusLockTests.test_invalid_expectations_fail_before_browser_starts) ... ok
+test_invalid_input_does_not_write (test_nexus_lock.NexusLockTests.test_invalid_input_does_not_write) ... ok
+test_missing_conflicting_wrong_version_and_invalid_hash_fail (test_nexus_lock.NexusLockTests.test_missing_conflicting_wrong_version_and_invalid_hash_fail) ... ok
+test_missing_marker_requires_independent_success_in_formal_flow (test_nexus_lock.NexusLockTests.test_missing_marker_requires_independent_success_in_formal_flow) ... 2026-10-11 06:21:15 [CONSOLE] [DOWNLOAD] 完整日志请求：https://jenkins.invalid/job/plugin/10/consoleText；使用浏览器登录会话，不截取日志尾部
+2026-10-11 06:21:15 [CONSOLE] [DOWNLOAD] 下载超时=300s；请求完整日志，页面只显示提取摘要
+2026-10-11 06:21:15 [CONSOLE] [HTTP] consoleText=200; type=unknown; response URL=https://jenkins.invalid/job/plugin/10/consoleText
+2026-10-11 06:21:15 [CONSOLE] [DOWNLOAD] 完整响应已读取：bytes=981; lines=18
+2026-10-11 06:21:15 [CONSOLE] [DOWNLOAD] 完整日志请求：https://jenkins.invalid/job/plugin/10/consoleText；使用浏览器登录会话，不截取日志尾部
+2026-10-11 06:21:15 [CONSOLE] [DOWNLOAD] 下载超时=300s；请求完整日志，页面只显示提取摘要
+2026-10-11 06:21:15 [CONSOLE] [HTTP] consoleText=200; type=unknown; response URL=https://jenkins.invalid/job/plugin/10/consoleText
+2026-10-11 06:21:15 [CONSOLE] [DOWNLOAD] 完整响应已读取：bytes=981; lines=18
+2026-10-11 06:21:15 [NEXUS] [SEARCH] 找到 Nexus upload output 分组 #1，正在读取 JSON
+2026-10-11 06:21:15 [NEXUS] [SEARCH] 已搜索完整日志；Nexus upload output 分组=1
+2026-10-11 06:21:15 [NEXUS] [JSON] upload_results 条目=2；按插件名筛选 .tar.gz，排除附属文件
+2026-10-11 06:21:15 [CONSOLE] [DOWNLOAD] 完整日志请求：https://jenkins.invalid/job/plugin/10/consoleText；使用浏览器登录会话，不截取日志尾部
+2026-10-11 06:21:15 [CONSOLE] [DOWNLOAD] 下载超时=300s；请求完整日志，页面只显示提取摘要
+2026-10-11 06:21:15 [CONSOLE] [HTTP] consoleText=200; type=unknown; response URL=https://jenkins.invalid/job/plugin/10/consoleText
+2026-10-11 06:21:15 [CONSOLE] [DOWNLOAD] 完整响应已读取：bytes=981; lines=18
+ok
+test_only_nexus_group_json_is_used (test_nexus_lock.NexusLockTests.test_only_nexus_group_json_is_used) ... ok
+test_timestamped_final_status_without_accepting_earlier_success (test_nexus_lock.NexusLockTests.test_timestamped_final_status_without_accepting_earlier_success) ... ok
+test_timestamped_json_maps_by_name_and_ignores_sidecars (test_nexus_lock.NexusLockTests.test_timestamped_json_maps_by_name_and_ignores_sidecars) ... ok
+test_actual_sha_is_not_copied_from_expected_input (test_nexus_simulated_jenkins.SimulatedJenkinsTests.test_actual_sha_is_not_copied_from_expected_input) ... ok
+test_formal_build_uses_same_field_format (test_nexus_simulated_jenkins.SimulatedJenkinsTests.test_formal_build_uses_same_field_format) ... 2026-10-11 06:21:15 [CONSOLE] [DOWNLOAD] 完整日志请求：https://mobile-premier01-jenkins.build-mobile.iwpb.euw2.prod.aws.cloud.hsbc/job/IWPB_Transaction_Banking/job/Domestic_Payment_and_Transfer_Mobile_Global_12824743/job/Lib/job/mobile_paybybank-ios-plugin/job/release-build/job/release_1_3_202610101332/2/consoleText；使用浏览器登录会话，不截取日志尾部
+2026-10-11 06:21:15 [CONSOLE] [DOWNLOAD] 下载超时=300s；请求完整日志，页面只显示提取摘要
+2026-10-11 06:21:15 [CONSOLE] [HTTP] consoleText=200; type=text/plain;charset=utf-8; response URL=https://mobile-premier01-jenkins.build-mobile.iwpb.euw2.prod.aws.cloud.hsbc/job/IWPB_Transaction_Banking/job/Domestic_Payment_and_Transfer_Mobile_Global_12824743/job/Lib/job/mobile_paybybank-ios-plugin/job/release-build/job/release_1_3_202610101332/2/consoleText
+2026-10-11 06:21:15 [CONSOLE] [DOWNLOAD] 完整响应已读取：bytes=2405; lines=31
+2026-10-11 06:21:15 [NEXUS] [SEARCH] 找到 Nexus upload output 分组 #1，正在读取 JSON
+2026-10-11 06:21:15 [NEXUS] [SEARCH] 已搜索完整日志；Nexus upload output 分组=1
+2026-10-11 06:21:15 [NEXUS] [JSON] upload_results 条目=4；按插件名筛选 .tar.gz，排除附属文件
+ok
+test_large_log_download_to_comparison_and_saved_result (test_nexus_simulated_jenkins.SimulatedJenkinsTests.test_large_log_download_to_comparison_and_saved_result) ... ok
+test_missing_group_fails_even_with_success_icon (test_nexus_simulated_jenkins.SimulatedJenkinsTests.test_missing_group_fails_even_with_success_icon) ... ok
+test_other_tarball_version_cannot_pass (test_nexus_simulated_jenkins.SimulatedJenkinsTests.test_other_tarball_version_cannot_pass) ... ok
 test_unique_branches_and_parallel_limit (test_parallel_store.TestSeparateTasks.test_unique_branches_and_parallel_limit) ... ok
 test_ten_concurrent_task_reservations_are_unique_and_limit_is_enforced (test_parallel_ten.TenProcessTests.test_ten_concurrent_task_reservations_are_unique_and_limit_is_enforced) ... ok
 test_ten_workers_run_upgrade_and_bootstrap_without_crossing_logs_or_locks (test_parallel_ten.TenProcessTests.test_ten_workers_run_upgrade_and_bootstrap_without_crossing_logs_or_locks) ... ok
@@ -390,10 +516,67 @@ test_no_extra_index_allowed (test_pip_sources.PipSourceTests.test_no_extra_index
 test_no_index_option_rejected (test_pip_sources.PipSourceTests.test_no_index_option_rejected) ... ok
 test_non_https_index_blocked (test_pip_sources.PipSourceTests.test_non_https_index_blocked) ... ok
 test_two_corporate_nexus_indexes_allowed (test_pip_sources.PipSourceTests.test_two_corporate_nexus_indexes_allowed) ... ok
-test_browser_reuses_valid_login_without_keychain_form_submission (test_startup_and_auth.AuthAndStartupTests.test_browser_reuses_valid_login_without_keychain_form_submission) ... ok
-test_browser_submits_login_and_refreshes_cached_state (test_startup_and_auth.AuthAndStartupTests.test_browser_submits_login_and_refreshes_cached_state) ... 2026-10-10 05:03:50 [AUTH] plugin 检测到登录页面，尝试自动填写账号密码
+test_limit_is_ten_even_if_old_configuration_requests_more (test_resume_capacity.ResumeCapacityTests.test_limit_is_ten_even_if_old_configuration_requests_more) ... ok
+test_resumes_race_for_one_slot_and_preserve_task_data (test_resume_capacity.ResumeCapacityTests.test_resumes_race_for_one_slot_and_preserve_task_data) ... ok
+test_default_concurrency_limit_is_shared_with_manual_builds (test_schedule_api.RealCreateBuildHandOffTests.test_default_concurrency_limit_is_shared_with_manual_builds) ... ok
+test_due_schedule_creates_a_real_queued_task (test_schedule_api.RealCreateBuildHandOffTests.test_due_schedule_creates_a_real_queued_task) ... ok
+test_complete_template_round_trip_and_shared_issue_validation (test_schedule_api.ScheduleAPITests.test_complete_template_round_trip_and_shared_issue_validation) ... ok
+test_full_lifecycle (test_schedule_api.ScheduleAPITests.test_full_lifecycle) ... ok
+test_page_serves_schedules_script_and_nav (test_schedule_api.ScheduleAPITests.test_page_serves_schedules_script_and_nav) ... ok
+test_post_requires_csrf_and_ids_are_validated (test_schedule_api.ScheduleAPITests.test_post_requires_csrf_and_ids_are_validated) ... ok
+test_preview_returns_five_runs_and_explains_errors (test_schedule_api.ScheduleAPITests.test_preview_returns_five_runs_and_explains_errors) ... ok
+test_validation_errors_are_400_and_nothing_is_saved (test_schedule_api.ScheduleAPITests.test_validation_errors_are_400_and_nothing_is_saved) ... ok
+test_heartbeat_online_then_stale (test_schedules.SchedulerProcessTests.test_heartbeat_online_then_stale) ... ok
+test_launch_agent_plist_is_restartable_and_keeps_mac_awake (test_schedules.SchedulerProcessTests.test_launch_agent_plist_is_restartable_and_keeps_mac_awake) ... ok
+test_run_forever_survives_a_failing_tick_and_single_instance (test_schedules.SchedulerProcessTests.test_run_forever_survives_a_failing_tick_and_single_instance) ... [SCHEDULER] 启动 v0.8.0 pid=16330；每 0s 检查一次到期任务
+2026-10-11 06:21:18 [SCHEDULER] 本轮检查失败，下一轮重试：
+Traceback (most recent call last):
+  File "/workspace/mac-app-build/appbuilder/scheduler.py", line 81, in run_forever
+    result = schedules.tick(start=start)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/mac-app-build/tests/test_schedules.py", line 185, in boom
+    raise RuntimeError('db locked')
+RuntimeError: db locked
+2026-10-11 06:21:18 [SCHEDULER] 本轮检查失败，下一轮重试：
+Traceback (most recent call last):
+  File "/workspace/mac-app-build/appbuilder/scheduler.py", line 81, in run_forever
+    result = schedules.tick(start=start)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/mac-app-build/tests/test_schedules.py", line 185, in boom
+    raise RuntimeError('db locked')
+RuntimeError: db locked
+2026-10-11 06:21:18 [SCHEDULER] 本轮检查失败，下一轮重试：
+Traceback (most recent call last):
+  File "/workspace/mac-app-build/appbuilder/scheduler.py", line 81, in run_forever
+    result = schedules.tick(start=start)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/mac-app-build/tests/test_schedules.py", line 185, in boom
+    raise RuntimeError('db locked')
+RuntimeError: db locked
+[SCHEDULER] 已停止
 ok
-test_cached_state_not_required_when_keychain_exists (test_startup_and_auth.AuthAndStartupTests.test_cached_state_not_required_when_keychain_exists) ... 2026-10-10 05:03:50 [BROWSER] plugin Chrome 已启动（后台模式）
+test_disabled_schedule_never_fires_and_delete_removes_runs (test_schedules.TickTests.test_disabled_schedule_never_fires_and_delete_removes_runs) ... ok
+test_due_schedule_starts_a_task_with_shared_defaults (test_schedules.TickTests.test_due_schedule_starts_a_task_with_shared_defaults) ... ok
+test_full_concurrency_queues_instead_of_dropping (test_schedules.TickTests.test_full_concurrency_queues_instead_of_dropping) ... ok
+test_nothing_happens_before_due_time (test_schedules.TickTests.test_nothing_happens_before_due_time) ... ok
+test_queued_runs_start_oldest_first_and_respect_the_limit (test_schedules.TickTests.test_queued_runs_start_oldest_first_and_respect_the_limit) ... ok
+test_race_on_concurrency_limit_keeps_run_pending (test_schedules.TickTests.test_race_on_concurrency_limit_keeps_run_pending) ... ok
+test_run_now_queues_once_and_uses_normal_dispatch (test_schedules.TickTests.test_run_now_queues_once_and_uses_normal_dispatch) ... ok
+test_same_occurrence_is_never_run_twice (test_schedules.TickTests.test_same_occurrence_is_never_run_twice) ... ok
+test_sleeping_mac_catches_up_only_the_latest_missed_run (test_schedules.TickTests.test_sleeping_mac_catches_up_only_the_latest_missed_run) ... ok
+test_start_failure_is_recorded_and_does_not_block_others (test_schedules.TickTests.test_start_failure_is_recorded_and_does_not_block_others) ... ok
+test_bad_template_cron_and_aggressive_interval_rejected (test_schedules.ValidationTests.test_bad_template_cron_and_aggressive_interval_rejected) ... ok
+test_create_normalizes_and_schedules_next_run (test_schedules.ValidationTests.test_create_normalizes_and_schedules_next_run) ... ok
+test_secrets_are_refused_not_stored (test_schedules.ValidationTests.test_secrets_are_refused_not_stored) ... ok
+test_update_reschedules_and_toggle_clears_next_run (test_schedules.ValidationTests.test_update_reschedules_and_toggle_clears_next_run) ... ok
+test_create_edit_save_defaults_and_all_advanced_values_round_trip (test_shared_build_ui.SharedBuildUITests.test_create_edit_save_defaults_and_all_advanced_values_round_trip) ... ok
+test_defaults_help_branch_paging_refresh_and_manual_fallback (test_shared_build_ui.SharedBuildUITests.test_defaults_help_branch_paging_refresh_and_manual_fallback) ... ok
+test_responsive_layout_and_cancel_restores_shared_defaults (test_shared_build_ui.SharedBuildUITests.test_responsive_layout_and_cancel_restores_shared_defaults) ... ok
+test_schedule_list_actions_recent_twenty_runs_and_log_links (test_shared_build_ui.SharedBuildUITests.test_schedule_list_actions_recent_twenty_runs_and_log_links) ... ok
+test_browser_reuses_valid_login_without_keychain_form_submission (test_startup_and_auth.AuthAndStartupTests.test_browser_reuses_valid_login_without_keychain_form_submission) ... ok
+test_browser_submits_login_and_refreshes_cached_state (test_startup_and_auth.AuthAndStartupTests.test_browser_submits_login_and_refreshes_cached_state) ... 2026-10-11 06:21:42 [AUTH] plugin 检测到登录页面，尝试自动填写账号密码
+ok
+test_cached_state_not_required_when_keychain_exists (test_startup_and_auth.AuthAndStartupTests.test_cached_state_not_required_when_keychain_exists) ... 2026-10-11 06:21:42 [BROWSER] plugin Chrome 已启动（后台模式）
 ok
 test_cli_accepts_once_only_login_and_update (test_startup_and_auth.AuthAndStartupTests.test_cli_accepts_once_only_login_and_update) ... ok
 test_doctor_with_mocked_dependencies (test_startup_and_auth.AuthAndStartupTests.test_doctor_with_mocked_dependencies) ... ok
@@ -419,7 +602,7 @@ test_reject_credentials_in_urls_before_creating_tasks (test_web_advanced_paramet
 test_reject_invalid_poll_and_regexp_and_enum (test_web_advanced_parameters.DefaultsTest.test_reject_invalid_poll_and_regexp_and_enum) ... ok
 test_task_scoped_url_and_jekins_build_parameters_from_web (test_web_advanced_parameters.DefaultsTest.test_task_scoped_url_and_jekins_build_parameters_from_web) ... ok
 test_two_tasks_do_not_share_overrides_or_mutate_yaml (test_web_advanced_parameters.DefaultsTest.test_two_tasks_do_not_share_overrides_or_mutate_yaml) ... ok
-test_gmx_all_five_fields_written_and_verified (test_web_advanced_parameters.JenkinsFieldsTest.test_gmx_all_five_fields_written_and_verified) ... 2026-10-10 05:03:50 [FORM] GMX 参数设置 ENTITIES=UK SYNC_UPLOAD=false CUSTOM_FOLDER=0_A_UK_Custom
+test_gmx_all_five_fields_written_and_verified (test_web_advanced_parameters.JenkinsFieldsTest.test_gmx_all_five_fields_written_and_verified) ... 2026-10-11 06:21:42 [FORM] GMX 参数设置 ENTITIES=UK SYNC_UPLOAD=false CUSTOM_FOLDER=0_A_UK_Custom
 [Jenkins/gmx] ENTITIES=UK SYNC_UPLOAD=false CUSTOM_FOLDER=0_A_UK_Custom
 ok
 test_missing_build_type_option_stops_unsafe_form_submit (test_web_advanced_parameters.JenkinsFieldsTest.test_missing_build_type_option_stops_unsafe_form_submit) ... ok
@@ -465,7 +648,7 @@ test_web_offline_update_still_launches (test_web_launcher.UpdateShellTests.test_
 test_web_successful_update_launches (test_web_launcher.UpdateShellTests.test_web_successful_update_launches) ... ok
 
 ----------------------------------------------------------------------
-Ran 220 tests in 16.988s
+Ran 296 tests in 49.445s
 
 OK
 exit=0
@@ -473,10 +656,11 @@ $ python -m compileall -q appbuilder
 exit=0
 $ sh -n install.sh app-build selftest.sh
 exit=0
-$ python -m appbuilder run --plugin-version 1.3 --plugin-branch develop --gmx-branch develop --country uk --project-name PayByBank --dry-run
+$ python -m appbuilder run --plugin-version 1.3 --plugin-branch develop --gmx-branch feature/UKPBB-203745-test --country uk --project-name PayByBank --dry-run
 {
   "plugin_source": "develop",
-  "gmx_source": "develop",
+  "gmx_source": "feature/UKPBB-203745-test",
+  "gmx_issue_key": "UKPBB-203745",
   "plugin_version_input": "1.3",
   "country": "UK",
   "project": "PayByBank",
@@ -484,11 +668,11 @@ $ python -m appbuilder run --plugin-version 1.3 --plugin-branch develop --gmx-br
   "gmx_url": "https://alm-github.systems.uk.hsbc/mobile/mobilebanking-global-ios",
   "visible": false,
   "verbose": false,
-  "plugin_version": "1.3.202610100503",
-  "plugin_branch": "release/1.3.202610100503",
-  "gmx_branch": "upload/auto202610100503",
-  "plugin_job": "https://mobile-premier01-jenkins.build-mobile.iwpb.euw2.prod.aws.cloud.hsbc/job/IWPB_Transaction_Banking/job/Domestic_Payment_and_Transfer_Mobile_Global_12824743/job/Lib/job/mobile_paybybank-ios-plugin/job/release-build/job/release_1_3_202610100503/",
-  "gmx_job": "https://mobile-platform-jenkins.build-mobile.iwpb.euw2.prod.aws.cloud.hsbc/job/mobilex-global-uploads/job/global-ios-upload/job/upload%2Fauto202610100503/",
+  "plugin_version": "1.3.202610110621",
+  "plugin_branch": "release/1.3.202610110621",
+  "gmx_branch": "upload/UKPBB-203745-auto202610110621",
+  "plugin_job": "https://mobile-premier01-jenkins.build-mobile.iwpb.euw2.prod.aws.cloud.hsbc/job/IWPB_Transaction_Banking/job/Domestic_Payment_and_Transfer_Mobile_Global_12824743/job/Lib/job/mobile_paybybank-ios-plugin/job/release-build/job/release_1_3_202610110621/",
+  "gmx_job": "https://mobile-platform-jenkins.build-mobile.iwpb.euw2.prod.aws.cloud.hsbc/job/mobilex-global-uploads/job/global-ios-upload/job/upload%2FUKPBB-203745-auto202610110621/",
   "folder": "0_A_UK_PayByBank",
   "note": "预览而已：没有 Git、Jenkins、文件写入操作。正式任务时间戳由并发管理器分配。"
 }

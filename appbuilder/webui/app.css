@@ -60,3 +60,37 @@
 .live-checkboxes label,.live-confirm{display:flex!important;align-items:center;flex-direction:row!important;gap:7px!important;font-size:11px!important}
 .live-checkboxes input,.live-confirm input{width:16px!important;height:16px;accent-color:#70ddca}
 .live-confirm{background:#3a3025;border:1px solid #78664f;padding:12px;border-radius:8px;color:#ffdfb2!important}
+
+/* Schedules */
+.schedules-panel .sched-buttons{display:flex;gap:12px;align-items:center}
+.schedules-panel .diagnose-fields{grid-template-columns:repeat(auto-fit,minmax(200px,1fr))}
+.schedules-panel .table-wrap{margin-top:18px}
+.sched-actions{display:flex;gap:8px;flex-wrap:wrap}
+.sched-actions button{white-space:nowrap}
+.sched-cron{font:12px ui-monospace,monospace;color:#9fd8ff}
+.sched-link{cursor:pointer;text-decoration:underline;text-decoration-color:#3b5368}
+.schedule-runs{margin-top:22px}
+.sched-off td{opacity:.55}
+
+/* One shared editor: comfortable single-column advanced groups on narrow panels. */
+[hidden]{display:none!important}
+#build-form .label-help{font-size:11px;line-height:1.65;color:#9bb2c9;font-weight:400;letter-spacing:0}
+#build-form .form-grid{margin-bottom:18px;align-items:start}
+#build-form .field-toggle{display:grid;grid-template-columns:1fr auto;gap:8px;padding:12px;border:1px solid #34556c;border-radius:9px;background:#17293a}
+#build-form .field-toggle input{width:18px;height:18px;margin:0;accent-color:#73dfca}
+#build-form .field-toggle .label-help{grid-column:1 / -1;margin:0}
+#build-form .branch-refresh{justify-self:start;padding:6px 0}
+#build-form [id$="-branch-status"],#build-form .branch-refresh{grid-column:1 / -1}
+#build-form .advanced-panel{margin-top:15px}
+#schedule-settings{border:1px solid #3b6570;border-radius:10px;padding:16px;margin:18px 0;color:#c6e8e5}
+#schedule-settings legend{padding:0 8px}
+.schedule-toggle{margin:20px 0}.schedule-toggle small{line-height:1.7}
+#build-form .sched-buttons{display:flex;align-items:center;gap:12px}
+#build-form .sched-buttons .submit-btn{flex:1}
+@media(max-width:690px){#build-form .form-grid{grid-template-columns:1fr}#build-form .span-2{grid-column:auto}}
+
+.schedule-toggle .toggle{pointer-events:none}
+
+.schedule-toggle small{font-size:11px;white-space:normal}
+.diagnose-form .label-help{font-size:11px;line-height:1.65}
+.live-checkboxes label{flex-wrap:wrap}.live-checkboxes .label-help{flex-basis:100%}

@@ -1,4 +1,12 @@
-# HSBC UK PBB — Mac APP Build Automation (v0.7.9)
+# HSBC UK PBB — Mac APP Build Automation (v0.8.0)
+
+## v0.8.0 — 共用构建表单与定时任务
+
+New build 默认只展开 Plugin 来源分支/版本与 GMX 来源分支/实体/项目。更多 Plugin、更多 GMX、共用高级设置分别折叠；所有输入均有中文名称和行内说明。来源分支支持 GitHub 全部分页加载、输入搜索、刷新、仓库变化重载及手输兜底；Token 只由 Mac 服务端读取。
+
+开启「保存为定时任务」后，在同一表单填写名称与 cron；保存、编辑、取消和立即构建共用字段、默认值与校验。所有高级参数及工单编号完整保存，凭据不进入计划。Chrome 显示默认开启，定时和手动一致，可在共用高级设置关闭。Schedules 提供调度器状态、五次预览入口、启停、立即运行、编辑、最近 20 次记录与构建日志链接。默认最多 10 条完整 Plugin→GMX 流水线，手动、定时、Resume 共用名额。保留 25 个实体、AUTO 分支 fallback、历史数据与 Resume。
+
+参见 [定时任务操作说明](docs/24-定时任务.md) 和 [v0.8.0 交付与验证](docs/25-v0.8.0-交付与验证.md)。代码更新不会自动安装 Mac 后台服务。
 
 ## v0.7.9 — 完整 Country / Entity 选项
 
@@ -121,6 +129,10 @@ GMX 参数页按现场截图新增 `SKIP_TEST`（默认 true）、`FORCE`（默�
 
 更多说明见 [v0.6.4 Web 参数配置手册](docs/11-v0.6.4-Web参数补齐与验证.md)。
 
+## 定时任务
+
+在 **New build** 开启「保存为定时任务」，用同一表单输入 cron；**Schedules** 管理已有计划。独立调度器可用 `./app-build scheduler run` 前台运行；按需手动 `./app-build scheduler install` 后在登录 Mac 时自动运行。错过的时间只补跑最近一次，并发已满时排队。详见 [定时任务说明](docs/24-定时任务.md)。
+
 ## 0. 工作流
 
 1. 使用 Plugin 输入源分支创建 `release/<大版本>.<YYYYMMDDHHmm>`，两个 `.xcconfig` 的 `BUNDLE_VERSION_SHORT` 同步设为 `<大版本>.<时间戳>`，精确提交并 Push。
@@ -242,7 +254,7 @@ Web Console 也支持首次填写 GitHub PAT 并保存到 Mac Keychain，因此�
 - `--plugin-version` 是**大版本**，例如 `1.3`。
 - `--country` 默认 UK；`--project-name` 必填。项目名称允许字母、数字、`_`、`-`，不允许空格或路径分隔符（避免意外路径）。
 - 每个任务只生成一次时间戳。若同一分钟内发起第二个任务，管理器分配下一个可用分钟编码，保证分支唯一（编码可能略晚于实际钟表时间）。
-- 默认最多 2 个并发任务，可在 `config.yaml` 改 `build.max_parallel`。macOS 后台任务自动通过 `caffeinate -i` 阻止空闲睡眠（合上 Mac 盖、VPN 断开仍会影响任务）。
+- 默认最多 10 条完整 Plugin→GMX 流水线，手动、定时和 Resume 共用；可在 `config.yaml` 降低 `build.max_parallel`，最高 10。macOS 后台任务自动通过 `caffeinate -i` 阻止空闲睡眠（合上 Mac 盖、VPN 断开仍会影响任务）。
 
 ## 5. 文件与结果位置
 

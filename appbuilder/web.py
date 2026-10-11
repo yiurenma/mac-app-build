@@ -20,9 +20,9 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 from types import SimpleNamespace
 
-from .config import DATA, ROOT, load_config, token_or_error
+from .config import DATA, ROOT, load_config, token_or_error, parallel_limit
 from . import __version__
-from .store import task, task_list, create_task, active_count, update_task, update_task_params, task_folder
+from .store import task, task_list, create_task, active_count, update_task, update_task_params, task_folder, reserve_resume
 from .telemetry import safe_text
 from .versions import validate_args
 
@@ -108,6 +108,9 @@ def form_defaults(config):
     j = config.get('jenkins', {})
     b = config.get('build', {})
     return {
+        'plugin_branch': 'develop', 'gmx_branch': 'develop',
+        'plugin_version': '1.3', 'country': 'UK', 'project_name': 'PayByBank',
+        'visible': True, 'verbose': True,
         'plugin_url': config['github']['plugin_url'],
         'gmx_url': config['github']['gmx_url'],
         'plugin_parent': j['plugin_parent'],
@@ -122,7 +125,7 @@ def form_defaults(config):
         'callback_timeout_minutes': j.get('callback_timeout_minutes', 30),
         'max_changed_lines': b.get('max_changed_lines', 100),
         'upload_success_pattern': b.get('upload_success_pattern', ''),
-        'max_parallel': b.get('max_parallel', 2),
+        'max_parallel': parallel_limit(config),
         'gmx_issue_key': b.get('gmx_issue_key', ''),
         'gmx_build_type': j.get('gmx_defaults', {}).get('BUILD_TYPE', 'Develop'),
         'gmx_signing_repo_branch': j.get('gmx_defaults', {}).get('SIGNING_REPO_BRANCH', 'master'),
@@ -221,18 +224,13 @@ def build_preferences(body, config, country, project):
     }
 
 
-def create_build(body):
-    """Use the same validations and persistent job engine as CLI run."""
-    from .cli import create_params, doctor_check, spawn
-    from .auth import store_credentials, store_github_token
-    config = load_config()
-    github_token = str(body.get('github_token') or '').strip()
-    user = str(body.get('jenkins_user') or '').strip()
-    password = str(body.get('jenkins_password') or '')
-    if bool(user) != bool(password):
-        raise ValueError('Jenkins 账号和密码必须同时填写，或同时留空使用 Keychain')
-    if len(user) > 256 or len(password) > 4096 or len(github_token) > 4096:
-        raise ValueError('账号、密码或 Token 长度超限')
+def validate_build_parameters(body, config):
+    """Single validation path for immediate builds and saved schedule templates."""
+    from .cli import create_params
+    for key in ('visible', 'verbose'):
+        if key in body and not isinstance(body[key], bool):
+            raise ValueError(f'{key} 必须是开关值')
+    defaults = form_defaults(config)
     country = _field(body, 'country', 30).upper()
     project = _field(body, 'project_name', 100)
     # Validate names and build version *before* creating any persistent state.
@@ -244,13 +242,29 @@ def create_build(body):
         plugin_version=_field(body, 'plugin_version', 50),
         project_name=project, country=country,
         plugin_url=github['plugin_url'], gmx_url=github['gmx_url'],
-        visible=body.get('visible', True) is True,
-        verbose=body.get('verbose', True) is True,
+        visible=body.get('visible', defaults['visible']),
+        verbose=body.get('verbose', defaults['verbose']),
     )
     params = create_params(args, config)
     params['jenkins_settings'] = jenkins
     params['build_settings'] = build
     params['gmx_parameters'] = gmx
+    return params
+
+
+def create_build(body):
+    """Use the same validations and persistent job engine as CLI run."""
+    from .cli import doctor_check, spawn
+    from .auth import store_credentials, store_github_token
+    config = load_config()
+    github_token = str(body.get('github_token') or '').strip()
+    user = str(body.get('jenkins_user') or '').strip()
+    password = str(body.get('jenkins_password') or '')
+    if bool(user) != bool(password):
+        raise ValueError('Jenkins 账号和密码必须同时填写，或同时留空使用 Keychain')
+    if len(user) > 256 or len(password) > 4096 or len(github_token) > 4096:
+        raise ValueError('账号、密码或 Token 长度超限')
+    params = validate_build_parameters(body, config)
     # Persist credentials only after all build parameters are valid.
     if github_token:
         store_github_token(github_token)
@@ -258,7 +272,7 @@ def create_build(body):
         store_credentials(user, password)
     doctor_check(config, strict=True)
     token_or_error(config)
-    if active_count() >= int(config.get('build', {}).get('max_parallel', 2)):
+    if active_count() >= parallel_limit(config):
         raise ValueError('已达到并发任务上限，请先等待或恢复已有任务')
     created = create_task(config, params)
     spawn(created['id'], wait=False)
@@ -284,15 +298,16 @@ def resume_build(task_id, body):
     cfg = load_config()
     doctor_check(cfg, strict=True)
     token_or_error(cfg)
-    if active_count() >= int(cfg.get('build', {}).get('max_parallel', 2)):
-        raise ValueError('并发任务已达到上限')
-    if row['status'] in ('RUNNING', 'QUEUED'):
-        update_task(task_id, status='INTERRUPTED', note='旧 Worker 不在线，从 Web Console 恢复')
     # The UI keeps a browser visible by default while replaying trace.
     update_task_params(task_id,
                        visible=(True if body.get('visible', True) is True else None),
                        verbose=(True if body.get('verbose', True) is True else None))
-    spawn(task_id, wait=False)
+    previous = reserve_resume(cfg, task_id)
+    try:
+        spawn(task_id, wait=False)
+    except Exception:
+        update_task(task_id, status=previous['status'], pid=previous['pid'], note=previous['note'])
+        raise
     return public_task(task(task_id))
 
 
@@ -506,7 +521,7 @@ def make_handler(csrf_token):
             try:
                 if p == '/':
                     return self._asset('index.html')
-                if p in ('/app.css', '/app.js'):
+                if p in ('/app.css', '/app.js', '/schedules.js'):
                     return self._asset(p[1:])
                 if p == '/api/health':
                     return self._send({'app': 'mac-app-builder', 'service': 'web-console', 'version': __version__})
@@ -541,6 +556,10 @@ def make_handler(csrf_token):
                     return self._send(poll_live_test(match[1]))
                 if p == '/api/doctor':
                     return self._send(get_doctor())
+                from .schedule_api import handle_get
+                handled = handle_get(p, parse_qs(u.query))
+                if handled is not None:
+                    return self._send(handled[1], status=handled[0])
                 self._failed(404, '未找到该页面')
             except (ValueError, KeyError, TypeError) as e:
                 self._failed(400, str(e))
@@ -596,11 +615,18 @@ def make_handler(csrf_token):
                                            expected=body.get('expected', 'SUCCESS'),
                                            visible=True, expected_artifacts=body.get('expected_artifacts'))
                     return self._send(result)
+                if self.path == '/api/branches':
+                    from .branches import list_branches
+                    return self._send(list_branches(body, load_config()))
                 if self.path == '/api/tasks':
                     return self._send({'task': create_build(body)}, status=201)
                 m = re.fullmatch(r'/api/tasks/([^/?]+)/resume', self.path)
                 if m:
                     return self._send({'task': resume_build(m[1], body)})
+                from .schedule_api import handle_post
+                handled = handle_post(self.path, body)
+                if handled is not None:
+                    return self._send(handled[1], status=handled[0])
                 self._failed(404, '不支持该操作')
             except (ValueError, KeyError, TypeError) as e:
                 self._failed(400, str(e))
