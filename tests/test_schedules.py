@@ -168,6 +168,27 @@ class TickTests(SchedulerCase):
         self.assertEqual(self.tick(dt(2026, 10, 10, 10, 20, 5)), {'queued': 0, 'started': 1})
         self.assertEqual(schedules.last_run(row['id'])['note'], '手动触发')
 
+    def test_hidden_schedule_and_manual_run_keep_mode_and_distinct_task_ids(self):
+        row=schedules.create_schedule('hidden','0 * * * *',{**TEMPLATE,'visible':False},now=dt(2026,10,10,10,15),config=CONFIG)
+        with patch.object(store,'active_count',return_value=0):
+            schedules.tick(dt(2026,10,10,11,0,1),start=self.starter,config=CONFIG)
+            receipt=schedules.run_now(row['id'],now=dt(2026,10,10,11,0,2))
+            schedules.dispatch_pending(start=self.starter,config=CONFIG)
+        runs=schedules.list_runs(row['id'])
+        self.assertEqual(len({r['task_id'] for r in runs}),2)
+        self.assertEqual(receipt['status'],'PENDING')
+        self.assertTrue(all(body['visible'] is False for body in self.started))
+
+    def test_manual_run_at_capacity_has_pending_id_and_no_worker(self):
+        row=self.make()
+        receipt=schedules.run_now(row['id'])
+        with patch.object(store,'active_count',return_value=2),patch('builtins.print') as output:
+            self.assertEqual(schedules.dispatch_pending(start=self.starter,config=CONFIG),0)
+        run=schedules.last_run(row['id'])
+        self.assertEqual(run['id'],receipt['run_id']);self.assertIsNone(run['task_id'])
+        self.assertEqual(run['status'],'PENDING');self.assertFalse(self.started)
+        self.assertIn('尚未创建',output.call_args.args[0])
+
 
 class SchedulerProcessTests(SchedulerCase):
     def test_heartbeat_online_then_stale(self):

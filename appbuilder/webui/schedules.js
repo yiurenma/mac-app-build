@@ -89,7 +89,7 @@ async function post(path,body){return api(path,{method:'POST',body:JSON.stringif
 async function toggle(row){try{await post(`/api/schedules/${encodeURIComponent(row.id)}/toggle`,{enabled:!row.enabled});toast(row.enabled?'已停用':'已启用');await load();}catch(e){toast(e.message,true);}}
 async function runNow(row){
   if(!confirm(`立即运行「${row.name}」？\n将创建新的分支和 Jenkins 构建；并发已满时会排队等待。`))return;
-  try{await post(`/api/schedules/${encodeURIComponent(row.id)}/run-now`);toast('已加入队列，调度器会在下一轮（约 15 秒内）启动');setTimeout(load,1500);}catch(e){toast(e.message,true);}
+  try{const queued=await post(`/api/schedules/${encodeURIComponent(row.id)}/run-now`);toast(`运行记录 #${queued.run_id||'—'} 已排队；调度器在线且有并发名额后才会启动。请在运行记录查看对应的新构建日志`);await load();await showRuns(row);}catch(e){toast(e.message,true);}
 }
 async function remove(row){
   if(!confirm(`删除定时任务「${row.name}」及其运行记录？\n已经创建的构建任务不受影响。`))return;
@@ -105,7 +105,7 @@ async function showRuns(row,silent){
     for(const run of data.runs){
       const tr=create('tr');const status=create('td');status.append(pill(run.task_status||run.status));
       const build=create('td');
-      if(run.task_id){build.append(button(run.task_id,()=>openTask(run.task_id),'subtle-btn sched-link'));}else build.textContent='—';
+      if(run.task_id){build.append(button(run.task_id,()=>openTask(run.task_id),'subtle-btn sched-link'));}else build.textContent=run.status==='PENDING'?'尚未启动：等待调度器或并发名额':'—';
       tr.append(create('td','',fmt(run.planned)),status,build,create('td','',run.note||''));body.append(tr);
     }
     el('schedule-runs').hidden=false;

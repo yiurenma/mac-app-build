@@ -518,12 +518,14 @@ class JenkinsBrowser:
         operation('PW', f'筛选出 Build Numbers={sorted(numbers)}')
         return numbers
 
-    def _safe_click(self, text, role):
+    def _safe_click(self, text, role, before_click=None):
         operation('PW', f'page.get_by_role({role}, name=^{text}$).count()')
         loc = self.page.get_by_role(role, name=re.compile(r'^' + re.escape(text) + r'$', re.I))
         if loc.count() == 1:
             action('CLICK', f'{self.site}: {role} {text}')
             operation('PW', f'locator.click() site={self.site} role={role} name={text}')
+            if before_click:
+                loc.wait_for(state='visible');loc.click(trial=True);before_click(loc)
             loc.click()
             debug(f'{self.site} click {role} {text} 完成 -> {self.page.url}')
             return
@@ -531,11 +533,13 @@ class JenkinsBrowser:
             raise NeedsAttention(f'Jenkins 出现多个 {text} 控件，不自动点击')
         # Legacy Jenkins buttons use input[type=submit], links may wrap icon spans.
         if role == 'button':
-            for css in [f'input[type="submit"][value="{text}"]', f'button:has-text("{text}")']:
+            for css in [f'input[type="submit"][value="{text}"]']:
                 matches = self.page.locator(css)
                 if matches.count() == 1:
                     action('CLICK', f'{self.site}: {css}')
                     operation('PW', f'locator({css}).click()')
+                    if before_click:
+                        matches.wait_for(state='visible');matches.click(trial=True);before_click(matches)
                     matches.click()
                     debug(f'{self.site} click {css} 完成 -> {self.page.url}')
                     return
@@ -690,28 +694,106 @@ class JenkinsBrowser:
             raise NeedsAttention('BUILD_TYPE 不能为空，否则 GMX Build 会被禁用')
         print(f'[Jenkins/gmx] ENTITIES={country} SYNC_UPLOAD={str(should_sync).lower()} CUSTOM_FOLDER={target}', flush=True)
 
+    def queued_builds(self, job_url):
+        """Read only explicit same-row job and queue links, never infer from HTTP 200."""
+        root=urlsplit(job_url)
+        rows=self.page.locator('#buildQueue tr, #buildQueue .task, .build-queue tr')
+        result=set()
+        for row in rows.all():
+            links=row.locator('a[href]').evaluate_all('(xs)=>xs.map(x=>x.href)')
+            if not any(urlsplit(x)._replace(query='',fragment='').geturl().rstrip('/')==job_url.rstrip('/') for x in links):continue
+            for link in links:
+                target=urlsplit(link)
+                match=re.search(r'/queue/item/(\d+)/?$',target.path)
+                if target.scheme==root.scheme and target.netloc==root.netloc and match:result.add(int(match[1]))
+        return sorted(result)
+
+    def _wait_build_ready(self):
+        # DOMContentLoaded does not wait for async scripts that bind Jenkins controls.
+        # Use an observable load boundary in both modes, not visible-only slow_mo.
+        started=time.monotonic()
+        action('FORM',f'{self.site} 等待页面脚本加载及可见 busy 状态结束；尚未提交')
+        try:
+            self.page.wait_for_load_state('load',timeout=12000)
+            self.page.wait_for_function("""() => document.readyState === 'complete' &&
+                !Array.from(document.querySelectorAll('[aria-busy="true"]')).some(e=>
+                  e.getClientRects().length && getComputedStyle(e).visibility !== 'hidden')""",timeout=12000)
+        except PlaywrightTimeout as exc:
+            raise NeedsAttention('Jenkins 构建页面脚本/忙碌状态尚未就绪，未点击提交；请检查页面加载') from exc
+        action('FORM',f'{self.site} 页面 load 已完成，elapsed={time.monotonic()-started:.2f}s；仍须核实 POST/队列')
+
     def request_build(self, job_url, *, with_parameters, country='', project=''):
-        action('JENKINS', f'{self.site} 准备触发 {"Build with Parameters" if with_parameters else "首次 Build"}')
+        action('JENKINS', f'{self.site} 准备构建；mode={"visible" if self.visible else "headless"}；尚未派发')
         self.visit(job_url)
+        self._wait_build_ready()
         before = self.build_numbers(job_url)
-        if with_parameters:
-            self._safe_click('Build with Parameters', 'link')
-            operation('PW', 'page.locator(form).count() 检查参数页')
-            if self.page.locator('form').count() == 0:
-                raise NeedsAttention('参数化构建页面没有表单')
-            if self.site == 'gmx':
-                self.fill_gmx_parameters(country, project, getattr(self, 'gmx_settings', None))
-            # plugin: all defaults untouched
-            self._safe_click('Build', 'button')
-        else:
-            # normal Build Now; some theme labels this "Build"
-            operation('PW', 'page.get_by_role(link, name=Build Now).count()')
-            if self.page.get_by_role('link', name='Build Now').count():
-                self._safe_click('Build Now', 'link')
+        root=urlsplit(job_url)
+        callback=getattr(self,'build_dispatch_checkpoint',None) or (lambda **fields:None)
+        expected_baseline=getattr(self,'build_expected_baseline',None)
+        if expected_baseline is not None and set(before)!=set(expected_baseline):
+            callback(state='CONFLICT')
+            raise NeedsAttention('提交前 Build 历史已变化，可能是自动或外部构建；未派发，不关联新增编号')
+        def before_submit(control):
+            current=urlsplit(self.page.url)
+            if current.scheme!=root.scheme or current.netloc!=root.netloc or not current.path.startswith(root.path.rstrip('/')+'/'):
+                raise NeedsAttention('构建提交页面不属于目标 Job，未派发')
+            if with_parameters:
+                form=control.locator('xpath=ancestor::form[1]')
+                if form.count()!=1:raise NeedsAttention('Build 按钮不属于唯一参数表单，未派发')
+                if (form.get_attribute('method') or 'get').lower()!='post':
+                    raise NeedsAttention('构建表单不是 POST，未派发')
+                kind=control.evaluate('(e)=>e.type')
+                if kind!='submit':raise NeedsAttention('Build 控件不是提交按钮，未派发')
+                invalid=form.evaluate('(f)=>Array.from(f.elements).filter(e=>e.willValidate && !e.validity.valid).length')
+                if invalid:raise NeedsAttention(f'构建表单有 {invalid} 项必填或格式校验未通过，未派发；请检查参数（不记录字段值）')
+                target=urlsplit(urljoin(self.page.url,control.get_attribute('formaction') or form.get_attribute('action') or self.page.url))
+                if target.scheme!=root.scheme or target.netloc!=root.netloc or target.path.rstrip('/') not in (root.path.rstrip('/')+'/build',root.path.rstrip('/')+'/buildWithParameters'):
+                    raise NeedsAttention('参数表单提交目标与 Job 不符，未派发')
             else:
-                self._safe_click('Build', 'link')
-        action('JENKINS', f'{self.site} 已点击 Build，等待本次 Build Number (baseline={sorted(before)})')
-        return before
+                target=urlsplit(urljoin(self.page.url,control.get_attribute('href') or ''))
+                if target.scheme!=root.scheme or target.netloc!=root.netloc or target.path.rstrip('/')!=root.path.rstrip('/')+'/build':
+                    raise NeedsAttention('Build 链接目标与 Job 不符，未派发')
+            callback(state='DISPATCHING')
+            action('DISPATCH',f'{self.site} 提交检查通过，即将点击；中断后按结果未知处理，禁止盲重发')
+        observed=[];post_requests=[]
+        def request_seen(request):
+            target=urlsplit(request.url)
+            if request.method=='POST' and target.scheme==root.scheme and target.netloc==root.netloc and target.path.rstrip('/') in (root.path.rstrip('/')+'/build',root.path.rstrip('/')+'/buildWithParameters'):
+                post_requests.append(True)
+                action('DISPATCH',f'{self.site} 已观察目标构建 POST；接受状态待确认，不记录表单/认证内容')
+        def response_seen(response):
+            target=urlsplit(response.url)
+            if (response.request.method=='POST' and target.scheme==root.scheme and target.netloc==root.netloc
+                    and target.path.rstrip('/') in (root.path.rstrip('/')+'/build',root.path.rstrip('/')+'/buildWithParameters')):
+                location=urlsplit(urljoin(response.url,response.headers.get('location','')))
+                match=re.search(r'/queue/item/(\d+)/?$',location.path)
+                queue=int(match[1]) if match and location.netloc==root.netloc and location.scheme==root.scheme else None
+                observed.append({'http_status':response.status,'queue_id':queue})
+                action('DISPATCH',f'{self.site} 构建 POST 返回 HTTP {response.status}；queue_id={queue}；不记录请求内容')
+        self.page.on('response',response_seen)
+        self.page.on('request',request_seen)
+        try:
+            if with_parameters:
+                self._safe_click('Build with Parameters', 'link')
+                self._wait_build_ready()
+                action('FORM',f'{self.site} 已打开参数页，尚未提交')
+                if self.page.locator('form').count()==0:raise NeedsAttention('参数化构建页面没有表单，未派发')
+                if self.site=='gmx':self.fill_gmx_parameters(country,project,getattr(self,'gmx_settings',None))
+                self._safe_click('Build','button',before_click=before_submit)
+            else:
+                label='Build Now' if self.page.get_by_role('link',name='Build Now',exact=True).count() else 'Build'
+                self._safe_click(label,'link',before_click=before_submit)
+            # Yield briefly for asynchronous page handlers; never click again.
+            deadline=time.monotonic()+2
+            while not observed and time.monotonic()<deadline:self.page.wait_for_timeout(100)
+            action('DISPATCH',f'{self.site} clicked=true；POST_observed={bool(post_requests)}；response_observed={bool(observed)}')
+            receipt=observed[-1] if observed else {}
+            callback(state='ACCEPTED' if receipt.get('queue_id') and receipt.get('http_status') in (201,302,303) else 'UNKNOWN',**receipt)
+            action('DISPATCH',f'{self.site} 点击结束；确认队列={receipt.get("queue_id")}；现在核对目标 Job 的新编号，不把页面 HTTP200 当成功')
+            return before
+        finally:
+            self.page.remove_listener('response',response_seen)
+            self.page.remove_listener('request',request_seen)
 
     def detect_new_build(self, job_url, baseline, minutes=12):
         deadline = time.monotonic() + minutes * 60
@@ -726,7 +808,7 @@ class JenkinsBrowser:
                 raise NeedsAttention(f'发现多个新 Build {candidates}，无法确认哪个属于本次触发')
             action('WAIT', f'{self.site} 等待新 Build Number，已等待 {int(time.monotonic()-start)}s；baseline={sorted(baseline)}')
             time.sleep(self.poll)
-        raise NeedsAttention(f'触发后没有发现 Build Number。可能仍在队列中，请人工确认: {job_url}')
+        raise NeedsAttention(f'等待结束仍未发现 Build Number；不能据此确认仍在队列中，不会自动重复提交，请核对目标 Job: {job_url}')
 
     def _heading_result(self, number):
         """Only the numbered Build header, never old successful jobs in sidebar."""
@@ -1002,6 +1084,52 @@ def callback_number_from_text(text, source_number):
 
 
 
+def _dispatch_or_reconcile(browser,job_url,task_id,key,**parameters):
+    rt=read_state(task_id)['runtime']
+    previous=rt.get(key+'_dispatch',{})
+    if previous.get('job_url') and previous['job_url']!=job_url:
+        raise NeedsAttention('保存的派发 Job 与当前目标不一致，禁止提交或复用编号')
+    if previous.get('state')=='CONFLICT':
+        raise NeedsAttention('提交前历史变化尚未核对；禁止自动关联或重发')
+    browser.visit(job_url)
+    current=set(browser.build_numbers(job_url))
+    baseline=rt.get(key+'_baseline')
+    if baseline is not None:
+        found=sorted(current-set(baseline))
+        if len(found)>1:raise NeedsAttention('恢复发现多个新 Build，禁止猜测或重复提交')
+        if found:
+            action('DISPATCH',f'{key} 恢复发现目标 Job 新 Build #{found[0]}，不重复提交')
+            return found[0]
+        queues=browser.queued_builds(job_url) if hasattr(browser,'queued_builds') else []
+        if queues:
+            action('DISPATCH',f'{key} 恢复发现目标 Job 队列 {queues}，不重复提交')
+            return browser.detect_new_build(job_url,baseline,minutes=3)
+        if previous.get('state')!='PREPARING':
+            raise NeedsAttention(f'{key} 提交结果未知：只有 baseline 或派发已开始，当前未见新 Build/明确队列；不会盲重发。请核对目标 Job 的队列与历史，baseline={baseline}')
+        action('DISPATCH',f'{key} 上次明确停在提交前，重新准备表单；尚未派发')
+    else:baseline=sorted(current)
+    patch_runtime(task_id,**{key+'_baseline':baseline,key+'_dispatch':{'state':'PREPARING','job_url':job_url}})
+    def checkpoint(**fields):
+        patch_runtime(task_id,**{key+'_dispatch':{'job_url':job_url,**fields}})
+    browser.build_expected_baseline=baseline
+    browser.build_dispatch_checkpoint=checkpoint
+    try:
+        browser.request_build(job_url,**parameters)
+    finally:
+        browser.build_dispatch_checkpoint=None
+        browser.build_expected_baseline=None
+    receipt=read_state(task_id)['runtime'].get(key+'_dispatch',{})
+    if receipt.get('state')=='UNKNOWN':
+        browser.visit(job_url)
+        found=sorted(set(browser.build_numbers(job_url))-set(baseline))
+        if len(found)==1:return found[0]
+        if len(found)>1:raise NeedsAttention('提交后出现多个新 Build，无法证明归属；不会重复提交')
+        queues=browser.queued_builds(job_url)
+        if not queues:raise NeedsAttention('点击后未确认构建 POST 接受/队列或新编号，提交结果未知；停止等待，不自动重发，请核对 Jenkins')
+        action('DISPATCH',f'{key} 已观察目标队列 {queues}，等待编号，不重复提交')
+    return browser.detect_new_build(job_url,baseline)
+
+
 def ensure_bootstrap(browser: JenkinsBrowser, job_url: str, task_id: str, site: str):
     """First plain Build may fail while Jenkins loads parameter definitions."""
     rt = read_state(task_id)['runtime']
@@ -1018,18 +1146,7 @@ def ensure_bootstrap(browser: JenkinsBrowser, job_url: str, task_id: str, site: 
         raise NeedsAttention(f'{site} Jenkins 未显示 Build 或 Build with Parameters')
     num = rt.get(key + '_number')
     if not num:
-        if key + '_baseline' in rt:
-            # After an interruption we do not click again; avoid duplicate runs.
-            num = browser.detect_new_build(job_url, rt[key + '_baseline'], minutes=3)
-        else:
-            # NOTE: transient interruption between click and persisted baseline can be
-            # recovered by inspecting new build history; do not click twice.
-            browser.visit(job_url)
-            baseline = sorted(browser.build_numbers(job_url))
-            action('JENKINS', f'{site} 初始化前已有 Build: {baseline}')
-            patch_runtime(task_id, **{key + '_baseline': baseline})
-            browser.request_build(job_url, with_parameters=False)
-            num = browser.detect_new_build(job_url, baseline)
+        num = _dispatch_or_reconcile(browser,job_url,task_id,key,with_parameters=False)
         patch_runtime(task_id, **{key + '_number': num})
     if site == 'gmx':
         # GMX's first unparameterized branch-indexing build can be DISABLED
@@ -1054,15 +1171,7 @@ def formal_build(browser: JenkinsBrowser, job_url, task_id, site, country='', pr
     key = site + '_formal'
     num = rt.get(key + '_number')
     if not num:
-        if key + '_baseline' in rt:
-            num = browser.detect_new_build(job_url, rt[key + '_baseline'], minutes=3)
-        else:
-            browser.visit(job_url)
-            baseline = sorted(browser.build_numbers(job_url))
-            action('JENKINS', f'{site} 正式构建前已有 Build: {baseline}')
-            patch_runtime(task_id, **{key + '_baseline': baseline})
-            browser.request_build(job_url, with_parameters=True, country=country, project=project)
-            num = browser.detect_new_build(job_url, baseline)
+        num = _dispatch_or_reconcile(browser,job_url,task_id,key,with_parameters=True,country=country,project=project)
         patch_runtime(task_id, **{key + '_number': num})
     result = rt.get(key + '_result')
     console = ''

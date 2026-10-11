@@ -200,7 +200,7 @@ def run_now(schedule_id, now=None):
                          "VALUES(?,?, 'PENDING', '手动触发', ?)", (schedule_id, _iso(now), _iso(now)))
         if cur.rowcount == 0:
             raise ValueError('刚刚已经触发过一次，请稍候再试')
-    return {'queued': True}
+    return {'queued': True, 'run_id': cur.lastrowid, 'status': 'PENDING'}
 
 
 def enqueue_due(now):
@@ -251,7 +251,9 @@ def dispatch_pending(now=None, start=None, config=None):
             "SELECT * FROM schedule_runs WHERE status='PENDING' ORDER BY planned, id")]
     started = 0
     for run in pending:
-        if store.active_count() >= limit:
+        active=store.active_count()
+        if active >= limit:
+            print(f'[SCHEDULER] run_id={run["id"]} PENDING；并发 {active}/{limit}，尚未创建新构建/Worker；不是 Jenkins 等待',flush=True)
             break
         try:
             schedule = get_schedule(run['schedule_id'])
@@ -269,6 +271,7 @@ def dispatch_pending(now=None, start=None, config=None):
             _finish(run['id'], 'FAILED', note=safe_text(f'{type(exc).__name__}: {exc}')[:500], now=now)
             continue
         _finish(run['id'], 'STARTED', task_id=created['id'], now=now)
+        print(f'[SCHEDULER] run_id={run["id"]} → task_id={created["id"]}；visible={body.get("visible")}；日志 {store.task_folder(created["id"])/"run.log"}',flush=True)
         started += 1
     return started
 
