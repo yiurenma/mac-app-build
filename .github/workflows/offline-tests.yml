@@ -23,8 +23,8 @@ jobs:
           python -m playwright install --with-deps chromium
           browser_path=$(python -c 'from playwright.sync_api import sync_playwright; p=sync_playwright().start(); print(p.chromium.executable_path); p.stop()')
           sudo ln -sf "$browser_path" /usr/bin/chromium
-      - name: Three offline regression rounds
-        run: ./selftest.sh
+      - name: Three offline regression rounds (headless and headed via Xvfb)
+        run: xvfb-run -a ./selftest.sh
       - name: JavaScript and whitespace checks
         run: |
           node --check appbuilder/webui/app.js
