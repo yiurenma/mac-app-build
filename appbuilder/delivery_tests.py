@@ -24,6 +24,10 @@ def connect():
 
 def finish(test_id,status,result):
     with closing(connect()) as db,db:
+        previous=db.execute('SELECT result FROM tests WHERE id=?',(test_id,)).fetchone()
+        if previous:
+            audit=json.loads(previous['result'])
+            result={**{key:audit[key] for key in ('allow_repeat_test','repeated_unknown_ids','requested_at') if key in audit},**result}
         db.execute('UPDATE tests SET status=?,result=? WHERE id=?',(status,json.dumps(result),test_id))
 
 
@@ -44,6 +48,9 @@ def start(body):
     from .outlook import recipients,valid_address
     kind=body.get('kind');test_id=body.get('request_id','')
     if kind not in ('testfairy','outlook') or not re.fullmatch(r'[a-f0-9-]{16,64}',test_id):raise ValueError('测试类型或请求编号无效')
+    allow_repeat=body.get('allow_repeat_test',False)
+    if not isinstance(allow_repeat,bool):raise ValueError('允许重复测试必须是开关值')
+    if kind!='outlook' and allow_repeat:raise ValueError('允许重复测试仅适用于测试邮件')
     config=load_config()
     if kind=='testfairy':
         login=body.get('url') or DEFAULT_LOGIN;approved_target(login,config)
@@ -85,21 +92,26 @@ def start(body):
         if existing:
             if existing['fingerprint']!=fingerprint or existing['kind']!=kind:raise ValueError('测试编号已用于不同输入，禁止重复提交')
             return {'id':test_id}
-        uncertain=db.execute("SELECT id FROM tests WHERE kind=? AND fingerprint=? AND status IN ('SUBMITTING','UNKNOWN') LIMIT 1",(kind,fingerprint)).fetchone()
-        if kind=='outlook' and not uncertain:
+        uncertain_ids=[]
+        if kind=='outlook':
             # Include older fixed-content tests: changing task must not silently replay an uncertain send.
-            for previous in db.execute("SELECT result FROM tests WHERE kind='outlook' AND status IN ('SUBMITTING','UNKNOWN')"):
+            for previous in db.execute("SELECT * FROM tests WHERE kind='outlook' AND status IN ('RUNNING','SUBMITTING','UNKNOWN')"):
                 result=json.loads(previous['result'])
                 same_recipients={address.lower() for address in result.get('to',[])}=={address.lower() for address in inputs['to']}
-                same_sender=not inputs['account'] or result.get('account','').lower()==inputs['account'].lower()
-                if same_recipients and same_sender:
-                    uncertain=True;break
-        if kind=='outlook' and uncertain:
-            raise ValueError('同一目标已有结果不明的测试邮件，请先核对 Outlook 发件箱/已发送；禁止盲目重发')
+                same_sender=not inputs['account'] or not result.get('account') or result['account'].lower()==inputs['account'].lower()
+                if previous['fingerprint']==fingerprint or (same_recipients and same_sender):
+                    if previous['status'] in ('RUNNING','SUBMITTING') and (previous['id'] in _ACTIVE or now-previous['created']<900):
+                        raise ValueError('同一目标的测试邮件正在执行；允许重复测试也不能并发发送')
+                    uncertain_ids.append(previous['id'])
+        if uncertain_ids and not allow_repeat:
+            raise ValueError('同一目标已有结果不明的测试邮件，请先核对 Outlook 发件箱/已发送；再次发送须明确开启允许重复测试')
         recent=db.execute('SELECT id,status,created FROM tests WHERE kind=? ORDER BY created DESC LIMIT 1',(kind,)).fetchone()
         if recent and (now-recent['created']<30 or (recent['status'] in ('RUNNING','SUBMITTING') and (recent['id'] in _ACTIVE or now-recent['created']<900))):
             raise ValueError('同类测试正在执行或刚执行过，请等待至少 30 秒后再试')
-        db.execute('INSERT INTO tests VALUES(?,?,?,?,?,?)',(test_id,kind,fingerprint,now,'RUNNING','{}'))
+        initial=({'to':inputs['to'],'account':inputs['account'],'task_id':inputs['task_id'],
+                  'allow_repeat_test':allow_repeat,'repeated_unknown_ids':uncertain_ids,'requested_at':now}
+                 if kind=='outlook' else {})
+        db.execute('INSERT INTO tests VALUES(?,?,?,?,?,?)',(test_id,kind,fingerprint,now,'RUNNING',json.dumps(initial)))
         _ACTIVE.add(test_id)
     def execute():
         try:

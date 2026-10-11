@@ -10,7 +10,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlsplit, urljoin, parse_qsl, urlunsplit
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import sync_playwright, TimeoutError as BrowserTimeout
 from .jenkins import NeedsAttention, browser_launch_options
 from .auth import submit_recognized_login
 
@@ -171,6 +171,17 @@ _FOLDER_CANDIDATES = r"""({label,parents,path,selector}) => {
 }"""
 
 
+_LOADING_STATE = r"""() => {
+ const visible=e=>!!e.getClientRects().length&&getComputedStyle(e).visibility!=='hidden';
+ const scope=document.querySelector('main,[role="main"]')||document.body;
+ const busy=Array.from(scope.querySelectorAll('[aria-busy="true"],[role="progressbar"],progress')).some(visible)||scope.getAttribute('aria-busy')==='true';
+ const alerts=Array.from(scope.querySelectorAll('[role="alert"]')).filter(visible).map(e=>e.innerText||'');
+ const error=alerts.find(t=>/error|failed|unable|try again|失败|错误|无法|出错/i.test(t))||'';
+ const ready=!busy&&(scope.getAttribute('aria-busy')==='false'||Array.from(scope.querySelectorAll('[role="tree"],[role="list"],[role="grid"],table,[aria-busy="false"]')).some(visible));
+ return {busy,ready,error:error.slice(0,600)};
+}"""
+
+
 class TestFairyBrowser:
     def __init__(self, config, data, options, *, login_credentials=None, visible=True):
         self.config=config;self.options=options;self.base=approved_target(options['login_url'],config)
@@ -238,54 +249,106 @@ class TestFairyBrowser:
             self.context.storage_state(path=name);os.chmod(name,0o600);os.replace(name,self.auth_path)
         finally:
             if os.path.exists(name):os.unlink(name)
-    def _folder(self,path):
-        self.page.goto(self.base+'/my',wait_until='domcontentloaded')
+    def _lookup_deadline(self):
+        return time.monotonic()+max(1,min(1800,float(self.config.get('testfairy',{}).get('wait_seconds',600))))
+
+    def _observe_loading(self):
+        if getattr(self,'_loading_observed',False):return
+        self._loading_observed=True
+        self._pending=set();self._network_errors=[]
+        def relevant(request):
+            u=urlsplit(request.url);base=urlsplit(self.base)
+            return u.scheme==base.scheme and u.netloc==base.netloc and request.resource_type in ('document','xhr','fetch')
+        def request_started(request):
+            if relevant(request):self._pending.add(id(request))
+        def response_received(response):
+            if relevant(response.request) and response.status>=400:
+                self._network_errors.append(f'{response.request.resource_type} HTTP {response.status}')
+                self._network_errors[:]=self._network_errors[-8:]
+        def finished(request):self._pending.discard(id(request))
+        def failed(request):
+            finished(request)
+            if relevant(request):
+                code=re.search(r'net::[A-Z0-9_]+',str(request.failure))
+                self._network_errors.append(request.resource_type+' '+(code.group() if code else '请求失败'))
+                self._network_errors[:]=self._network_errors[-8:]
+        self.page.on('request',request_started)
+        self.page.on('response',response_received)
+        self.page.on('requestfinished',finished)
+        self.page.on('requestfailed',failed)
+
+    def _lookup_state(self):
+        from .telemetry import safe_text
+        if not self._same_origin():raise NeedsAttention('TestFairy 查找跳转离开允许租户，已停止')
+        if self.page.locator('input[type="password"]:visible').count():
+            raise NeedsAttention('TestFairy 会话已失效，停止查找，构建不会重跑')
+        state=self.page.evaluate(_LOADING_STATE)
+        if state['error']:
+            raise NeedsAttention('TestFairy 页面明确加载错误：'+safe_text(state['error'])[:300])
+        state['busy']=state['busy'] or bool(self._pending)
+        return state
+
+    def _lookup_failure(self,stage,state,evidence=None):
+        detail='加载超时：仍观察到加载中' if state['busy'] else ('列表已就绪但未找到目标（空列表或目录未出现）' if state['ready'] else '等待超时：加载状态不明，尚未观察到目标')
+        if evidence and len(evidence['indices'])>1:detail='目录存在多个可见交互候选，无法唯一定位'
+        message='TestFairy '+stage+'：'+detail
+        if evidence:
+            message+='；可见交互候选 '+str(len(evidence['indices']))+'；候选结构 '+json.dumps(evidence['summary'],ensure_ascii=False)
+        if self._network_errors:
+            message+='；观测到同源请求错误 '+', '.join(self._network_errors)+'（未确认是否目录接口；不包含地址查询、请求体或响应内容）'
+        raise NeedsAttention(message+'；未改分享权限或重新构建')
+
+    def _lookup_action(self,action,deadline,**kwargs):
+        if time.monotonic()>=deadline:
+            self._lookup_failure('页面操作总等待预算已用尽',self._lookup_state())
+        try:
+            return action(timeout=max(1,int((deadline-time.monotonic())*1000)),**kwargs)
+        except BrowserTimeout:
+            self._lookup_failure('页面操作总等待预算已用尽',self._lookup_state())
+
+    def _folder(self,path,deadline=None):
+        deadline=self._lookup_deadline() if deadline is None else deadline
+        self._observe_loading()
+        self._lookup_action(self.page.goto,deadline,url=self.base+'/my',wait_until='domcontentloaded')
         if not self._same_origin() or self.page.locator('input[type=password]').count():
             raise NeedsAttention('TestFairy 会话已失效，停止查找，构建不会重跑')
         labels=path.split('/')
         selector=self.config.get('testfairy',{}).get('folder_selector',_FOLDER_SELECTOR)
         apps_activated=False
         for depth,label in enumerate(labels):
-            deadline=time.monotonic()+3
             while True:
+                state=self._lookup_state()
                 evidence=self.page.evaluate(_FOLDER_CANDIDATES, {'label':label,'parents':labels[:depth],
                     'path':labels,'selector':self.config.get('testfairy',{}).get('folder_selector',_FOLDER_SELECTOR)})
                 if evidence['current']:
                     break  # breadcrumb/tree explicitly proves we are already at this path level
                 if len(evidence['indices'])==1:
-                    self.page.locator(self.config.get('testfairy',{}).get('folder_selector',_FOLDER_SELECTOR)).nth(evidence['indices'][0]).click()
+                    self._lookup_action(self.page.locator(selector).nth(evidence['indices'][0]).click,deadline)
                     if not self._same_origin():raise NeedsAttention('TestFairy 目录跳转离开当前租户')
                     break
                 if depth==0 and not evidence['indices'] and not apps_activated:
                     apps=self.page.evaluate(_FOLDER_CANDIDATES, {'label':'APPS','parents':[],
                         'path':['APPS'],'selector':selector})
                     if len(apps['indices'])==1:
-                        self.page.locator(selector).nth(apps['indices'][0]).click()
+                        self._lookup_action(self.page.locator(selector).nth(apps['indices'][0]).click,deadline)
                         if not self._same_origin():raise NeedsAttention('APPS 跳转离开当前租户')
                         apps_activated=True
-                        deadline=time.monotonic()+3  # wait for this directory transition as well
                         continue
                 if time.monotonic()>=deadline:
-                    # No page text, href values, credentials or query strings in diagnostics.
-                    raise NeedsAttention('TestFairy 目录无法唯一定位：'+label+
-                        '；已走过 '+('/'.join(labels[:depth]) or 'APPS')+
-                        '；页面路径 '+urlsplit(self.page.url).path+
-                        '；可见交互候选 '+str(len(evidence['indices']))+
-                        '；候选结构 '+json.dumps(evidence['summary'],ensure_ascii=False)+
-                        '；请提供目录树截图或配置 testfairy.folder_selector（仅目录节点）')
-                self.page.wait_for_timeout(200)
+                    self._lookup_failure('目录 '+label+'；已走过 '+('/'.join(labels[:depth]) or 'APPS'),state,evidence)
+                self.page.wait_for_timeout(min(200,max(1,(deadline-time.monotonic())*1000)))
     def find(self,expected):
         self.login(expected)
         cfg=self.config.get('testfairy',{})
-        self._folder(expected['path'])
-        deadline=time.monotonic()+max(1,min(1800,float(cfg.get('wait_seconds',600))))
+        deadline=self._lookup_deadline()
+        self._folder(expected['path'],deadline)
         selector=cfg.get('card_selector','article, .app-card, .build-card, .version-card, [data-build-id]')
         while True:
-            if not self._same_origin():raise NeedsAttention('等待 App 时离开 TestFairy 当前租户')
+            state=self._lookup_state()
             cards=self.page.locator(selector)
             matches=[]
             for i in range(min(cards.count(),100)):
-                card=cards.nth(i);parsed=parse_candidate(card.inner_text(),expected)
+                card=cards.nth(i);parsed=parse_candidate(self._lookup_action(card.inner_text,deadline),expected)
                 if parsed:matches.append((card,parsed))
             if len(matches)>1:raise NeedsAttention('同一 GMX 构建匹配多个 TestFairy App，停止生成链接/邮件')
             if matches:
@@ -298,24 +361,25 @@ class TestFairyBrowser:
                     if share.count()!=1:raise NeedsAttention('匹配 App 的现有 Share 入口无法唯一识别')
                     if self.page.locator('[role="dialog"]:visible, dialog[open]:visible').count():
                         raise NeedsAttention('Share 前已有可见弹窗，无法证明链接归属；请关闭后再测试')
-                    share.click()
-                    share_deadline=time.monotonic()+3
+                    self._lookup_action(share.click,deadline)
                     while True:
-                        if not self._same_origin():raise NeedsAttention('Share 页面离开 TestFairy 当前租户')
+                        state=self._lookup_state()
+                        if time.monotonic()>=deadline:
+                            self._lookup_failure('Share 未出现属于当前 App 的唯一链接容器；不会从整页或其他 App 取链接',state)
                         dialog=self.page.locator('[role="dialog"]:visible, dialog[open]:visible')
                         if dialog.count()>1:raise NeedsAttention('Share 出现多个弹窗，无法唯一证明当前 App 链接归属')
                         # A newly opened unique dialog or the same verified card only; never search the page.
                         scope=dialog if dialog.count()==1 else card
-                        if scope is card and (card.count()!=1 or not parse_candidate(card.inner_text(),expected)):
+                        if scope is card and (card.count()!=1 or not parse_candidate(self._lookup_action(card.inner_text,deadline),expected)):
                             raise NeedsAttention('Share 后原 App 卡片身份已变化，不能证明链接归属')
                         links=scope.locator('a[href*="/join/"]')
-                        raw=[links.nth(i).get_attribute('href') for i in range(links.count())]
+                        raw=[self._lookup_action(links.nth(i).get_attribute,deadline,name='href') for i in range(links.count())]
                         raw += scope.locator('input[value*="/join/"]').evaluate_all('(xs)=>xs.map(x=>x.value)')
                         if raw:break
-                        if time.monotonic()>=share_deadline:
-                            raise NeedsAttention('Share 未出现属于当前 App 的唯一链接容器；不会从整页或其他 App 取链接')
+                        if time.monotonic()>=deadline:
+                            self._lookup_failure('Share 未出现属于当前 App 的唯一链接容器；不会从整页或其他 App 取链接',state)
                         self.page.wait_for_timeout(100)
-                else:raw=[links.nth(i).get_attribute('href') for i in range(links.count())]
+                else:raw=[self._lookup_action(links.nth(i).get_attribute,deadline,name='href') for i in range(links.count())]
                 urls={share_url(value,self.base) for value in raw if value}
                 if len(urls)!=1:raise NeedsAttention('未找到唯一已有分享链接；不会创建公开权限')
                 resolved=urls.pop()
@@ -323,7 +387,7 @@ class TestFairyBrowser:
                     raise NeedsAttention('实际分享链接含查询参数，需人工核对；不会删改参数后发送另一地址')
                 parsed.update(share_url=resolved,matched_at=datetime.now(timezone.utc).isoformat())
                 self._save_session();return parsed
-            if time.monotonic()>=deadline:raise NeedsAttention('等待本次 GMX 对应 TestFairy App 超时；未取最新包，未生成邮件')
+            if time.monotonic()>=deadline:self._lookup_failure('等待本次 GMX 对应 App 超时；未取最新包',state)
             self.page.wait_for_timeout(min(250,max(0,(deadline-time.monotonic())*1000)))
 
 

@@ -93,6 +93,7 @@ class BrowserTests(unittest.TestCase):
         self.context.route('**/*', lambda route: route.fulfill(content_type='text/html',body=html))
 
     def test_apps_entry_and_async_directory_ignore_hidden_and_heading_duplicates(self):
+        self.worker.config['testfairy']['wait_seconds']=4
         self.context.unroute('**/*')
         def fixture(route):
             path=route.request.url.split(BASE)[-1]

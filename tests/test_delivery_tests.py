@@ -78,6 +78,58 @@ class DeliveryTestAPIs(unittest.TestCase):
                         dt.start({**original,**changed,'request_id':'e'*32})
         self.assertEqual(adapter.submit.call_count,1)
 
+    def test_explicit_repeat_creates_audited_attempt_preserves_unknown_and_is_idempotent(self):
+        adapter=self.adapter();adapter.submit.side_effect=[TimeoutError('uncertain'),{'status':'SUBMITTED','message_id':'new-message'}]
+        with patch('appbuilder.outlook.OutlookAdapter',return_value=adapter),patch('appbuilder.store.patch_runtime') as normal_ledger:
+            dt.start(self.mail)
+            old=dt.poll('a'*32)
+            repeat={**self.mail,'request_id':'b'*32,'allow_repeat_test':True}
+            with patch('appbuilder.delivery_tests.time.time',return_value=9999999999):
+                dt.start(repeat);dt.start(repeat)
+                dt.start({**repeat,'allow_repeat_test':False})
+        self.assertEqual(adapter.submit.call_count,2)
+        self.assertEqual(dt.poll('a'*32),old)
+        result=dt.poll('b'*32)
+        self.assertEqual(result['status'],'SUBMITTED')
+        self.assertTrue(result['result']['allow_repeat_test'])
+        self.assertEqual(result['result']['repeated_unknown_ids'],['a'*32])
+        normal_ledger.assert_not_called()
+
+    def test_repeat_permission_is_per_request_and_retained_when_second_attempt_unknown(self):
+        adapter=self.adapter();adapter.submit.side_effect=TimeoutError('uncertain')
+        with patch('appbuilder.outlook.OutlookAdapter',return_value=adapter):
+            dt.start(self.mail)
+            with patch('appbuilder.delivery_tests.time.time',return_value=9999999999):
+                dt.start({**self.mail,'request_id':'b'*32,'allow_repeat_test':True})
+            with patch('appbuilder.delivery_tests.time.time',return_value=10000000099):
+                with self.assertRaisesRegex(ValueError,'结果不明'):
+                    dt.start({**self.mail,'request_id':'c'*32})
+        self.assertEqual(dt.poll('b'*32)['result']['repeated_unknown_ids'],['a'*32])
+        self.assertEqual(adapter.submit.call_count,2)
+
+    def test_allow_repeat_never_bypasses_inflight_target_even_when_another_test_is_newer(self):
+        now=2000
+        with dt.connect() as db:
+            db.execute('INSERT INTO tests VALUES(?,?,?,?,?,?)',('d'*32,'outlook','other-fingerprint',0,'SUBMITTING',json.dumps({'to':['WORK@example.com'],'account':'sender@example.com'})))
+            db.execute('INSERT INTO tests VALUES(?,?,?,?,?,?)',('e'*32,'outlook','unrelated',1000,'SUBMITTED','{}'))
+        dt._ACTIVE.add('d'*32)
+        self.addCleanup(dt._ACTIVE.clear)
+        with patch('appbuilder.delivery_tests.time.time',return_value=now),patch('appbuilder.outlook.OutlookAdapter') as adapter:
+            with self.assertRaisesRegex(ValueError,'正在执行'):
+                dt.start({**self.mail,'allow_repeat_test':True})
+        adapter.assert_not_called()
+
+    def test_repeat_option_must_be_boolean_and_does_not_bypass_cooldown(self):
+        for value in ('true',1,None):
+            with self.assertRaisesRegex(ValueError,'开关值'):
+                dt.start({**self.mail,'allow_repeat_test':value})
+        adapter=self.adapter();adapter.submit.side_effect=TimeoutError('uncertain')
+        with patch('appbuilder.outlook.OutlookAdapter',return_value=adapter):
+            dt.start(self.mail)
+            with self.assertRaisesRegex(ValueError,'30 秒'):
+                dt.start({**self.mail,'request_id':'b'*32,'allow_repeat_test':True})
+        self.assertEqual(adapter.submit.call_count,1)
+
     def test_test_email_requires_explicit_action_and_valid_target(self):
         for body in ({**self.mail,'confirm_send':False},{**self.mail,'recipients':'nickname'}):
             with self.assertRaises(ValueError):dt.start(body)

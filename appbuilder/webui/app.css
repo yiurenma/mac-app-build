@@ -97,3 +97,7 @@
 /* Delivery previews and test results must wrap long corporate URLs. */
 .advanced-body pre,#active-summary pre{white-space:pre-wrap;overflow-wrap:anywhere;max-width:100%}
 #active-summary{flex-wrap:wrap}#active-summary details{flex-basis:100%;min-width:0}
+/* One-click repeat authorization belongs only to the independent mail test. */
+#mail-test-form .field-toggle{display:grid;grid-template-columns:1fr auto;align-items:center;gap:8px}
+#mail-test-form .field-toggle input{width:18px;height:18px;margin:0;padding:0;accent-color:#73dfca}
+#mail-test-form .field-toggle .label-help{grid-column:1 / -1;margin:0}

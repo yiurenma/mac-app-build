@@ -212,7 +212,9 @@ class SharedBuildUITests(unittest.TestCase):
         self.field('tf_test_user').fill('offline@example.com')
         self.field('tf_test_password').fill('FAKE_TEST_PASSWORD')
         self.field('tf_test_expected').fill('https://hsbc-mobilex.testfairy.com/join/current')
-        self.field('tf_test_task').evaluate('(x)=>x.value="202610111000-abcdef"')
+        p.route('**/api/tasks',lambda route:route.fulfill(json={'tasks':[{'id':'202610111000-abcdef','project':'PayByBank','country':'UK','status':'FAILED','stage':'GMX_JENKINS'}]}))
+        p.evaluate("state.tasks=[{id:'202610111000-abcdef',project:'PayByBank',country:'UK',status:'FAILED'}];renderTestTasks()")
+        self.field('tf_test_task').select_option('202610111000-abcdef')
         result={'id':'c'*32,'status':'MATCH','result':{'message':'分享链接匹配','expected_share_url':'https://hsbc-mobilex.testfairy.com/join/current','actual_share_url':'https://hsbc-mobilex.testfairy.com/join/current'}}
         with patch('appbuilder.delivery_tests.start',return_value={'id':'c'*32}) as start,patch('appbuilder.delivery_tests.poll',side_effect=lambda _:result):
             p.locator('#test-testfairy').click()
@@ -220,7 +222,7 @@ class SharedBuildUITests(unittest.TestCase):
             self.assertEqual(start.call_args.args[0]['task_id'],'202610111000-abcdef')
             self.assertEqual(start.call_args.args[0]['expected_share_url'],'https://hsbc-mobilex.testfairy.com/join/current')
             self.assertEqual(self.field('tf_test_password').input_value(),'')
-            self.field('mail_test_task').evaluate('(x)=>x.value="202610111000-abcdef"')
+            self.field('mail_test_task').select_option('202610111000-abcdef')
             self.field('mail_test_to').fill('recipient@example.com')
             result.update(status='BLOCKED',result={'message':'离线模拟：未调用发送','stage':'set_recipients','send_attempted':False,'error_number':-1708,'returncode':1})
             p.locator('#test-outlook-send').click()
@@ -230,6 +232,14 @@ class SharedBuildUITests(unittest.TestCase):
             expect(p.locator('#mail-test-result')).to_contain_text('原生错误号：-1708')
             expect(p.locator('#mail-test-result')).to_contain_text('退出码：1')
             self.assertTrue(start.call_args.args[0]['confirm_send'])
+            self.assertFalse(start.call_args.args[0]['allow_repeat_test'])
+            self.field('mail_test_allow_repeat').check()
+            p.locator('#test-outlook-send').click()
+            expect(p.locator('#test-outlook-send')).to_be_enabled()
+            self.assertTrue(start.call_args.args[0]['allow_repeat_test'])
+            self.assertFalse(self.field('mail_test_allow_repeat').is_checked())
+            self.assertLessEqual(self.field('mail_test_allow_repeat').bounding_box()['height'],24)
+            self.assertNotIn('allow_repeat_test',p.evaluate('buildBody()'))
             self.assertEqual(start.call_args.args[0]['task_id'],'202610111000-abcdef')
             self.assertEqual(start.call_args.args[0]['recipients'],'recipient@example.com')
         self.assertFalse(self.manual)
@@ -237,3 +247,29 @@ class SharedBuildUITests(unittest.TestCase):
         destination=Path('/tmp/mac-app-build-ui');destination.mkdir(exist_ok=True)
         p.locator('#testfairy-tests').screenshot(path=str(destination/'testfairy-test.png'))
         p.locator('#mail-tests').screenshot(path=str(destination/'outlook-test.png'))
+
+    def test_delivery_history_search_and_choices_are_independent(self):
+        p=self.page
+        rows=[{'id':'old-failed','project':'PayByBank','country':'UK','status':'FAILED','stage':'GMX_JENKINS'},
+              {'id':'new-success','project':'Wallet','country':'HK','status':'SUCCESS','stage':'GMX_JENKINS'}]
+        p.route('**/api/tasks',lambda route:route.fulfill(json={'tasks':rows}))
+        p.evaluate("""state.tasks=[
+          {id:'old-failed',project:'PayByBank',country:'UK',status:'FAILED'},
+          {id:'new-success',project:'Wallet',country:'HK',status:'SUCCESS'}];
+          renderTestTasks();""")
+        self.field('mail_test_search').fill('failed')
+        expect(self.field('mail_test_task').locator('option')).to_have_count(2)
+        self.field('mail_test_task').select_option('old-failed')
+        self.field('tf_test_search').fill('wallet')
+        self.field('tf_test_task').select_option('new-success')
+        p.evaluate("state.selected='new-success';renderSelection();renderTestTasks()")
+        self.assertEqual(self.field('mail_test_task').input_value(),'old-failed')
+        self.assertEqual(self.field('tf_test_task').input_value(),'new-success')
+        self.field('mail_test_search').fill('HK')
+        # Keep the explicit choice visible during filtering and periodic refresh.
+        self.assertEqual(self.field('mail_test_task').input_value(),'old-failed')
+        expect(self.field('mail_test_task').locator('option')).to_have_count(3)
+        self.field('mail_test_task').select_option('new-success')
+        self.assertEqual(self.field('tf_test_task').input_value(),'new-success')
+        self.assertIn('信息不足会提示',self.field('tf_test_task').locator('..').inner_text())
+        self.assertFalse(self.errors,self.errors)

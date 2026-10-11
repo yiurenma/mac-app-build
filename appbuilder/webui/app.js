@@ -25,8 +25,6 @@ function renderTasks(){const list=state.tasks;const counts={total:list.length,ru
 }
 function renderSelection(){const row=state.tasks.find(t=>t.id===state.selected);if(!row)return;
   $('selected-subtitle').textContent=`${row.project} · ${row.country} · ${row.id}`;
-  $('tf-test-form').elements.tf_test_task.value=row.id;
-  $('mail-test-form').elements.mail_test_task.value=row.id;
   const box=$('active-summary');box.replaceChildren();const icon=create('div','icon-circle',row.status==='SUCCESS'?'✓':'⌁');const info=create('div');info.append(create('strong','',row.stage+' · '+row.status),create('small','',row.note||'任务已创建'));box.append(icon,info);
   const links=$('jenkins-links');links.replaceChildren();
   for(const link of row.jenkins_links||[]){
@@ -44,7 +42,7 @@ function renderSelection(){const row=state.tasks.find(t=>t.id===state.selected);
   $('stage-strip').querySelectorAll('div').forEach((e,i)=>{e.className='';if(row.status==='SUCCESS'||(idx>=0&&i<idx))e.className='done';else if(i===idx)e.className='current';});
   $('resume-build').hidden=['SUCCESS','RUNNING','QUEUED'].includes(row.status);
 }
-async function loadTasks(){if(state.loading)return;state.loading=true;try{const res=await api('/api/tasks');state.tasks=res.tasks||[];if(!state.selected&&state.tasks.length){state.selected=state.tasks[0].id;state.offset=0;}renderTasks();renderSelection();}catch(e){toast('任务状态刷新失败：'+e.message,true)}finally{state.loading=false;}}
+async function loadTasks(){if(state.loading)return;state.loading=true;try{const res=await api('/api/tasks');state.tasks=res.tasks||[];if(!state.selected&&state.tasks.length){state.selected=state.tasks[0].id;state.offset=0;}renderTasks();renderSelection();renderTestTasks();}catch(e){toast('任务状态刷新失败：'+e.message,true)}finally{state.loading=false;}}
 async function loadLog(reset=false){if(!state.selected)return;const selected=state.selected;if(reset)state.offset=0;
  try{const q=state.offset>0?`?offset=${state.offset}`:'';const data=await api(`/api/tasks/${encodeURIComponent(selected)}/log${q}`);if(state.selected!==selected)return;
   const terminal=$('terminal');const nearBottom=terminal.scrollTop+terminal.clientHeight>terminal.scrollHeight-75;
@@ -216,11 +214,27 @@ init();
 
 $('check-outlook').addEventListener('click',async()=>{const out=$('outlook-status');out.textContent='正在只读检查…';try{const r=await api('/api/outlook');out.textContent='Outlook '+r.version+' · '+r.accounts.map(a=>a.email).join(', ');if(r.accounts.length===1)$('build-form').elements.outlook_account.value=r.accounts[0].email;}catch(e){out.textContent=e.message;}});
 
+function renderTestTasks(){
+ for(const prefix of ['tf','mail']){
+  const f=$(prefix+'-test-form').elements,select=f[prefix+'_test_task'],selected=select.value;
+  const query=f[prefix+'_test_search'].value.trim().toLowerCase();
+  const rows=state.tasks.filter(t=>t.id===selected||[t.id,t.project,t.country,t.status,t.plugin_version].join(' ').toLowerCase().includes(query));
+  const signature=JSON.stringify(rows.map(t=>[t.id,t.project,t.country,t.status]));
+  if(select.dataset.optionsSignature===signature)continue;
+  select.dataset.optionsSignature=signature;
+  select.replaceChildren(create('option','',rows.length?'请选择历史构建':'没有匹配的历史构建'));select.options[0].value='';
+  for(const t of rows){const option=create('option','',`${t.id} · ${t.project||'APP Build'} · ${t.country||'—'} · ${t.status}`);option.value=t.id;select.append(option);}
+  select.value=selected;
+ }
+}
+for(const prefix of ['tf','mail'])$(prefix+'-test-form').elements[prefix+'_test_search'].addEventListener('input',renderTestTasks);
+
 async function runDeliveryTest(kind){
  const f=$(kind==='testfairy'?'tf-test-form':'mail-test-form').elements,button=$(kind==='testfairy'?'test-testfairy':'test-outlook-send'),out=$(kind==='testfairy'?'tf-test-result':'mail-test-result');
  const body={kind,request_id:crypto.randomUUID()};
  if(kind==='testfairy')Object.assign(body,{url:f.tf_test_url.value,username:f.tf_test_user.value,password:f.tf_test_password.value,task_id:f.tf_test_task.value,expected_share_url:f.tf_test_expected.value});
- else Object.assign(body,{task_id:f.mail_test_task.value,recipients:f.mail_test_to.value,account:$('build-form').elements.outlook_account.value,confirm_send:true});
+ else {Object.assign(body,{task_id:f.mail_test_task.value,recipients:f.mail_test_to.value,account:$('build-form').elements.outlook_account.value,confirm_send:true,allow_repeat_test:f.mail_test_allow_repeat.checked});f.mail_test_allow_repeat.checked=false;}
+ if(!body.task_id){out.textContent='请在本测试区选择历史构建。';return;}
  button.disabled=true;out.textContent='正在执行独立测试…';
  try{const r=await api('/api/delivery-tests/start',{method:'POST',body:JSON.stringify(body)});if(kind==='testfairy')f.tf_test_password.value='';delete body.password;
    for(let i=0;i<360;i++){const result=await api('/api/delivery-tests/'+encodeURIComponent(r.id));out.textContent=result.status+' · '+(result.result.message||'执行中')+(result.result.final_url?'\n实际地址（已去除敏感查询参数）：'+result.result.final_url:'')+(result.result.expected_share_url?'\n预期链接：'+result.result.expected_share_url+'\n实际链接：'+result.result.actual_share_url:'')+(result.result.account?'\n发件账号：'+result.result.account:'')+(result.result.stage?'\n阶段：'+result.result.stage+' · send 调用：'+(result.result.send_attempted===true?'已调用':result.result.send_attempted===false?'未调用':'无法确认'):'')+(result.result.error_number!=null?'\n原生错误号：'+result.result.error_number:'')+(result.result.returncode!=null?'\n退出码：'+result.result.returncode:'');if(!['RUNNING','SUBMITTING'].includes(result.status))return;await new Promise(resolve=>setTimeout(resolve,1000));}
