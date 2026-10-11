@@ -52,7 +52,7 @@
                 <label>GMX Issue Key<input name="gmx_issue_key" placeholder="可选；留空自动提取或生成 AUTO-时间戳" maxlength="50"></label>
                 <label>GMX Source Branch<input name="gmx_branch" placeholder="develop" value="develop" required maxlength="200"></label>
                 <label>Plugin Version<input name="plugin_version" placeholder="1.3" value="1.3" required maxlength="50"></label>
-                <label>Country / Entity<input name="country" value="UK" list="country-options" required maxlength="30"><datalist id="country-options"><option value="UK"><option value="HK"><option value="SG"><option value="IN"><option value="AU"><option value="AE"><option value="CA"><option value="US"></datalist></label>
+                <label>Country / Entity<select name="country" required><option value="AE">AE</option><option value="AU">AU</option><option value="BM">BM</option><option value="CIOM">CIOM</option><option value="CN">CN</option><option value="EG">EG</option><option value="EX">EX</option><option value="HK">HK</option><option value="ID">ID</option><option value="IN">IN</option><option value="LK">LK</option><option value="MO">MO</option><option value="MSB">MSB</option><option value="MT">MT</option><option value="MX">MX</option><option value="MY">MY</option><option value="PH">PH</option><option value="QA">QA</option><option value="SG">SG</option><option value="TW">TW</option><option value="UK" selected>UK</option><option value="US">US</option><option value="VN">VN</option><option value="NOT_SET">NOT_SET</option><option value="ALL">ALL</option></select></label>
                 <label class="span-2">Project Name<input name="project_name" placeholder="PayByBank" value="PayByBank" required maxlength="100"></label>
               </div>
               <div class="parameter-summary" id="derived-summary" role="status">
@@ -179,7 +179,7 @@
                 <label>GMX Branch<input name="branch" required maxlength="140" value="upload/UKPBB-203745-V8" autocomplete="off"></label>
                 <label>GMX Jenkins Job URL（可选）<input name="job_url" type="url" maxlength="2048" placeholder="留空自动尝试 %2F / %252F；也可粘贴浏览器完整 Job 地址" autocomplete="off"></label>
                 <div class="diagnose-fields">
-                  <label>Country<input name="country" value="UK" maxlength="4" required></label>
+                  <label>Country / Entity<select name="country" required><option value="AE">AE</option><option value="AU">AU</option><option value="BM">BM</option><option value="CIOM">CIOM</option><option value="CN">CN</option><option value="EG">EG</option><option value="EX">EX</option><option value="HK">HK</option><option value="ID">ID</option><option value="IN">IN</option><option value="LK">LK</option><option value="MO">MO</option><option value="MSB">MSB</option><option value="MT">MT</option><option value="MX">MX</option><option value="MY">MY</option><option value="PH">PH</option><option value="QA">QA</option><option value="SG">SG</option><option value="TW">TW</option><option value="UK" selected>UK</option><option value="US">US</option><option value="VN">VN</option><option value="NOT_SET">NOT_SET</option><option value="ALL">ALL</option></select></label>
                   <label>Project<input name="project" value="PayByBank" maxlength="80" required></label>
                   <label>BUILD_TYPE<input name="build_type" value="Develop" maxlength="100" required></label>
                   <label>SIGNING_REPO_BRANCH<input name="signing_repo_branch" value="master" maxlength="100" required></label>

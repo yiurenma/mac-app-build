@@ -1,4 +1,8 @@
-# HSBC UK PBB — Mac APP Build Automation (v0.7.8)
+# HSBC UK PBB — Mac APP Build Automation (v0.7.9)
+
+## v0.7.9 — 完整 Country / Entity 选项
+
+正式构建和 GMX 构建测试的下拉框均按 Jenkins 截图提供：AE, AU, BM, CIOM, CN, EG, EX, HK, ID, IN, LK, MO, MSB, MT, MX, MY, PH, QA, SG, TW, UK, US, VN, NOT_SET, ALL。默认 UK；NOT_SET 和 ALL 为 Jenkins 特殊值。
 
 ## v0.7.8 — GMX 分支命名修复
 

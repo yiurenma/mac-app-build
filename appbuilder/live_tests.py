@@ -23,7 +23,7 @@ def validate_options(body):
     branch = validate_branch(body.get('branch'))
     country = body.get('country', 'UK')
     project = body.get('project', 'PayByBank')
-    if not isinstance(country, str) or not re.fullmatch(r'[A-Z]{2,4}', country):
+    if not isinstance(country, str) or not re.fullmatch(r'(?:[A-Z]{2,4}|NOT_SET)', country):
         raise ValueError('Country 格式不合法，例如 UK')
     if not isinstance(project, str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_-]{0,80}', project):
         raise ValueError('Project 格式不合法')
