@@ -52,4 +52,6 @@ class StepReportingTests(unittest.TestCase):
         samples=['Call log: fill("DUMMY_PRIVATE_VALUE")', '{"password": "DUMMY_PRIVATE_VALUE"}',
                  "{'token': 'DUMMY_PRIVATE_VALUE'}", 'password="DUMMY_PRIVATE_VALUE with spaces"']
         for sample in samples:
-            with self.subTest(sample=sample):self.assertNotIn('DUMMY_PRIVATE_VALUE',safe_text(sample))
+            with self.subTest(sample=sample):
+                self.assertNotIn('DUMMY_PRIVATE_VALUE',safe_text(sample))
+                self.assertNotIn('with spaces',safe_text(sample))

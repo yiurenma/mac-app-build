@@ -40,8 +40,6 @@ def safe_text(value, env=None):
                s)
     s = re.sub(r'(?im)\b(authorization|proxy-authorization|cookie|set-cookie)\s*[:=]\s*[^\r\n]*',
                r'\1=[REDACTED]', s)
-    s = re.sub(r'(?i)\b(token|password|passwd|secret|api[_-]?key|access[_-]?key)\s*[:=]\s*[^\s,;&]+',
-               r'\1=[REDACTED]', s)
     # Structured errors and Playwright action logs can quote credential values.
     s = re.sub(r"(?i)([\"']?)\b(token|password|passwd|secret|api[_-]?key|access[_-]?key)\1\s*[:=]\s*(?:\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'|[^\s,;&]+)",
                r'\2=[REDACTED]', s)
