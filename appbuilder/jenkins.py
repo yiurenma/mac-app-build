@@ -91,6 +91,14 @@ def same_origin_login_entry(page, target):
     return None
 
 
+def same_target_url(actual, target):
+    """Compare saved URL identity without decoding encoded branch slashes."""
+    current, expected = urlsplit(actual), urlsplit(target)
+    return (current.scheme == expected.scheme and current.netloc == expected.netloc
+            and current.path.rstrip('/') == expected.path.rstrip('/')
+            and current.query == expected.query)
+
+
 def configured_login_entry(conf, site, target):
     """Normal Jenkins login route from the configured origin/context only."""
     parent = urlsplit(conf.get(site + '_parent', ''))
@@ -375,9 +383,9 @@ class JenkinsBrowser:
                 self.page.goto(entry, wait_until='domcontentloaded', timeout=timeout)
                 self._login_if_needed(target)
             response = self.page.goto(target, wait_until='domcontentloaded', timeout=timeout)
-            if (urlsplit(self.page.url).hostname != urlsplit(target).hostname
-                    or login_route(self.page.url) or has_login_inputs(self.page)):
-                raise NeedsAttention(f'{self.site} 自动登录尚未完成，保留原登录缓存；请完成 Chrome 中的公司验证')
+            if (login_route(self.page.url) or has_login_inputs(self.page)
+                    or not same_target_url(self.page.url, target)):
+                raise NeedsAttention(f'{self.site} 自动登录未返回精确原目标，保留原登录缓存；请检查 Chrome 中的公司验证或跳转')
             self._defer_login_cache = False
             if response and response.status == 200 and not page_error_kind(self.page):
                 self._cache_login()

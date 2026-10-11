@@ -66,9 +66,13 @@ class CachedSessionRecoveryTests(unittest.TestCase):
             route.fulfill(status=200,headers={'set-cookie':'session=valid; Path=/; Secure'},content_type='text/html',body='<script>location.replace('+json.dumps(TARGET)+')</script>')
         elif path=='/sso/step':
             route.fulfill(status=200,content_type='text/html',body='<h1>Company SSO</h1><input name="username"><button>Next</button>')
+        elif path=='/dashboard/':
+            route.fulfill(status=200,content_type='text/html',body='<h1>Jenkins dashboard</h1>')
         elif path==PATH:
             authenticated='session=valid' in route.request.headers.get('cookie','')
-            if self.mode=='valid' or (self.mode in ('expired','no-link-expired','parent-shell') and authenticated):
+            if self.mode=='wrong-target' and authenticated:
+                route.fulfill(status=200,content_type='text/html',body='<script>location.replace('+json.dumps(HOST+'/dashboard/')+')</script>')
+            elif self.mode=='valid' or (self.mode in ('expired','no-link-expired','parent-shell') and authenticated):
                 route.fulfill(status=200,content_type='text/html',body=JOB)
             elif self.mode=='acl':
                 route.fulfill(status=403,content_type='text/html',body='<h1>Access Denied</h1><p>alice is missing the Job/Read permission</p>'+LINK)
@@ -146,6 +150,21 @@ class CachedSessionRecoveryTests(unittest.TestCase):
         self.assertIs(self.worker.context,old_context)
         self.assertIs(self.worker.page,old_page)
         self.assertEqual(self.requests.count('/j_security_check'),0)
+
+    def test_same_host_wrong_target_200_does_not_cache_or_continue(self):
+        self.mode='wrong-target';before=self.auth.read_bytes()
+        with self.assertRaisesRegex(NeedsAttention,'精确原目标'):
+            self.worker.wait_job(TARGET)
+        self.assertEqual(self.auth.read_bytes(),before)
+        self.assertEqual(self.requests.count('/j_security_check'),1)
+
+    def test_target_identity_preserves_encoded_gmx_branch_slashes(self):
+        from appbuilder.jenkins import same_target_url
+        target=HOST+'/job/upload%2FABC-123/'
+        self.assertTrue(same_target_url(target.rstrip('/'),target))
+        for other in (HOST+'/job/upload/ABC-123/',HOST+'/job/upload%252FABC-123/',
+                      HOST+'/job/other/',target+'?different=1'):
+            self.assertFalse(same_target_url(other,target))
 
     def test_no_saved_credentials_does_not_invent_auto_login(self):
         self.mode='ambiguous';self.worker.credentials=None
