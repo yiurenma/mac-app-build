@@ -504,7 +504,7 @@ def make_handler(csrf_token):
             try:
                 if p == '/':
                     return self._asset('index.html')
-                if p in ('/app.css', '/app.js'):
+                if p in ('/app.css', '/app.js', '/schedules.js'):
                     return self._asset(p[1:])
                 if p == '/api/health':
                     return self._send({'app': 'mac-app-builder', 'service': 'web-console', 'version': __version__})
@@ -539,6 +539,10 @@ def make_handler(csrf_token):
                     return self._send(poll_live_test(match[1]))
                 if p == '/api/doctor':
                     return self._send(get_doctor())
+                from .schedule_api import handle_get
+                handled = handle_get(p, parse_qs(u.query))
+                if handled is not None:
+                    return self._send(handled[1], status=handled[0])
                 self._failed(404, '未找到该页面')
             except (ValueError, KeyError, TypeError) as e:
                 self._failed(400, str(e))
@@ -599,6 +603,10 @@ def make_handler(csrf_token):
                 m = re.fullmatch(r'/api/tasks/([^/?]+)/resume', self.path)
                 if m:
                     return self._send({'task': resume_build(m[1], body)})
+                from .schedule_api import handle_post
+                handled = handle_post(self.path, body)
+                if handled is not None:
+                    return self._send(handled[1], status=handled[0])
                 self._failed(404, '不支持该操作')
             except (ValueError, KeyError, TypeError) as e:
                 self._failed(400, str(e))

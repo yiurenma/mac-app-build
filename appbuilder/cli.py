@@ -64,6 +64,12 @@ def args_parser():
     web.add_argument('--port', type=int, default=8765, help='本地页面端口（默认 8765）')
     web.add_argument('--no-open', action='store_true', help='只启动服务，不自动打开浏览器')
     web.add_argument('--update', action='store_true', help='启动前由 ./app-build 安全更新源码')
+    sched = sub.add_parser('scheduler', help='定时任务调度器（按 cron 自动创建构建）')
+    sched_sub = sched.add_subparsers(dest='scheduler_command', required=True)
+    sched_sub.add_parser('run', help='前台运行调度器（LaunchAgent 使用此命令）')
+    sched_sub.add_parser('install', help='安装并启动 macOS LaunchAgent：登录后自动运行、崩溃自动重启')
+    sched_sub.add_parser('uninstall', help='停止并移除 LaunchAgent')
+    sched_sub.add_parser('status', help='显示调度器状态与定时任务')
     auth = sub.add_parser('auth', help='仅首次保存 Jenkins 账号密码到 Mac Keychain')
     auth.add_argument('--jenkins-user', required=True)
     auth.add_argument('--jenkins-password', required=True)
@@ -223,6 +229,29 @@ def main(argv=None):
         doctor_check(load_config(), strict=False)
         from .web import serve
         serve(port=a.port, open_browser=not a.no_open)
+        return
+    if a.command == 'scheduler':
+        from . import scheduler
+        if a.scheduler_command == 'run':
+            try:
+                scheduler.run_forever()
+            except scheduler.AlreadyRunning as exc:
+                print('[SCHEDULER] ' + str(exc), flush=True)
+                raise SystemExit(0)
+        elif a.scheduler_command == 'install':
+            path = scheduler.install()
+            print(f'[SCHEDULER] 已安装并启动 LaunchAgent：{path}', flush=True)
+            print('[SCHEDULER] 之后登录 Mac 会自动运行；日志：.appbuilder/scheduler.log', flush=True)
+        elif a.scheduler_command == 'uninstall':
+            print('[SCHEDULER] 已移除 LaunchAgent' if scheduler.uninstall() else '[SCHEDULER] 未安装 LaunchAgent', flush=True)
+        else:
+            from . import schedules
+            beat = scheduler.heartbeat_status()
+            print(f"[SCHEDULER] {'在线' if beat['online'] else '离线'} pid={beat['pid']} "
+                  f"心跳={beat['age_seconds']}s 前", flush=True)
+            for row in schedules.list_schedules():
+                print(f"{row['id']} {'启用' if row['enabled'] else '停用'} {row['cron']:<16s} "
+                      f"下次={row['next_run'] or '-'} {row['name']}", flush=True)
         return
     if a.command == 'auth':
         setup_credentials(a)

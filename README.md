@@ -111,6 +111,10 @@ GMX 参数页按现场截图新增 `SKIP_TEST`（默认 true）、`FORCE`（默�
 
 更多说明见 [v0.6.4 Web 参数配置手册](docs/11-v0.6.4-Web参数补齐与验证.md)。
 
+## 定时任务
+
+在 Web Console 的 **Schedules** 页面输入 cron，由独立调度器自动创建构建；一次 `./app-build scheduler install` 即可开机自启。错过的时间只补跑最近一次，并发已满时排队。详见 [定时任务说明](docs/24-定时任务.md)。
+
 ## 0. 工作流
 
 1. 使用 Plugin 输入源分支创建 `release/<大版本>.<YYYYMMDDHHmm>`，两个 `.xcconfig` 的 `BUNDLE_VERSION_SHORT` 同步设为 `<大版本>.<时间戳>`，精确提交并 Push。

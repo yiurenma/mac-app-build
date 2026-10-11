@@ -60,3 +60,14 @@
 .live-checkboxes label,.live-confirm{display:flex!important;align-items:center;flex-direction:row!important;gap:7px!important;font-size:11px!important}
 .live-checkboxes input,.live-confirm input{width:16px!important;height:16px;accent-color:#70ddca}
 .live-confirm{background:#3a3025;border:1px solid #78664f;padding:12px;border-radius:8px;color:#ffdfb2!important}
+
+/* Schedules */
+.schedules-panel .sched-buttons{display:flex;gap:12px;align-items:center}
+.schedules-panel .diagnose-fields{grid-template-columns:repeat(auto-fit,minmax(200px,1fr))}
+.schedules-panel .table-wrap{margin-top:18px}
+.sched-actions{display:flex;gap:8px;flex-wrap:wrap}
+.sched-actions button{white-space:nowrap}
+.sched-cron{font:12px ui-monospace,monospace;color:#9fd8ff}
+.sched-link{cursor:pointer;text-decoration:underline;text-decoration-color:#3b5368}
+.schedule-runs{margin-top:22px}
+.sched-off td{opacity:.55}
