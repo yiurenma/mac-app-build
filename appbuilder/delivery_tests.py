@@ -90,7 +90,9 @@ def start(body):
             # Include older fixed-content tests: changing task must not silently replay an uncertain send.
             for previous in db.execute("SELECT result FROM tests WHERE kind='outlook' AND status IN ('SUBMITTING','UNKNOWN')"):
                 result=json.loads(previous['result'])
-                if result.get('to')==inputs['to'] and (not inputs['account'] or result.get('account')==inputs['account']):
+                same_recipients={address.lower() for address in result.get('to',[])}=={address.lower() for address in inputs['to']}
+                same_sender=not inputs['account'] or result.get('account','').lower()==inputs['account'].lower()
+                if same_recipients and same_sender:
                     uncertain=True;break
         if kind=='outlook' and uncertain:
             raise ValueError('同一目标已有结果不明的测试邮件，请先核对 Outlook 发件箱/已发送；禁止盲目重发')

@@ -97,15 +97,54 @@ class BrowserTests(unittest.TestCase):
         def fixture(route):
             path=route.request.url.split(BASE)[-1]
             if path=='/my':
-                html='<a href="/apps">APPS</a>'
+                html='''<div id="nav"></div><script>setTimeout(()=>document.querySelector('#nav').innerHTML='<a href="/apps">APPS</a>',250)</script>'''
             elif path=='/apps':
                 html='''<h1>IOS_Upload</h1><a hidden href="/wrong">IOS_Upload</a><div id="list"></div>
                 <script>setTimeout(()=>document.querySelector('#list').innerHTML='<a href="/folder1">IOS_Upload</a>',250)</script>'''
             else:return self.route(route)
             route.fulfill(content_type='text/html',body=html)
         self.context.route('**/*',fixture)
-        self.worker._folder('IOS_Upload/IOS_Release/custom_HK')
+        result=self.worker.find(expected_build(PARAMS,RUNTIME))
+        self.assertEqual(result['share_url'],BASE+'/join/current')
         self.assertTrue(self.worker.page.url.endswith('/folder3'))
+
+    def test_final_cards_load_in_current_directory_without_resetting_my(self):
+        self.context.unroute('**/*')
+        self.worker.config['testfairy']['wait_seconds']=3
+        visits=[]
+        def fixture(route):
+            path=route.request.url.split(BASE)[-1];visits.append(path)
+            if path=='/folder1':
+                html='''<div id="list"></div><script>setTimeout(()=>document.querySelector('#list').innerHTML='<a href="/folder2">IOS_Release</a>',250)</script>'''
+            elif path=='/folder3':
+                card='<article><pre>'+note()+'</pre><a href="/join/current">Share</a></article>'
+                html='<div id="list"></div><script>setTimeout(()=>document.querySelector("#list").innerHTML='+json.dumps(card)+',1200)</script>'
+            else:return self.route(route)
+            route.fulfill(content_type='text/html',body=html)
+        self.context.route('**/*',fixture)
+        result=self.worker.find(expected_build(PARAMS,RUNTIME))
+        self.assertEqual(result['share_url'],BASE+'/join/current')
+        self.assertEqual(visits.count('/folder3'),1)
+        self.assertNotIn('/my',visits[visits.index('/folder3')+1:])
+
+    def share_fixture(self, onclick=''):
+        self.context.unroute('**/*')
+        def fixture(route):
+            if route.request.url==BASE+'/folder3':
+                html='<aside><a href="/join/unrelated-app">Other App</a></aside><article><pre>'+note()+"</pre><button onclick='"+onclick+"'>Share</button></article>"
+                route.fulfill(content_type='text/html',body=html)
+            else:self.route(route)
+        self.context.route('**/*',fixture)
+
+    def test_share_without_owned_container_never_uses_other_app_link(self):
+        self.share_fixture()
+        with self.assertRaisesRegex(NeedsAttention,'不会从整页'):
+            self.worker.find(expected_build(PARAMS,RUNTIME))
+
+    def test_share_waits_for_new_dialog_and_ignores_unrelated_page_link(self):
+        dialog='<div role="dialog"><a href="/join/current">Share</a></div>'
+        self.share_fixture('setTimeout(()=>document.body.insertAdjacentHTML("beforeend",'+json.dumps(dialog)+'),250)')
+        self.assertEqual(self.worker.find(expected_build(PARAMS,RUNTIME))['share_url'],BASE+'/join/current')
 
     def test_current_breadcrumb_skips_ancestor_clicks(self):
         self.fixture_page('<nav aria-label="breadcrumb"><a>APPS</a><a>IOS_Upload</a><a>IOS_Release</a><span aria-current="page">custom_HK</span></nav><h1>custom_HK</h1>')

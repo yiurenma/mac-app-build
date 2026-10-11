@@ -216,11 +216,14 @@ class TestFairyBrowser:
                 if not submitted:
                     raise NeedsAttention('TestFairy 登录控件无法安全识别')
         deadline=time.monotonic()+(180 if self.visible else 25)
+        opened_apps=False
         while time.monotonic()<deadline:
             if not self._same_origin():raise NeedsAttention('TestFairy 认证跳转离开允许租户，已停止')
             if (self._same_origin() and urlsplit(self.page.url).path.rstrip('/')!='/login'
                     and not self.page.locator('input[type=password]').count()):
-                self.page.goto(self.base+'/my',wait_until='domcontentloaded')
+                if not opened_apps:
+                    self.page.goto(self.base+'/my',wait_until='domcontentloaded')
+                    opened_apps=True
                 if (self._same_origin() and not self.page.locator('input[type=password]').count()
                         and (self.page.get_by_text('APPS',exact=True).count()
                              or self.page.get_by_text(expected['path'].split('/')[0],exact=True).count())):
@@ -241,12 +244,7 @@ class TestFairyBrowser:
             raise NeedsAttention('TestFairy 会话已失效，停止查找，构建不会重跑')
         labels=path.split('/')
         selector=self.config.get('testfairy',{}).get('folder_selector',_FOLDER_SELECTOR)
-        root=self.page.evaluate(_FOLDER_CANDIDATES, {'label':labels[0],'parents':[],'path':labels,'selector':selector})
-        if not root['current'] and not root['indices']:
-            apps=self.page.evaluate(_FOLDER_CANDIDATES, {'label':'APPS','parents':[],'path':['APPS'],'selector':selector})
-            if len(apps['indices'])==1:
-                self.page.locator(selector).nth(apps['indices'][0]).click()
-                if not self._same_origin():raise NeedsAttention('APPS 跳转离开当前租户')
+        apps_activated=False
         for depth,label in enumerate(labels):
             deadline=time.monotonic()+3
             while True:
@@ -258,6 +256,15 @@ class TestFairyBrowser:
                     self.page.locator(self.config.get('testfairy',{}).get('folder_selector',_FOLDER_SELECTOR)).nth(evidence['indices'][0]).click()
                     if not self._same_origin():raise NeedsAttention('TestFairy 目录跳转离开当前租户')
                     break
+                if depth==0 and not evidence['indices'] and not apps_activated:
+                    apps=self.page.evaluate(_FOLDER_CANDIDATES, {'label':'APPS','parents':[],
+                        'path':['APPS'],'selector':selector})
+                    if len(apps['indices'])==1:
+                        self.page.locator(selector).nth(apps['indices'][0]).click()
+                        if not self._same_origin():raise NeedsAttention('APPS 跳转离开当前租户')
+                        apps_activated=True
+                        deadline=time.monotonic()+3  # wait for this directory transition as well
+                        continue
                 if time.monotonic()>=deadline:
                     # No page text, href values, credentials or query strings in diagnostics.
                     raise NeedsAttention('TestFairy 目录无法唯一定位：'+label+
@@ -270,10 +277,11 @@ class TestFairyBrowser:
     def find(self,expected):
         self.login(expected)
         cfg=self.config.get('testfairy',{})
+        self._folder(expected['path'])
         deadline=time.monotonic()+max(1,min(1800,float(cfg.get('wait_seconds',600))))
         selector=cfg.get('card_selector','article, .app-card, .build-card, .version-card, [data-build-id]')
         while True:
-            self._folder(expected['path'])
+            if not self._same_origin():raise NeedsAttention('等待 App 时离开 TestFairy 当前租户')
             cards=self.page.locator(selector)
             matches=[]
             for i in range(min(cards.count(),100)):
@@ -288,13 +296,25 @@ class TestFairyBrowser:
                     share=card.get_by_role('button',name=re.compile(r'^Share$',re.I))
                     if share.count()!=1:share=card.get_by_role('link',name=re.compile(r'^Share$',re.I))
                     if share.count()!=1:raise NeedsAttention('匹配 App 的现有 Share 入口无法唯一识别')
+                    if self.page.locator('[role="dialog"]:visible, dialog[open]:visible').count():
+                        raise NeedsAttention('Share 前已有可见弹窗，无法证明链接归属；请关闭后再测试')
                     share.click()
-                    if not self._same_origin():raise NeedsAttention('Share 页面离开 TestFairy 当前租户')
-                    dialog=self.page.get_by_role('dialog')
-                    scope=dialog if dialog.count()==1 else self.page
-                    links=scope.locator('a[href*="/join/"]')
-                    raw=[links.nth(i).get_attribute('href') for i in range(links.count())]
-                    raw += scope.locator('input[value*="/join/"]').evaluate_all('(xs)=>xs.map(x=>x.value)')
+                    share_deadline=time.monotonic()+3
+                    while True:
+                        if not self._same_origin():raise NeedsAttention('Share 页面离开 TestFairy 当前租户')
+                        dialog=self.page.locator('[role="dialog"]:visible, dialog[open]:visible')
+                        if dialog.count()>1:raise NeedsAttention('Share 出现多个弹窗，无法唯一证明当前 App 链接归属')
+                        # A newly opened unique dialog or the same verified card only; never search the page.
+                        scope=dialog if dialog.count()==1 else card
+                        if scope is card and (card.count()!=1 or not parse_candidate(card.inner_text(),expected)):
+                            raise NeedsAttention('Share 后原 App 卡片身份已变化，不能证明链接归属')
+                        links=scope.locator('a[href*="/join/"]')
+                        raw=[links.nth(i).get_attribute('href') for i in range(links.count())]
+                        raw += scope.locator('input[value*="/join/"]').evaluate_all('(xs)=>xs.map(x=>x.value)')
+                        if raw:break
+                        if time.monotonic()>=share_deadline:
+                            raise NeedsAttention('Share 未出现属于当前 App 的唯一链接容器；不会从整页或其他 App 取链接')
+                        self.page.wait_for_timeout(100)
                 else:raw=[links.nth(i).get_attribute('href') for i in range(links.count())]
                 urls={share_url(value,self.base) for value in raw if value}
                 if len(urls)!=1:raise NeedsAttention('未找到唯一已有分享链接；不会创建公开权限')
@@ -304,7 +324,7 @@ class TestFairyBrowser:
                 parsed.update(share_url=resolved,matched_at=datetime.now(timezone.utc).isoformat())
                 self._save_session();return parsed
             if time.monotonic()>=deadline:raise NeedsAttention('等待本次 GMX 对应 TestFairy App 超时；未取最新包，未生成邮件')
-            time.sleep(min(10,max(0,deadline-time.monotonic())))
+            self.page.wait_for_timeout(min(250,max(0,(deadline-time.monotonic())*1000)))
 
 
 def mail_preview(params,runtime,created):

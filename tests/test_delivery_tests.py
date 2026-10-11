@@ -65,6 +65,19 @@ class DeliveryTestAPIs(unittest.TestCase):
         self.assertEqual(dt.poll('a'*32)['status'],'UNKNOWN');self.assertEqual(adapter.submit.call_count,1)
         with patch('appbuilder.delivery_tests.time.time',return_value=9999999999):
             with self.assertRaisesRegex(ValueError,'结果不明'):dt.start({**self.mail,'request_id':'e'*32})
+    def test_unknown_guard_normalizes_recipient_order_duplicates_and_sender_case(self):
+        adapter=self.adapter();adapter.submit.side_effect=TimeoutError('uncertain')
+        original={**self.mail,'recipients':'One@example.com, two@example.com','account':'SENDER@example.com'}
+        with patch('appbuilder.outlook.OutlookAdapter',return_value=adapter):
+            dt.start(original)
+            with patch('appbuilder.delivery_tests.time.time',return_value=9999999999):
+                for changed in ({'recipients':'two@example.com, One@example.com'},
+                                {'account':'sender@EXAMPLE.COM'},
+                                {'recipients':'TWO@example.com, one@example.com, one@example.com','account':'sender@example.com'}):
+                    with self.assertRaisesRegex(ValueError,'结果不明'):
+                        dt.start({**original,**changed,'request_id':'e'*32})
+        self.assertEqual(adapter.submit.call_count,1)
+
     def test_test_email_requires_explicit_action_and_valid_target(self):
         for body in ({**self.mail,'confirm_send':False},{**self.mail,'recipients':'nickname'}):
             with self.assertRaises(ValueError):dt.start(body)
