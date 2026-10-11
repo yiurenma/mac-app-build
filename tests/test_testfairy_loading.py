@@ -150,6 +150,21 @@ class DirectoryLoadingTests(unittest.TestCase):
         self.assertLess(elapsed, 3.8, 'Share reset the total wait budget')
         self.assertIn(BASE+'/app', self.requests)
         self.assertEqual(sum(urlsplit(url).path == '/my' for url in self.requests), 1)
+    def test_browser_timeout_at_budget_boundary_preserves_cause_and_budget(self):
+        self.worker.page.goto(BASE+'/my')
+        self.worker._phase='share'
+        started=time.monotonic()
+        with self.assertRaises(NeedsAttention) as caught:
+            self.worker._lookup_action(self.worker.page.locator('#absent').inner_text,started+.01)
+        error=self.worker._diagnosed_error(caught.exception)
+        self.assertIn('总等待预算已用尽',str(error))
+        first=error.testfairy_diagnostics['first_error']
+        self.assertEqual(first['type'],'TimeoutError')
+        self.assertEqual(first['phase'],'share')
+        self.assertIn('Locator.inner_text',first['message'])
+        self.assertNotIn('总等待预算已用尽',first['message'])
+        self.assertLess(time.monotonic()-started,1)
+
     def test_plain_card_label_reports_structure_without_click_or_sensitive_attributes(self):
         import json
         from appbuilder.testfairy import _FOLDER_STRUCTURE, _FOLDER_SELECTOR

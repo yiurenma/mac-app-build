@@ -387,7 +387,9 @@ class TestFairyBrowser:
             message+='；未完成同源请求 '+str(state['pending_requests'])+'；请求类型/持续秒数 '+json.dumps(state.get('pending_structure',[]),ensure_ascii=False)+'（不能据此判断目录仍在加载；不采集请求地址或内容）'
         if self._network_errors:
             message+='；观测到同源请求错误 '+', '.join(self._network_errors)+'（未确认是否目录接口；不包含地址查询、请求体或响应内容）'
-        raise NeedsAttention(message+'；未改分享权限或重新构建')
+        error=NeedsAttention(message+'；未改分享权限或重新构建')
+        error.lookup_budget_exhausted=stage=='页面操作总等待预算已用尽'
+        raise error
 
     def _lookup_action(self,action,deadline,**kwargs):
         if time.monotonic()>=deadline:
@@ -534,6 +536,8 @@ class TestFairyBrowser:
         summary=dict(self.trace.summary)
         first=summary.get('first_error') or {}
         message=first.get('message','查找失败').split('；目标名称只读结构')[0][:360]
+        if getattr(exc,'lookup_budget_exhausted',False):
+            message+='；页面操作总等待预算已用尽'
         error=NeedsAttention('TestFairy '+first.get('phase',stage)+'：'+message+'；诊断日志 '+summary['log_path'])
         error.testfairy_diagnostics=summary
         return error

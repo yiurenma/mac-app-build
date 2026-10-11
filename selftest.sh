@@ -28,6 +28,6 @@ for i in 1 2 3; do
   ) > "$log" 2>&1 || { echo "第 $i 轮失败，请查看 $log" >&2; tail -n 100 "$log" >&2; exit 1; }
   # Keep checked-in evidence whitespace-clean despite unittest's progress output.
   "$PY" -c 'import pathlib,sys; p=pathlib.Path(sys.argv[1]); p.write_text("\n".join(line.rstrip() for line in p.read_text().splitlines())+"\n")' "$log"
-  grep -E 'Ran [0-9]+ tests|^OK$' "$log" || true
+  grep -E 'Ran [0-9]+ tests|^OK|\.\.\. skipped ' "$log" || true
 done
 echo '三轮离线回归完成。真正 Nexus/SSO/Jenkins/上传仍须在 Mac 内网联调。'
