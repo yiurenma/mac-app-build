@@ -67,8 +67,12 @@ class SharedBuildUITests(unittest.TestCase):
         self.assertEqual(self.form.locator('[name=gmx_custom_folder]').count(), 1)
         self.assertEqual(p.locator('#schedules input, #schedules select').count(), 0)
         self.assertEqual(self.form.locator('#gmx-settings [name^=selector_]').count(), 8)
+        self.assertEqual(self.form.locator('#gmx-settings [name=upload_success_pattern]').count(),1)
+        self.assertEqual(self.form.locator('#advanced-settings [name=upload_success_pattern]').count(),0)
         self.assertEqual(p.locator('#derived-gmx').text_content(), 'upload/AUTO-[timestamp]')
         self.open_details()
+        self.assertIn('0_A_<国家>_<项目>',self.field('gmx_custom_folder').locator('..').inner_text())
+        self.assertIn('0_A_<国家>_<项目>',p.locator('#gmx-build-live-form [name=custom_folder]').locator('..').inner_text())
         self.assertEqual(p.locator('input:not([type=hidden]),select').evaluate_all('''nodes=>nodes.filter(n=>{
           const label=n.closest('label');return !label||!label.querySelector('small')||!/[\\u4e00-\\u9fff]/.test(label.textContent);
         }).map(n=>n.name||n.id)'''), [])
@@ -101,6 +105,7 @@ class SharedBuildUITests(unittest.TestCase):
         self.field('poll_seconds').fill('55')
         self.field('browser_channel').select_option('msedge')
         self.field('selector_force').fill('#custom-force')
+        self.field('upload_success_pattern').fill('UPLOAD.*SUCCESS')
         self.field('visible').uncheck();self.field('verbose').uncheck()
         self.field('gmx_force').uncheck();self.field('gmx_keep_alive').check()
         self.field('country').select_option('ALL')

@@ -67,6 +67,7 @@
 <label class="field-toggle span-2">同步上传 · SYNC_UPLOAD<input data-build name="gmx_sync_upload" type="checkbox"><small class="label-help">默认开启：等待同步上传流程；关闭：触发下游上传，当前 Build 成功不能单独证明上传完成。</small></label>
 <label class="field-toggle span-2">保留节点 · KEEP_ALIVE<input data-build name="gmx_keep_alive" type="checkbox"><small class="label-help">默认关闭：构建结束释放节点；开启：为 CI 调试保留节点，请按公司规范使用。</small></label>
 </div>
+<div class="form-grid"><label class=" ">上传成功日志规则 · upload_success_pattern<input data-build name="upload_success_pattern" placeholder="留空：仅确认 Jenkins SUCCESS" maxlength="200"><small class="label-help">默认留空，仅确认 Jenkins SUCCESS；可填正则表达式，要求最终上传日志同时匹配。</small></label></div>
 <details class="selectors-panel"><summary>GMX 高级定位器 · 自动识别失败时填写</summary><div class="form-grid"><label class=" span-2">实体定位器 · ENTITIES CSS<input data-build name="selector_entities" maxlength="256" placeholder="自动识别"><small class="label-help">默认留空，自动识别 Jenkins 控件；仅识别失败时填写该控件的 CSS 选择器，例如 #field。</small></label>
 <label class=" span-2">同步上传定位器 · SYNC_UPLOAD CSS<input data-build name="selector_sync_upload" maxlength="256" placeholder="自动识别"><small class="label-help">默认留空，自动识别 Jenkins 控件；仅识别失败时填写该控件的 CSS 选择器，例如 #field。</small></label>
 <label class=" span-2">上传目录定位器 · CUSTOM_FOLDER CSS<input data-build name="selector_custom_folder" maxlength="256" placeholder="自动识别"><small class="label-help">默认留空，自动识别 Jenkins 控件；仅识别失败时填写该控件的 CSS 选择器，例如 #field。</small></label>
@@ -92,7 +93,7 @@
 <label class=" ">构建等待上限 · build_timeout_minutes<input type="number" data-build name="build_timeout_minutes" min="1" max="1440" step="1" required><small class="label-help">默认 180 分钟，超过则标记超时，1–1440。</small></label>
 <label class=" ">Callback 等待上限 · callback_timeout_minutes<input type="number" data-build name="callback_timeout_minutes" min="1" max="240" step="1" required><small class="label-help">默认 30 分钟，等待回调构建完成，1–240。</small></label>
 <label class=" ">允许 Git 变更行数 · max_changed_lines<input type="number" data-build name="max_changed_lines" min="1" max="100000" step="1" required><small class="label-help">默认 100 行，超出则停止自动提交；填 1–100000 的整数。</small></label>
-<label class=" ">上传成功日志规则 · upload_success_pattern<input data-build name="upload_success_pattern" placeholder="留空：仅确认 Jenkins SUCCESS" maxlength="200"><small class="label-help">默认留空，仅确认 Jenkins SUCCESS；可填正则表达式，要求最终上传日志同时匹配。</small></label>
+
 </div><div class="group-head group-divider">本机凭据</div><div class="form-grid"><label class=" span-2">GitHub 访问令牌 · github_token<input data-build name="github_token" type="password" placeholder="首次输入后保存到 Mac Keychain" autocomplete="off" maxlength="4096"><small class="label-help">首次填写 PAT 后保存到本机 Mac Keychain；留空使用已保存凭据。分支列表只由本机服务读取令牌，浏览器不会获得已保存令牌。</small></label>
 <label class=" ">Jenkins 用户名 · jenkins_user<input data-build name="jenkins_user" placeholder="Corporate username" autocomplete="username" maxlength="256"><small class="label-help">首次填写公司账号，须与密码同时填写；留空使用本机 Keychain。</small></label>
 <label class=" ">Jenkins 密码 · jenkins_password<input data-build name="jenkins_password" type="password" placeholder="••••••••" autocomplete="new-password"><small class="label-help">与用户名一起保存到本机 Keychain；留空使用已保存凭据，定时模板不保存密码。</small></label>
