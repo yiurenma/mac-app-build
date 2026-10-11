@@ -8,6 +8,36 @@ from appbuilder.outlook import recipients,preferences,OutlookAdapter,notify_outc
 from appbuilder.jenkins import NeedsAttention
 
 class OutlookTests(unittest.TestCase):
+    def test_probe_distinguishes_missing_empty_and_invalid_account_shapes(self):
+        adapter=OutlookAdapter()
+        cases=[({},'probe_response'),({'accounts':[]},'0 个账号'),
+               ({'accounts':[{'email':'bad','id':None}]},'"fields": ["email", "id"]'),
+               ({'accounts':[None]},'record')]
+        for payload,reason in cases:
+            with self.subTest(payload=payload),patch.object(adapter,'_dictionary'),patch.object(adapter,'_script',return_value=payload):
+                with self.assertRaisesRegex(NeedsAttention,'账号') as error:adapter.probe()
+                self.assertIn(reason,str(error.exception))
+
+    def test_explicit_sender_can_ignore_only_provably_unrelated_invalid_account(self):
+        adapter=OutlookAdapter()
+        payload={'accounts':[{'email':' work@example.com ','id':'1'}, {'email':'other@example.com','id':None}]}
+        with patch.object(adapter,'_dictionary'),patch.object(adapter,'_script',return_value=payload):
+            self.assertEqual(adapter.resolve('WORK@example.com')['id'],'1')
+            with self.assertRaisesRegex(NeedsAttention,'无法证明唯一'):adapter.resolve()
+            for bad_email in (None,'invalid','work@example.com'):
+                payload['accounts'][1]['email']=bad_email
+                with self.assertRaisesRegex(NeedsAttention,'可能与目标邮箱重复'):adapter.resolve('work@example.com')
+
+    def test_probe_rejects_stringified_missing_ids_and_reports_counts_without_secret_values(self):
+        adapter=OutlookAdapter()
+        for identifier in ('undefined','null','',None,False,0,'0'):
+            payload={'accounts':[{'email':'work@example.com','id':identifier}]}
+            with patch.object(adapter,'_dictionary'),patch.object(adapter,'_script',return_value=payload):
+                with self.assertRaises(NeedsAttention) as error:adapter.probe()
+            self.assertIn('"returned": 1',str(error.exception))
+            self.assertIn('"valid": 0',str(error.exception))
+            self.assertNotIn('work@example.com',str(error.exception))
+
     def test_recipients_are_explicit_addresses(self):
         self.assertEqual(recipients('a@example.com; b@example.com,a@example.com'),['a@example.com','b@example.com'])
         for value in ('Alice','a@example.com\nBcc: evil@example.com','Alice <a@example.com>','a..b@example.com','a@example..com'):

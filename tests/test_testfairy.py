@@ -111,7 +111,7 @@ class BrowserTests(unittest.TestCase):
 
     def test_final_cards_load_in_current_directory_without_resetting_my(self):
         self.context.unroute('**/*')
-        self.worker.config['testfairy']['wait_seconds']=3
+        self.worker.config['testfairy']['wait_seconds']=4
         visits=[]
         def fixture(route):
             path=route.request.url.split(BASE)[-1];visits.append(path)
@@ -138,14 +138,74 @@ class BrowserTests(unittest.TestCase):
         self.context.route('**/*',fixture)
 
     def test_share_without_owned_container_never_uses_other_app_link(self):
+        self.worker.config['testfairy']['wait_seconds']=4
         self.share_fixture()
         with self.assertRaisesRegex(NeedsAttention,'不会从整页'):
             self.worker.find(expected_build(PARAMS,RUNTIME))
 
     def test_share_waits_for_new_dialog_and_ignores_unrelated_page_link(self):
+        self.worker.config['testfairy']['wait_seconds']=4  # includes navigation and the asynchronous dialog
         dialog='<div role="dialog"><a href="/join/current">Share</a></div>'
         self.share_fixture('setTimeout(()=>document.body.insertAdjacentHTML("beforeend",'+json.dumps(dialog)+'),250)')
         self.assertEqual(self.worker.find(expected_build(PARAMS,RUNTIME))['share_url'],BASE+'/join/current')
+
+    def test_real_folder_cards_with_app_name_title_follow_exact_path(self):
+        self.worker.config['testfairy']['wait_seconds']=4
+        self.context.unroute('**/*')
+        def fixture(route):
+            path=route.request.url.split(BASE)[-1]
+            levels={'/my':('IOS_Upload','/folder1'),'/folder1':('IOS_Release','/folder2'),
+                    '/folder2':('custom_HK','/folder3')}
+            if path not in levels:return self.route(route)
+            label,target=levels[path]
+            card='<div class="folder-card large-text"><img src="/images/app/badger/ic-play-folder.png"><span class="app-name large-text" title="'+label+'">'+label+'</span></div>'
+            html='<main><div class="folder-container large-text">'+card+'<div hidden>'+card+'</div></div></main>'
+            # An unrelated card outside the actual directory container is never eligible.
+            html+=card+'<script>document.querySelector(".folder-container > .folder-card").addEventListener("click",()=>location.href='+json.dumps(target)+')</script>'
+            route.fulfill(content_type='text/html',body=html)
+        self.context.route('**/*',fixture)
+        result=self.worker.find(expected_build(PARAMS,RUNTIME))
+        self.assertEqual(result['share_url'],BASE+'/join/current')
+
+    def test_real_folder_cards_with_duplicate_names_stop_without_click(self):
+        card='<div class="folder-card large-text"><span class="app-name large-text" title="IOS_Upload">IOS_Upload</span></div>'
+        self.fixture_page('<main><div class="folder-container large-text">'+card+card+'</div></main>')
+        with self.assertRaisesRegex(NeedsAttention,'可见交互候选 2'):
+            self.worker._folder('IOS_Upload')
+        self.assertTrue(self.worker.page.url.endswith('/my'))
+
+    def test_real_folder_card_title_text_conflict_is_not_clicked(self):
+        self.fixture_page('<main><div class="folder-container"><div class="folder-card"><span class="app-name" title="Other">IOS_Upload</span></div></div></main>')
+        with self.assertRaisesRegex(NeedsAttention,'可见交互候选 0'):
+            self.worker._folder('IOS_Upload')
+        self.assertTrue(self.worker.page.url.endswith('/my'))
+
+    def test_multiple_real_folder_containers_match_only_exact_name(self):
+        labels=['0_A_UKPBB','0_A_UKPBB_CUTTING_EDGE','0_A_UK_PayByBank','0_A_UK_PayByBank_CUTTING_EDGE','0_A_UK_PBB']
+        html='<app-my><div class="my-main main-store"><div class="contents"><div class="main">'
+        for label in labels:
+            html+='<div class="folder-container large-text"><div class="folder-card large-text"><span class="app-name large-text" title="'+label+'">'+label+'</span></div></div>'
+        html+='</div></div></div></app-my><script>document.querySelectorAll(".folder-card").forEach(e=>e.addEventListener("click",()=>window.chosen=e.querySelector(".app-name").textContent))</script>'
+        self.fixture_page(html)
+        self.worker._folder('0_A_UK_PayByBank')
+        self.assertEqual(self.worker.page.evaluate('window.chosen'),'0_A_UK_PayByBank')
+
+    def test_real_app_toolbar_reads_join_only_for_exact_saved_build(self):
+        expected=expected_build(PARAMS,RUNTIME)
+        for mode in ('exact','missing','wrong'):
+            with self.subTest(mode=mode):
+                metadata=note() if mode=='exact' else (note(number=8) if mode=='wrong' else 'HSBC UK develop 3.76.0 (130425) Uploaded')
+                html='<div class="app-container"><div class="app-card"><pre>'+metadata+'</pre><app-build-actions-toolbar><div class="actions"><a class="action share-icon" href="/join/current" target="_blank"><img title="Share" alt="Share"></a><a href="/download?token=DOWNLOAD_SECRET">Download</a></div></app-build-actions-toolbar></div></div><script>window.clicked=0;document.querySelectorAll("a").forEach(e=>e.addEventListener("click",()=>window.clicked++))</script>'
+                self.fixture_page(html)
+                self.worker._observe_loading()
+                with patch.object(self.worker,'login'),patch.object(self.worker,'_folder',side_effect=lambda *a:self.worker.page.goto(BASE+'/my')):
+                    if mode=='exact':
+                        result=self.worker.find(expected)
+                        self.assertEqual(result['share_url'],BASE+'/join/current')
+                        self.assertNotIn('DOWNLOAD_SECRET',json.dumps(result))
+                    else:
+                        with self.assertRaises(NeedsAttention):self.worker.find(expected)
+                self.assertEqual(self.worker.page.evaluate('window.clicked'),0)
 
     def test_current_breadcrumb_skips_ancestor_clicks(self):
         self.fixture_page('<nav aria-label="breadcrumb"><a>APPS</a><a>IOS_Upload</a><a>IOS_Release</a><span aria-current="page">custom_HK</span></nav><h1>custom_HK</h1>')
@@ -168,18 +228,21 @@ class BrowserTests(unittest.TestCase):
         self.assertTrue(self.worker.page.url.endswith('/my'))
 
     def test_login_native_csrf_exact_card_and_existing_link(self):
+        self.worker.config['testfairy']['wait_seconds']=4
         result=self.worker.find(expected_build(PARAMS,RUNTIME))
         self.assertEqual(result['share_url'],BASE+'/join/current')
         self.assertEqual(result['app_version'],'3.76.0')
         self.assertEqual([p for p,m in self.requests if m=='POST'],['/login/'])
         self.assertFalse(self.worker.auth_path.exists())
     def test_duplicate_matches_stop(self):
+        self.worker.config['testfairy']['wait_seconds']=4
         self.mode='multiple'
         with self.assertRaisesRegex(NeedsAttention,'多个'):self.worker.find(expected_build(PARAMS,RUNTIME))
     def test_wrong_build_times_out_without_using_latest(self):
         self.mode='wrong'
         with self.assertRaisesRegex(NeedsAttention,'超时'):self.worker.find(expected_build(PARAMS,RUNTIME))
     def test_no_existing_share_does_not_enable_public_access(self):
+        self.worker.config['testfairy']['wait_seconds']=4
         self.mode='permission'
         with self.assertRaisesRegex(NeedsAttention,'Share'):self.worker.find(expected_build(PARAMS,RUNTIME))
         self.assertFalse(any('enable' in p for p,m in self.requests))

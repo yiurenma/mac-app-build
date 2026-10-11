@@ -126,7 +126,7 @@ class DirectoryLoadingTests(unittest.TestCase):
 
     def test_multiple_directories_and_share_use_one_total_budget(self):
         import json
-        self.worker.config['testfairy']['wait_seconds'] = 1.8
+        self.worker.config['testfairy']['wait_seconds'] = 3
         expected = {'path': 'IOS_Upload/IOS_Develop', 'folder': 'fixture', 'number': 7,
                     'sha': 'a' * 40, 'build_url': 'https://build.example/job/upload/7/'}
         def delayed_link(label, target):
@@ -138,14 +138,53 @@ class DirectoryLoadingTests(unittest.TestCase):
         note = ('3.76.0 (130363)\nBuild number: 7\nBuild URL: ' + expected['build_url']
                 + '\nFolder Param: fixture\nCommitSHA: ' + expected['sha'])
         dialog = '<div role="dialog"><a href="/join/current">Share</a></div>'
-        onclick = 'setTimeout(()=>document.body.insertAdjacentHTML("beforeend",'+json.dumps(dialog)+'),1300)'
+        onclick = 'window.shareClicked=true;setTimeout(()=>document.body.insertAdjacentHTML("beforeend",'+json.dumps(dialog)+'),2600)'
         self.pages['/app'] = '<article><pre>'+note+"</pre><button onclick='"+onclick+"'>Share</button></article>"
         started = time.monotonic()
         with patch.object(self.worker, 'login'), self.assertRaises(NeedsAttention) as caught:
             self.worker.find(expected)
         elapsed = time.monotonic()-started
-        self.assertIn('Share', str(caught.exception))
-        self.assertGreaterEqual(elapsed, 1.7)
-        self.assertLess(elapsed, 2.5, 'Share reset the total wait budget')
+        self.assertTrue(self.worker.page.evaluate('window.shareClicked === true'))
+        self.assertRegex(str(caught.exception), 'Share|总等待预算已用尽')
+        self.assertGreaterEqual(elapsed, 2.9)
+        self.assertLess(elapsed, 3.8, 'Share reset the total wait budget')
         self.assertIn(BASE+'/app', self.requests)
         self.assertEqual(sum(urlsplit(url).path == '/my' for url in self.requests), 1)
+    def test_plain_card_label_reports_structure_without_click_or_sensitive_attributes(self):
+        import json
+        from appbuilder.testfairy import _FOLDER_STRUCTURE, _FOLDER_SELECTOR
+        self.pages['/my'] = '''<aside>SIDEBAR_SECRET</aside><main><div class="CLASS_SECRET" data-secret="ATTR_SECRET">
+        <span aria-label="ARIA_SECRET">IOS_Upload</span></div><div hidden>IOS_Upload</div></main>'''
+        message = self.folder_error(self.pages['/my'], seconds=.3)
+        structure = self.worker.page.evaluate(_FOLDER_STRUCTURE, {'label':'IOS_Upload','selector':_FOLDER_SELECTOR})
+        self.assertEqual(structure['scope'], 'main')
+        self.assertEqual(structure['exactVisibleLabels'], 1)
+        self.assertEqual(structure['nodes'][0]['node']['tag'], 'span')
+        self.assertIn('outside_selector',structure['nodes'][0]['exclusionReasons'])
+        self.assertIn('accessible_name_mismatch',structure['nodes'][0]['exclusionReasons'])
+        self.assertIn('可见交互候选 0',message)
+        self.assertIn('目标名称只读结构',message)
+        for secret in ('SIDEBAR_SECRET','CLASS_SECRET','ATTR_SECRET','ARIA_SECRET'):
+            self.assertNotIn(secret,message+json.dumps(structure))
+        self.assertEqual([urlsplit(url).path for url in self.requests], ['/my'])
+
+    def test_network_pending_alone_is_not_dom_loading_evidence(self):
+        from appbuilder.jenkins import NeedsAttention
+        self.pages['/my']='<main><div role="tree" aria-busy="false"></div></main>'
+        self.worker._observe_loading()
+        self.worker.page.goto(BASE+'/my')
+        self.worker._pending[123456]={'type':'fetch','started':time.monotonic()-30}
+        self.worker._pending[123457]={'type':'xhr','started':time.monotonic()-20}
+        state=self.worker._lookup_state()
+        self.assertFalse(state['busy'])
+        self.assertTrue(state['ready'])
+        self.assertGreaterEqual(state['pending_requests'],2)
+        self.assertEqual(state['pending_structure'][0]['type'],'fetch')
+        self.assertGreaterEqual(state['pending_structure'][0]['age_seconds'],30)
+        self.assertEqual(state['pending_structure'][1]['type'],'xhr')
+        with self.assertRaises(NeedsAttention) as error:
+            self.worker._lookup_failure('目录 IOS_Upload',state)
+        self.assertIn('列表已就绪',str(error.exception))
+        self.assertIn('不能据此判断目录仍在加载',str(error.exception))
+        self.assertIn('不采集请求地址或内容',str(error.exception))
+        self.assertIn('fetch',str(error.exception))

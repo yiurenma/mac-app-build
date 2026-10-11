@@ -143,7 +143,11 @@ def start(body):
                         **call_diagnostic(exc),'account':account['email'],'to':inputs['to'],'task_id':inputs['task_id']});return
                 finish(test_id,'SUBMITTED',{**result,'message':'已提交本机 Outlook；尚未验证服务器发出或收件人送达','account':account['email'],'to':inputs['to']})
         except (NeedsAttention,ValueError) as exc:
-            finish(test_id,'BLOCKED',{'message':safe_text(str(exc))})
+            diagnostic={}
+            if kind=='outlook' and hasattr(exc,'stage'):
+                from .outlook import call_diagnostic
+                diagnostic=call_diagnostic(exc)
+            finish(test_id,'BLOCKED',{'message':safe_text(str(exc)),**diagnostic})
         except Exception:
             finish(test_id,'ERROR',{'message':'测试未完成；请检查本机浏览器/Outlook。不会记录密码或自动重发'})
         finally:

@@ -52,6 +52,17 @@ class DeliveryTestAPIs(unittest.TestCase):
             with self.assertRaisesRegex(ValueError,'历史构建'):dt.start({**self.mail,'task_id':''})
         build.assert_not_called()
 
+    def test_account_probe_failure_preserves_pre_send_stage(self):
+        from appbuilder.outlook import OutlookCallError
+        adapter=self.adapter()
+        adapter.resolve.side_effect=OutlookCallError('probe_accounts','账号集合为空',not_submitted=True)
+        with patch('appbuilder.outlook.OutlookAdapter',return_value=adapter):dt.start(self.mail)
+        result=dt.poll('a'*32)
+        self.assertEqual(result['status'],'BLOCKED')
+        self.assertEqual(result['result']['stage'],'probe_accounts')
+        self.assertFalse(result['result']['send_attempted'])
+        adapter.submit.assert_not_called()
+
     def test_duplicate_id_and_concurrent_clicks_do_not_send_twice(self):
         adapter=self.adapter()
         with patch('appbuilder.outlook.OutlookAdapter',return_value=adapter):

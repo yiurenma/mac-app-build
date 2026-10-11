@@ -45,9 +45,28 @@ def preferences(body):
 
 
 PROBE_JS='''function run(argv) {
- const app=Application('Microsoft Outlook');
- const accounts=app.exchangeAccounts().concat(app.imapAccounts(),app.popAccounts());
- return JSON.stringify({version:app.version(),accounts:accounts.map(a=>({email:a.emailAddress(),id:String(a.id())}))});
+ let stage='probe_application';
+ try {
+  const app=Application('Microsoft Outlook');
+  stage='probe_version';const version=app.version();
+  const accounts=[], collections=[];
+  for(const type of ['exchangeAccounts','imapAccounts','popAccounts']) {
+   stage='probe_'+type;const found=app[type]();
+   if(!Array.isArray(found))throw Error('Account collection is not an array');
+   collections.push({type:type,count:found.length});
+   found.forEach(a=>{
+    const record={type:type,field_errors:[]};
+    for(const [key,property] of [['email','emailAddress'],['id','id']]) {
+     try {const value=a[property]();record[key]=value==null?null:String(value);}
+     catch(e){record[key]=null;record.field_errors.push({field:key,error_number:e.errorNumber||null});}
+    }
+    accounts.push(record);
+   });
+  }
+  return JSON.stringify({status:'OK',version:version,accounts:accounts,collections:collections});
+ } catch(e) {
+  return JSON.stringify({status:'ERROR',stage:stage,send_attempted:false,error:String(e),error_number:e.errorNumber||null});
+ }
 }'''
 SEND_JS='''ObjC.import('Foundation');
 function run(argv) {
@@ -58,7 +77,13 @@ function run(argv) {
   const app=Application('Microsoft Outlook');
   stage='resolve_account';
   const accounts=app.exchangeAccounts().concat(app.imapAccounts(),app.popAccounts());
-  const matches=accounts.filter(a=>a.emailAddress().toLowerCase()===p.account.toLowerCase()&&String(a.id())===p.account_id);
+  const matches=accounts.filter(a=>{
+   const email=a.emailAddress();
+   if(typeof email!=='string'||!email.trim())throw Error('Unreadable account identity; no message created');
+   if(email.trim().toLowerCase()!==p.account.toLowerCase())return false;
+   const id=a.id();if(id==null||String(id)!==p.account_id)throw Error('Matching account ID changed; no message created');
+   return true;
+  });
   if(matches.length!==1)throw Error('Account changed; no message created');
   stage='create_message';
   const msg=app.OutgoingMessage({subject:p.subject,plainTextContent:p.body});
@@ -105,35 +130,68 @@ class OutlookAdapter:
         except (OSError,ValueError,ET.ParseError,subprocess.TimeoutExpired):
             raise NeedsAttention('当前 Outlook 未提供所需原生脚本接口；不保证新版 Outlook 支持，保留预览且不发送') from None
     def _script(self,source,args=()):
+        probe_only=source==PROBE_JS
         try:
             result=subprocess.run(['/usr/bin/osascript','-l','JavaScript','-e',source,*args],capture_output=True,text=True,timeout=60)
         except subprocess.TimeoutExpired:
+            if probe_only:
+                raise OutlookCallError('probe_timeout','只读账号检查超过 60 秒；未创建或发送邮件',not_submitted=True) from None
             raise OutlookCallError('timeout','原生调用超过 60 秒；发送可能已开始，请核对发件箱/已发送') from None
         except OSError as exc:
-            raise OutlookCallError('invoke',exc,not_submitted=exc.errno in (errno.ENOENT,errno.EACCES,errno.ENOEXEC)) from None
+            raise OutlookCallError('probe_invoke' if probe_only else 'invoke',exc,
+                not_submitted=probe_only or exc.errno in (errno.ENOENT,errno.EACCES,errno.ENOEXEC)) from None
         if result.returncode:
-            raise OutlookCallError('native_call',f'退出代码 {result.returncode}: '+(result.stderr or '无错误输出'),returncode=result.returncode)
+            raise OutlookCallError('probe_native_call' if probe_only else 'native_call',
+                ('只读账号检查失败，未创建或发送邮件；' if probe_only else '')+
+                f'退出代码 {result.returncode}: '+(result.stderr or '无错误输出'),
+                not_submitted=probe_only,returncode=result.returncode)
         try:
             payload=json.loads(result.stdout)
             if not isinstance(payload,dict):raise ValueError()
         except (ValueError,TypeError):
+            if probe_only:
+                raise OutlookCallError('probe_response_parse','只读账号检查返回不是有效 JSON 对象；未创建或发送邮件，不回显原始内容',not_submitted=True) from None
             raise OutlookCallError('response_parse','原生返回不是有效 JSON 对象；不回显原始内容，发送结果需人工核对') from None
         if payload.get('status')=='ERROR':
             stage=payload.get('stage','native_call')
-            if stage not in {'read_payload','resolve_account','create_message','set_account','set_recipients','message_id','send','response'}:stage='native_call'
+            probe_stages={'probe_application','probe_version','probe_exchangeAccounts','probe_imapAccounts','probe_popAccounts'}
+            if stage not in {'read_payload','resolve_account','create_message','set_account','set_recipients','message_id','send','response'}|probe_stages:stage='native_call'
             raise OutlookCallError(stage,payload.get('error','未知原生错误'),
-                not_submitted=payload.get('send_attempted') is False and stage in {
-                    'read_payload','resolve_account','create_message','set_account','set_recipients','message_id'},error_number=payload.get('error_number'))
+                not_submitted=payload.get('send_attempted') is False and stage in ({
+                    'read_payload','resolve_account','create_message','set_account','set_recipients','message_id'}|probe_stages),error_number=payload.get('error_number'))
         return payload
     def probe(self):
         self._dictionary()
         result=self._script(PROBE_JS)
-        accounts=result.get('accounts',[])
-        if not accounts or any(not valid_address(a.get('email','')) or not a.get('id') for a in accounts):
-            raise NeedsAttention('Outlook 未返回可核验的已登录账号，不能自动发送')
-        return result
+        accounts=result.get('accounts')
+        if not isinstance(accounts,list):
+            raise OutlookCallError('probe_response','账号集合缺失或不是列表；不能据此判断登录状态或 Outlook 模式',not_submitted=True)
+        if not accounts:
+            raise OutlookCallError('probe_accounts','原生接口返回 0 个账号；请检查 Outlook 当前账户及原生脚本支持，不能据此断言未登录',not_submitted=True)
+        valid=[];invalid=[];unverified=[]
+        for index,account in enumerate(accounts):
+            fields=[]
+            if not isinstance(account,dict):
+                invalid.append({'index':index,'fields':['record']});unverified.append(None);continue
+            email=account.get('email');email=email.strip() if isinstance(email,str) else email
+            identifier=account.get('id')
+            if not valid_address(email):fields.append('email')
+            if (not isinstance(identifier,(str,int)) or isinstance(identifier,bool)
+                    or str(identifier).strip().lower() in ('','0','none','null','undefined','nan')):fields.append('id')
+            if fields:
+                invalid.append({'index':index,'fields':fields})
+                unverified.append(email if valid_address(email) else None)
+            else:valid.append({**account,'email':email,'id':str(identifier)})
+        diagnostics={'returned':len(accounts),'valid':len(valid),'invalid':invalid}
+        if not valid:
+            raise OutlookCallError('probe_accounts','账号校验失败：'+json.dumps(diagnostics,ensure_ascii=False),not_submitted=True)
+        return {**result,'accounts':valid,'account_diagnostics':diagnostics,'unverified_account_emails':unverified}
     def resolve(self,requested=''):
         result=self.probe();accounts=result['accounts']
+        if not requested and result.get('account_diagnostics',{}).get('invalid'):
+            raise OutlookCallError('resolve_account','账号列表包含不完整记录，无法证明唯一发件账号；请明确填写目标公司邮箱。'+json.dumps(result['account_diagnostics'],ensure_ascii=False),not_submitted=True)
+        if requested and any(email is None or email.lower()==requested.lower() for email in result.get('unverified_account_emails',[])):
+            raise OutlookCallError('resolve_account','不完整账号可能与目标邮箱重复，无法唯一核验；请检查 Outlook 账号接口。'+json.dumps(result['account_diagnostics'],ensure_ascii=False),not_submitted=True)
         choices=[a for a in accounts if a['email'].lower()==requested.lower()] if requested else accounts
         if len(choices)!=1:raise NeedsAttention('Outlook 发件账号不唯一，请在表单明确填写已登录公司邮箱')
         return choices[0]

@@ -126,12 +126,18 @@ def share_url(raw, base):
     return urlunsplit(('https',u.hostname.lower(),u.path,u.query,''))
 
 
-_FOLDER_SELECTOR = 'a, button, [role="treeitem"], [role="button"], [role="link"], [onclick], [data-folder-id], .folder-node'
+_FOLDER_SELECTOR = 'a, button, [role="treeitem"], [role="button"], [role="link"], [onclick], [data-folder-id], .folder-node, .folder-container .folder-card'
 _FOLDER_CANDIDATES = r"""({label,parents,path,selector}) => {
   const norm=x=>(x||'').replace(/\s+/g,' ').trim();
   const visible=e=>!!e.getClientRects().length && getComputedStyle(e).visibility!=='hidden';
   const crumbSelector='nav[aria-label*="readcrumb"], [role="navigation"][aria-label*="readcrumb"], .breadcrumb, .breadcrumbs, [data-breadcrumb]';
   const name=e=>{
+    if(e.matches('.folder-container .folder-card')){
+      const labels=Array.from(e.querySelectorAll('.app-name')).filter(visible);
+      if(labels.length!==1)return '';
+      const text=norm(labels[0].textContent),title=norm(labels[0].getAttribute('title'));
+      return text&&(!title||title===text)?text:'';
+    }
     if(e.getAttribute('aria-label'))return norm(e.getAttribute('aria-label'));
     const clone=e.cloneNode(true);
     clone.querySelectorAll('ul,ol,[role="group"]').forEach(n=>n.remove());
@@ -157,7 +163,7 @@ _FOLDER_CANDIDATES = r"""({label,parents,path,selector}) => {
     if(visible(e)&&containsPath([...ancestors(e),name(e)]))current=true;
   });
   const all=Array.from(document.querySelectorAll(selector));
-  let candidates=all.map((e,index)=>({e,index})).filter(({e})=>visible(e)&&!e.disabled&&e.getAttribute('aria-disabled')!=='true'&&!e.closest(crumbSelector)&&name(e)===label);
+  let candidates=all.map((e,index)=>({e,index})).filter(({e})=>visible(e)&&(!e.matches('.folder-card')||visible(e.closest('.folder-container')))&&!e.disabled&&e.getAttribute('aria-disabled')!=='true'&&!e.closest(crumbSelector)&&name(e)===label);
   // A nested label link and its treeitem represent one node: prefer the interactive leaf.
   candidates=candidates.filter(({e})=>!candidates.some(x=>x.e!==e&&e.contains(x.e)));
   const scoped=candidates.filter(({e})=>{
@@ -170,6 +176,29 @@ _FOLDER_CANDIDATES = r"""({label,parents,path,selector}) => {
   return {current,indices:candidates.map(x=>x.index),summary:candidates.slice(0,8).map(({e})=>({tag:e.tagName.toLowerCase(),role:e.getAttribute('role')||'',treeDepth:ancestors(e).length}))};
 }"""
 
+
+
+_FOLDER_STRUCTURE = r"""({label,selector}) => {
+ const norm=x=>(x||'').replace(/\s+/g,' ').trim();
+ const visible=e=>!!e.getClientRects().length&&getComputedStyle(e).visibility!=='hidden';
+ const scope=document.querySelector('main,[role="main"]')||document.body;
+ const roles=new Set(['button','link','treeitem','tree','list','listitem','grid','row','cell','navigation','main']);
+ const tags=new Set(['a','button','div','span','li','ul','ol','main','nav','section','article','p','h1','h2','h3','svg','i']);
+ const describe=e=>({tag:tags.has(e.localName)?e.localName:'other',role:roles.has(e.getAttribute('role'))?e.getAttribute('role'):'',
+   href:e.hasAttribute('href'),onclick:e.hasAttribute('onclick'),tabindex:e.hasAttribute('tabindex'),
+   folderSemantic:e.matches('[data-folder-id],.folder-node,[role="treeitem"]'),
+   ariaLabel:e.hasAttribute('aria-label'),ariaLabelMatches:e.hasAttribute('aria-label')&&norm(e.getAttribute('aria-label'))===label,
+   dataFolderId:e.hasAttribute('data-folder-id'),selectorMatch:e.matches(selector)});
+ const matches=Array.from(scope.querySelectorAll('*')).filter(e=>visible(e)&&norm(e.textContent)===label&&!Array.from(e.children).some(c=>visible(c)&&norm(c.textContent)===label));
+ return {scope:scope===document.body?'body':'main',exactVisibleLabels:matches.length,nodes:matches.slice(0,8).map(e=>{
+   const ancestors=[];for(let p=e.parentElement;p&&ancestors.length<3;p=p.parentElement){ancestors.push(describe(p));if(p===scope)break;}
+   const exclusionReasons=[];if(!e.matches(selector))exclusionReasons.push('outside_selector');
+   if(e.hasAttribute('aria-label')&&norm(e.getAttribute('aria-label'))!==label)exclusionReasons.push('accessible_name_mismatch');
+   if(e.disabled||e.getAttribute('aria-disabled')==='true')exclusionReasons.push('disabled');
+   if(e.closest('nav[aria-label*="readcrumb"],.breadcrumb,.breadcrumbs,[data-breadcrumb]'))exclusionReasons.push('breadcrumb');
+   return {node:describe(e),ancestors,exclusionReasons};
+ })};
+}"""
 
 _LOADING_STATE = r"""() => {
  const visible=e=>!!e.getClientRects().length&&getComputedStyle(e).visibility!=='hidden';
@@ -255,17 +284,17 @@ class TestFairyBrowser:
     def _observe_loading(self):
         if getattr(self,'_loading_observed',False):return
         self._loading_observed=True
-        self._pending=set();self._network_errors=[]
+        self._pending={};self._network_errors=[]
         def relevant(request):
             u=urlsplit(request.url);base=urlsplit(self.base)
             return u.scheme==base.scheme and u.netloc==base.netloc and request.resource_type in ('document','xhr','fetch')
         def request_started(request):
-            if relevant(request):self._pending.add(id(request))
+            if relevant(request):self._pending[id(request)]={'type':request.resource_type,'started':time.monotonic()}
         def response_received(response):
             if relevant(response.request) and response.status>=400:
                 self._network_errors.append(f'{response.request.resource_type} HTTP {response.status}')
                 self._network_errors[:]=self._network_errors[-8:]
-        def finished(request):self._pending.discard(id(request))
+        def finished(request):self._pending.pop(id(request),None)
         def failed(request):
             finished(request)
             if relevant(request):
@@ -285,7 +314,9 @@ class TestFairyBrowser:
         state=self.page.evaluate(_LOADING_STATE)
         if state['error']:
             raise NeedsAttention('TestFairy 页面明确加载错误：'+safe_text(state['error'])[:300])
-        state['busy']=state['busy'] or bool(self._pending)
+        state['pending_requests']=len(self._pending)  # network activity alone is not directory loading evidence
+        state['pending_structure']=[{'type':entry['type'],'age_seconds':round(max(0,time.monotonic()-entry['started']),1)}
+            for entry in sorted(self._pending.values(),key=lambda entry:entry['started'])[:8]]
         return state
 
     def _lookup_failure(self,stage,state,evidence=None):
@@ -294,6 +325,10 @@ class TestFairyBrowser:
         message='TestFairy '+stage+'：'+detail
         if evidence:
             message+='；可见交互候选 '+str(len(evidence['indices']))+'；候选结构 '+json.dumps(evidence['summary'],ensure_ascii=False)
+        if evidence and evidence.get('structure') is not None:
+            message+='；目标名称只读结构 '+json.dumps(evidence['structure'],ensure_ascii=False)+'（不据此自动点击未知控件）'
+        if state.get('pending_requests'):
+            message+='；未完成同源请求 '+str(state['pending_requests'])+'；请求类型/持续秒数 '+json.dumps(state.get('pending_structure',[]),ensure_ascii=False)+'（不能据此判断目录仍在加载；不采集请求地址或内容）'
         if self._network_errors:
             message+='；观测到同源请求错误 '+', '.join(self._network_errors)+'（未确认是否目录接口；不包含地址查询、请求体或响应内容）'
         raise NeedsAttention(message+'；未改分享权限或重新构建')
@@ -335,6 +370,7 @@ class TestFairyBrowser:
                         apps_activated=True
                         continue
                 if time.monotonic()>=deadline:
+                    evidence['structure']=self.page.evaluate(_FOLDER_STRUCTURE,{'label':label,'selector':selector})
                     self._lookup_failure('目录 '+label+'；已走过 '+('/'.join(labels[:depth]) or 'APPS'),state,evidence)
                 self.page.wait_for_timeout(min(200,max(1,(deadline-time.monotonic())*1000)))
     def find(self,expected):
