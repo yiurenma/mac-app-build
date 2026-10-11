@@ -144,6 +144,18 @@ def effective_task_config(config, params):
     return conf
 
 
+def log_jenkins_targets(params, conf):
+    """Expose persisted targets on Resume without silently rewriting history."""
+    computed = job_urls(conf, params['plugin_branch'], params['gmx_branch'])
+    for site in ('plugin', 'gmx'):
+        saved = params[site + '_job']
+        log(safe_text(f"[JENKINS-TARGET] {site}: source={params.get(site + '_source', '未记录')}; "
+                      f"target_branch={params[site + '_branch']}; saved_job={saved}"))
+        if saved != computed[site + '_job']:
+            log(safe_text(f"[JENKINS-TARGET] {site}: 按当前有效配置计算为 {computed[site + '_job']}；"
+                          "Resume 继续使用上述已保存 URL，不自动改写已有 Job/Build。请核对任务保存的父路径。"))
+
+
 def repair_legacy_gmx_target(task_id, params, conf, root, env):
     """Rename only an unpublished legacy target; keep commits and completed stages."""
     old = params['gmx_branch']
@@ -196,6 +208,7 @@ def _run_unlocked(task_id):
     max_lines = int(conf.get('build', {}).get('max_changed_lines', 100))
     update_task(task_id, status='RUNNING', pid=os.getpid(), note='')
     log(f'启动任务 {task_id}; plugin={plugin_branch}; gmx={gmx_branch}')
+    log_jenkins_targets(params, conf)
     log(f'[MODE] watch=terminal-observer visible={bool(params.get("visible"))} verbose={bool(params.get("verbose"))}')
     try:
         with credentials(conf.get('github', {}).get('token_env', 'GITHUB_TOKEN')) as env:

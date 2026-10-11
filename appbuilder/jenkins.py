@@ -9,7 +9,7 @@ import re
 import time
 import tempfile
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urljoin
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout, Error as PlaywrightError
 from .auth import read_credentials, approved_login_host, submit_recognized_login
 from .versions import folder
@@ -19,6 +19,76 @@ from .telemetry import action, debug, operation
 
 class NeedsAttention(RuntimeError):
     pass
+
+
+def page_error_kind(page):
+    """Recognize error-page headings, never old messages inside console logs."""
+    try:
+        headings = page.locator('h1, h2, [role="alert"]').all_text_contents()
+    except (AttributeError, PlaywrightError):
+        headings = []
+    headings = headings if isinstance(headings, list) else []
+    try:
+        title = page.title()
+    except (AttributeError, PlaywrightError):
+        title = ''
+    for raw in [title, *headings]:
+        if not isinstance(raw, str):
+            continue
+        text = ' '.join(raw.lower().split()).strip(' .!')
+        text = re.sub(r'\s*[-|]\s*jenkins$', '', text).strip(' .!')
+        if text in ('not found', '404 not found', 'oops! not found', 'oops not found'):
+            return 'not-found'
+        if text in ('access denied', 'forbidden', '403 forbidden', 'unauthorized', '401 unauthorized'):
+            return 'denied'
+    return None
+
+
+def login_route(url):
+    path = urlsplit(url).path.rstrip('/').lower()
+    return (path.endswith(('/login', '/signin', '/j_security_check'))
+            or '/securityrealm/' in path)
+
+
+def has_login_inputs(page):
+    selectors = 'input[type="password"],input[name="j_username"],input[name="loginfmt"]'
+    if '/job/' not in urlsplit(page.url).path:
+        selectors += ',input[name="username"],input[type="email"],input[autocomplete="username"]'
+    count = page.locator(selectors).count()
+    return isinstance(count, int) and count > 0
+
+
+def explicit_acl_denial(page):
+    """Only a concrete non-anonymous permission message proves an ACL denial."""
+    try:
+        text = page.locator('body').inner_text(timeout=1000)[:4000]
+    except (AttributeError, TypeError, PlaywrightError):
+        return False
+    return bool(isinstance(text, str) and re.search(
+        r'(?im)\b(?!anonymous\b)[\w.@-]+\s+is missing (?:the )?(?:Job|Overall|View|Run)/[\w]+ permission', text))
+
+
+def same_origin_login_entry(page, target):
+    """Follow only an actual Jenkins sign-in link, never invent another Job URL."""
+    expected = urlsplit(target)
+    prefix = expected.path.split('/job/', 1)[0].rstrip('/')
+    allowed_paths = {prefix + '/login', prefix + '/signin', prefix + '/securityRealm/commenceLogin'}
+    try:
+        links = page.locator('a[href]').evaluate_all('(links)=>links.map(a=>a.getAttribute("href"))')
+    except (AttributeError, PlaywrightError):
+        return None
+    if not isinstance(links, list):
+        return None
+    for href in links:
+        if not isinstance(href, str):
+            continue
+        absolute = urljoin(page.url, href)
+        candidate = urlsplit(absolute)
+        if (candidate.scheme == 'https' and candidate.netloc == expected.netloc
+                and not candidate.username and not candidate.password
+                and candidate.path.rstrip('/') in allowed_paths):
+            return absolute
+    return None
 
 
 def final_result_from_console(text):
@@ -188,27 +258,24 @@ class JenkinsBrowser:
                 os.unlink(temp)
 
     def _wait_manual_login(self, expected_url):
-        """Allow the human to complete company SSO only during an explicit test.
-
-        No form filling, secret capture or Build action. Never used by workers.
-        """
+        """Allow bounded manual SSO in a visible browser; never click Build."""
         from .auth import approved_login_host
         host = urlsplit(expected_url).hostname
         extra = self.conf.get('auth_allowed_hosts', ['*.hsbc'])
         if not approved_login_host(self.page.url, expected_url, extra):
             raise NeedsAttention(f'{self.site} 登录跳转到未批准主机：{urlsplit(self.page.url).hostname}')
-        action('AUTH', f'{self.site} 诊断浏览器需要登录：请在弹出的 Chrome 窗口完成公司 SSO/MFA（最多 180 秒）')
+        action('AUTH', f'{self.site} 浏览器需要登录：请在弹出的 Chrome 窗口完成公司 SSO/MFA（最多 180 秒）')
         limit = time.monotonic() + 180
         while time.monotonic() < limit:
             try:
                 current = urlsplit(self.page.url)
                 # Only the Jenkins host, outside its login screen, is accepted.
                 path = current.path.rstrip('/').lower()
-                on_jenkins = current.hostname == host and path not in ('/login', '/signin', '/securityrealm/commencelogin')
-                has_form = (self.page.locator('input[type="password"],input[name="j_username"],input[name="loginfmt"]').count() > 0)
-                if on_jenkins and not has_form:
+                on_jenkins = current.hostname == host and not login_route(self.page.url)
+                has_form = has_login_inputs(self.page)
+                if on_jenkins and not has_form and not page_error_kind(self.page):
                     self._cache_login()
-                    action('AUTH', f'{self.site} 人工 SSO 已完成，继续只读检查原 Jenkins URL')
+                    action('AUTH', f'{self.site} 人工 SSO 已完成，返回原 Jenkins URL 检查')
                     return True
             except PlaywrightError:
                 pass  # SSO navigation is in flight.
@@ -221,13 +288,16 @@ class JenkinsBrowser:
         password_page = self.page.locator('input[type="password"]').count() > 0
         login_input = (self.page.locator('input[name="j_username"]').count() > 0
                        or self.page.locator('input[name="loginfmt"]').count() > 0)
-        if not (redirected or password_page or login_input):
+        on_login_route = login_route(self.page.url)
+        if not (redirected or password_page or login_input or on_login_route or has_login_inputs(self.page)):
             return False
         if getattr(self, 'manual_login', False):
             return self._wait_manual_login(expected_url)
+        if not self.credentials and getattr(self, 'visible', False):
+            return self._wait_manual_login(expected_url)
         if not self.credentials:
             raise NeedsAttention(f'{self.site} 会话已过期且未配置 Keychain 认证；'
-                                 '请用 --jenkins-user / --jenkins-password 初始化')
+                                 f'请运行 ./app-build login --site {self.site} 完成登录后 Resume 原任务')
         extra = self.conf.get('auth_allowed_hosts', ['*.hsbc'])
         if not approved_login_host(self.page.url, expected_url, extra):
             raise NeedsAttention(f'{self.site} 登录跳转到未获批准域名：'
@@ -237,10 +307,12 @@ class JenkinsBrowser:
         action('AUTH', f'{self.site} 检测到登录页面，尝试自动填写账号密码')
         if not submit_recognized_login(self.page, username, password,
                                        log=lambda m: operation('PW', m)):
+            if getattr(self, 'visible', False):
+                return self._wait_manual_login(expected_url)
             raise NeedsAttention(f'{self.site} 登录页控件无法安全识别；'
                                  '请检查公司 SSO 页面或改用 --live 人工处理')
         try:
-            self.page.wait_for_url(lambda u: urlsplit(str(u)).hostname == host,
+            self.page.wait_for_url(lambda u: urlsplit(str(u)).hostname == host and not login_route(str(u)),
                                    timeout=25000)
         except PlaywrightTimeout:
             if not self.visible:
@@ -248,14 +320,18 @@ class JenkinsBrowser:
                                      '可能需要 MFA；请用 --live 运行以查看认证过程')
             action('AUTH', f'{self.site} 等待 SSO/MFA 完成，最多 90 秒')
             try:
-                self.page.wait_for_url(lambda u: urlsplit(str(u)).hostname == host,
+                self.page.wait_for_url(lambda u: urlsplit(str(u)).hostname == host and not login_route(str(u)),
                                        timeout=90000)
             except PlaywrightTimeout as e:
                 raise NeedsAttention(f'{self.site} SSO/MFA 未完成，需要人工检查') from e
         # Verify no password form remained; only then save state.
-        if self.page.locator('input[type="password"]').count():
+        if (self.page.locator('input[type="password"]').count()
+                or login_route(self.page.url) or has_login_inputs(self.page)):
             raise NeedsAttention(f'{self.site} 仍停留在认证页面，可能是密码错误或额外验证')
-        self._cache_login()
+        # A post-login error page does not prove that authentication succeeded.
+        # Reload the exact target for its status, but do not overwrite the cache.
+        if not page_error_kind(self.page):
+            self._cache_login()
         return True
 
     def visit(self, url, timeout=60000):
@@ -266,16 +342,37 @@ class JenkinsBrowser:
             response = self.page.goto(url, wait_until='domcontentloaded', timeout=timeout)
         except PlaywrightTimeout as e:
             raise NeedsAttention(f'Jenkins 页面访问超时: {url}') from e
+        # A stale cookie can produce a same-host 403/Not Found shell with only
+        # a sign-in link. Recover once only when that explicit evidence exists.
+        recovered = False
+        status = response.status if response else None
+        kind = page_error_kind(self.page)
+        if status in (401, 403) or (status == 200 and kind):
+            entry = same_origin_login_entry(self.page, url)
+            attempted = getattr(self, '_login_recovery_targets', set())
+            if entry and url not in attempted and not explicit_acl_denial(self.page):
+                self._login_recovery_targets = attempted | {url}
+                action('AUTH', f'{self.site} HTTP {status} 错误页含同域登录入口；可能是会话失效，仅尝试登录恢复一次，不修改目标 Job URL')
+                try:
+                    self.page.goto(entry, wait_until='domcontentloaded', timeout=timeout)
+                except PlaywrightTimeout as exc:
+                    raise NeedsAttention(f'{self.site} 登录入口超时；请运行 ./app-build login --site {self.site} 后 Resume') from exc
+                recovered = True
         # Reuse saved SSO state first; log in again only when it expired.
         authenticated = self._login_if_needed(url)
-        if authenticated:
+        if authenticated or recovered:
             operation('PW', f'page.goto({url}) 登录后重新加载目标 Job')
             response = self.page.goto(url, wait_until='domcontentloaded', timeout=timeout)
             # Do not keep retrying invalid credentials.
             if urlsplit(self.page.url).hostname != urlsplit(url).hostname or \
-                    self.page.locator('input[type="password"]').count():
+                    self.page.locator('input[type="password"]').count() or login_route(self.page.url) or has_login_inputs(self.page):
                 raise NeedsAttention(f'{self.site} 认证后仍未返回 Jenkins Job 页面')
         code = response.status if response else None
+        if recovered and not authenticated and code == 200 and not page_error_kind(self.page):
+            self._cache_login()
+        if code in (401, 403, 404) or page_error_kind(self.page):
+            final = urlsplit(self.page.url)
+            action('JENKINS-ACCESS', f'{self.site} HTTP={code}; 页面类型={page_error_kind(self.page) or "unknown"}; 最终路径={final.scheme}://{final.netloc}{final.path}; 登录恢复次数={int(url in getattr(self, "_login_recovery_targets", set()))}')
         operation('PW', f'page.goto completed: HTTP={code}, elapsed={time.monotonic()-started:.1f}s, title={self.page.title()}')
         debug(f'[BROWSER/{self.site}] HTTP {code} page={self.page.title()}')
         return code
@@ -291,11 +388,17 @@ class JenkinsBrowser:
             http = self.visit(job_url)
             last_http = http
             attempts += 1
-            if http == 200 and '404 Not Found' not in self.page.title():
+            error_kind = page_error_kind(self.page)
+            if http == 200 and not error_kind:
                 print(f'[Jenkins/{self.site}] Job 已发现: {job_url}（检查 {attempts} 次）', flush=True)
                 return
-            if http in (401, 403):
-                raise NeedsAttention(f'无权查看 Jenkins Job (HTTP {http}): {job_url}')
+            if http in (401, 403) or error_kind == 'denied':
+                reason = ('页面明确报告缺少 Jenkins 权限，停止自动操作' if explicit_acl_denial(self.page)
+                          else '登录可能过期，也可能 Job 不存在/未索引或权限不足，不能仅凭此页面确定原因')
+                parent = job_url.rstrip('/').rsplit('/job/', 1)[0] + '/'
+                raise NeedsAttention(f'Jenkins Job 暂不可访问 (HTTP {http})：{reason}。'
+                                     f'目标: {job_url}；请用同一公司账号在 Chrome 核对父 Job: {parent}。'
+                                     f'如需重新登录，运行 ./app-build login --site {self.site} 后 Resume 原任务；不新建分支、不改服务器权限')
             # A 404 is expected while branch indexing has not created the job.
             # Retry only until the configured discovery timeout and never click
             # Build while Jenkins reports Not Found.
@@ -303,7 +406,7 @@ class JenkinsBrowser:
             if remaining <= 0:
                 break
             delay = min(self.discover_poll, remaining)
-            action('WAIT', f'{self.site} Job 暂未就绪：HTTP {http}，累计等待 {int(time.monotonic()-start)}s，{delay:g}s 后重试（第 {attempts} 次检查）')
+            action('WAIT', f'{self.site} Job 暂未就绪：HTTP {http} / {error_kind or '未识别页面'}，累计等待 {int(time.monotonic()-start)}s，{delay:g}s 后重试（第 {attempts} 次检查）')
             time.sleep(delay)
         raise TimeoutError(
             f'{self.site} Jenkins Job 等待超时（最后 HTTP={last_http}，检查 {attempts} 次）。'
