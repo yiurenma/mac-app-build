@@ -161,12 +161,13 @@ _FOLDER_CANDIDATES = r"""({label,parents,path,selector}) => {
     if(names[0]==='APPS')names=names.slice(1);
     return names.length>parents.length && [...parents,label].every((n,i)=>names[i]===n);
   };
-  let current=false;
+  let current=false,currentConflict=false;
   document.querySelectorAll(crumbSelector).forEach(c=>{
     if(!visible(c))return;
     const names=Array.from(c.querySelectorAll('a,button,[aria-current],li,span'))
       .filter(e=>visible(e)&&!e.querySelector('a,button,[aria-current],li,span')).map(e=>norm(e.textContent));
     if(containsPath(names))current=true;
+    else if(Array.from(c.querySelectorAll('[aria-current]:not([aria-current="false"])')).some(visible))currentConflict=true;
   });
   document.querySelectorAll('[role="treeitem"][aria-selected="true"], [role="treeitem"][aria-current="page"]').forEach(e=>{
     if(visible(e)&&containsPath([...ancestors(e),name(e)]))current=true;
@@ -182,7 +183,7 @@ _FOLDER_CANDIDATES = r"""({label,parents,path,selector}) => {
   });
   // A flat directory listing has no tree ancestors. A tree must match the full parent path.
   candidates=scoped.length?scoped:candidates.filter(({e})=>ancestors(e).length===0);
-  return {current,indices:candidates.map(x=>x.index),summary:candidates.slice(0,8).map(({e})=>({tag:e.tagName.toLowerCase(),role:e.getAttribute('role')||'',treeDepth:ancestors(e).length}))};
+  return {current:current&&!currentConflict,currentConflict,indices:candidates.map(x=>x.index),summary:candidates.slice(0,8).map(({e})=>({tag:e.tagName.toLowerCase(),role:e.getAttribute('role')||'',treeDepth:ancestors(e).length}))};
 }"""
 
 
@@ -264,44 +265,43 @@ class TestFairyBrowser:
         return False
     def _same_origin(self):
         return urlsplit(self.page.url).netloc==urlsplit(self.base).netloc and urlsplit(self.page.url).scheme=='https'
-    def login(self, expected):
+    def login(self, expected, deadline=None):
+        deadline=deadline if deadline is not None else time.monotonic()+(180 if self.visible else 25)
         if self.options.get('save_session'):
-            self.page.goto(self.base+'/my',wait_until='domcontentloaded')
-            if (self._same_origin() and not self.page.locator('input[type=password]').count()
+            self._lookup_action(self.page.goto,deadline,url=self.base+'/my',wait_until='domcontentloaded')
+            if (self._same_origin() and not self.page.locator('input[type=password]:visible').count()
                     and self.page.get_by_text(expected['path'].split('/')[0],exact=True).count()):
                 return
-        self.page.goto(self.options['login_url'],wait_until='domcontentloaded')
-        if not self._same_origin():raise NeedsAttention('TestFairy 登录跳转离开允许租户，未自动填写凭据')
-        if self._same_origin() and self.page.locator('input[type=password]').count():
-            if self.login_credentials:
-                # Submit only same-origin TestFairy forms, never an IdP's password form.
-                forms=self.page.locator('form:has(input[type=password])')
+        self._lookup_action(self.page.goto,deadline,url=self.options['login_url'],wait_until='domcontentloaded')
+        submitted_once=False
+        opened_apps=False
+        while time.monotonic()<deadline:
+            if not self._same_origin():raise NeedsAttention('TestFairy 认证跳转离开允许租户，已停止，未继续填写凭据')
+            passwords=self.page.locator('input[type=password]:visible')
+            if passwords.count() and self.login_credentials and not submitted_once:
+                forms=self.page.locator('form:has(input[type=password]:visible)')
                 if forms.count()!=1:raise NeedsAttention('TestFairy 登录表单不唯一')
                 action=urljoin(self.page.url,forms.get_attribute('action') or self.page.url)
                 if urlsplit(action).netloc!=urlsplit(self.base).netloc or urlsplit(action).scheme!='https':
                     raise NeedsAttention('TestFairy 登录提交地址不同源，停止自动填写')
+                submitted_once=True
                 try:
                     submitted=submit_recognized_login(self.page,*self.login_credentials)
                 except Exception as exc:
                     self.trace.failure('login_submit',exc)
                     raise NeedsAttention('TestFairy 登录填写或提交失败，凭据不记录到日志') from exc
-                if not submitted:
-                    raise NeedsAttention('TestFairy 登录控件无法安全识别')
-        deadline=time.monotonic()+(180 if self.visible else 25)
-        opened_apps=False
-        while time.monotonic()<deadline:
-            if not self._same_origin():raise NeedsAttention('TestFairy 认证跳转离开允许租户，已停止')
-            if (self._same_origin() and urlsplit(self.page.url).path.rstrip('/')!='/login'
-                    and not self.page.locator('input[type=password]').count()):
+                if not submitted:raise NeedsAttention('TestFairy 登录控件无法安全识别')
+                continue
+            if urlsplit(self.page.url).path.rstrip('/')!='/login' and not passwords.count():
                 if not opened_apps:
-                    self.page.goto(self.base+'/my',wait_until='domcontentloaded')
+                    self._lookup_action(self.page.goto,deadline,url=self.base+'/my',wait_until='domcontentloaded')
                     opened_apps=True
-                if (self._same_origin() and not self.page.locator('input[type=password]').count()
+                if (self._same_origin() and not self.page.locator('input[type=password]:visible').count()
                         and (self.page.get_by_text('APPS',exact=True).count()
                              or self.page.get_by_text(expected['path'].split('/')[0],exact=True).count())):
                     return
-            self.page.wait_for_timeout(250)
-        raise NeedsAttention('TestFairy 登录未完成；请在可见 Chrome 完成 MFA/额外验证，不会自动绕过')
+            self.page.wait_for_timeout(min(250,max(1,(deadline-time.monotonic())*1000)))
+        raise NeedsAttention('TestFairy 登录未完成；请在可见 Chrome 完成 MFA/额外验证，不会自动绕过或重复提交密码')
     def _save_session(self):
         if not self.options.get('save_session'):return
         self.auth_path.parent.mkdir(parents=True,exist_ok=True)
@@ -398,6 +398,38 @@ class TestFairyBrowser:
             if self.trace:self.trace.failure(self._phase,exc,evidence=self._last_evidence)
             self._lookup_failure('页面操作总等待预算已用尽',self._lookup_state())
 
+    def _directory_snapshot(self,labels,depth,selector,deadline):
+        if depth+1<len(labels):
+            evidence=self.page.evaluate(_FOLDER_CANDIDATES,{'label':labels[depth+1],'parents':labels[:depth+1],
+                'path':labels,'selector':selector})
+            nodes=[self.page.locator(selector).nth(index) for index in evidence['indices']]
+            return {'nodes':{self._node_cursor(node,deadline) for node in nodes},'next':evidence}
+        cards=self.page.locator(self.config.get('testfairy',{}).get('card_selector','article, .app-card, .build-card, .version-card, [data-build-id]'))
+        return {'nodes':{self._node_cursor(cards.nth(index),deadline) for index in range(cards.count()) if cards.nth(index).is_visible()}}
+
+    def _await_directory_transition(self,labels,depth,selector,before,deadline):
+        while True:
+            state=self._lookup_state()
+            evidence=self.page.evaluate(_FOLDER_CANDIDATES,{'label':labels[depth],'parents':labels[:depth],
+                'path':labels,'selector':selector})
+            if evidence['current']:
+                return 'exact_path_selected'
+            if evidence.get('currentConflict'):
+                if time.monotonic()>=deadline:
+                    self._lookup_failure('目录 '+labels[depth]+'：明确当前面包屑与目标路径冲突，未证实进入目标',state,evidence)
+                self.page.wait_for_timeout(min(100,max(1,(deadline-time.monotonic())*1000)))
+                continue
+            after=self._directory_snapshot(labels,depth,selector,deadline)
+            # A visible next child inside the verified full tree ancestry proves an expanded branch.
+            nested=after.get('next',{}).get('summary',[])
+            if len(nested)==1 and nested[0]['treeDepth']>0:
+                return 'verified_tree_child_visible'
+            if after['nodes'] and after['nodes']!=before['nodes']:
+                return 'new_expected_child_or_app_cards'
+            if time.monotonic()>=deadline:
+                self._lookup_failure('目录 '+labels[depth]+' 点击后未证实目标路径或内容变化（同源URL变化不足以确认）',state,evidence)
+            self.page.wait_for_timeout(min(100,max(1,(deadline-time.monotonic())*1000)))
+
     def _folder(self,path,deadline=None):
         deadline=self._lookup_deadline() if deadline is None else deadline
         self._observe_loading()
@@ -417,9 +449,11 @@ class TestFairyBrowser:
                     self._trace_event('directory','end',deadline,depth=depth,reason='current_path_proven')
                     break  # breadcrumb/tree explicitly proves we are already at this path level
                 if len(evidence['indices'])==1:
+                    before=self._directory_snapshot(labels,depth,selector,deadline)
                     self._lookup_action(self.page.locator(selector).nth(evidence['indices'][0]).click,deadline)
                     if not self._same_origin():raise NeedsAttention('TestFairy 目录跳转离开当前租户')
-                    self._trace_event('directory','end',deadline,depth=depth,eligible=1)
+                    proof=self._await_directory_transition(labels,depth,selector,before,deadline)
+                    self._trace_event('directory','end',deadline,depth=depth,eligible=1,postcondition=proof)
                     break
                 if depth==0 and not evidence['indices'] and not apps_activated:
                     apps=self.page.evaluate(_FOLDER_CANDIDATES, {'label':'APPS','parents':[],

@@ -107,3 +107,67 @@ class DispatchTests(unittest.TestCase):
         self.assertFalse(any(m=='POST' for m,u in self.requests))
         self.assertEqual(self.state['runtime']['plugin_formal_dispatch']['state'],'UNKNOWN')
         self.worker.detect_new_build.assert_not_called()
+
+    def test_preparing_resume_does_not_adopt_external_build(self):
+        self.state['runtime']={'plugin_formal_baseline':[7], 'plugin_formal_dispatch':{'state':'PREPARING','job_url':JOB}}
+        self.worker.build_numbers=Mock(return_value={7,8})
+        with self.assertRaisesRegex(NeedsAttention,'不能认领'):self.run_build()
+        self.assertEqual(self.state['runtime']['plugin_formal_dispatch']['state'],'CONFLICT')
+        self.worker.detect_new_build.assert_not_called()
+        self.assertFalse(any(m=='POST' for m,u in self.requests))
+
+    def test_gmx_repaint_changes_parameter_after_fill_blocks_post(self):
+        self.worker.site='gmx';self.worker.conf={'gmx_fields':{name:'#'+name for name in ('ENTITIES','SYNC_UPLOAD','CUSTOM_FOLDER')}}
+        self.extra='<input id="ENTITIES"><input type="checkbox" id="SYNC_UPLOAD"><input id="CUSTOM_FOLDER">'
+        original=self.worker._safe_click
+        def click(text,role,before_click=None):
+            if before_click:
+                check=before_click
+                def changed(control):
+                    self.worker.page.locator('#CUSTOM_FOLDER').fill('OTHER')
+                    check(control)
+                before_click=changed
+            return original(text,role,before_click=before_click)
+        self.worker._safe_click=click
+        with self.assertRaisesRegex(NeedsAttention,'填写后被页面改变'):
+            _dispatch_or_reconcile(self.worker,JOB,'t','gmx_formal',with_parameters=True,country='UK',project='PayByBank')
+        self.assertFalse(any(m=='POST' for m,u in self.requests))
+        self.assertEqual(self.state['runtime']['gmx_formal_dispatch']['state'],'PREPARING')
+
+    def test_post_load_busy_initialization_waits_then_submits_once(self):
+        self.prevent=True
+        self.extra='<script>addEventListener("load",()=>{const f=document.querySelector("form");f.setAttribute("aria-busy","true");setTimeout(()=>{f.addEventListener("submit",()=>fetch("build",{method:"POST"}));f.removeAttribute("aria-busy");},350);});</script>'
+        self.assertEqual(self.run_build(),7)
+        self.assertEqual(sum(m=='POST' for m,u in self.requests),1)
+        self.assertEqual(self.state['runtime']['plugin_formal_dispatch']['state'],'ACCEPTED')
+
+    def test_visible_disabled_submit_waits_until_enabled_and_posts_once(self):
+        self.extra='<script>addEventListener("DOMContentLoaded",()=>{const b=document.querySelector("button");b.disabled=true;setTimeout(()=>b.disabled=false,350);});</script>'
+        self.assertEqual(self.run_build(),7)
+        self.assertEqual(sum(m=='POST' for m,u in self.requests),1)
+
+    def test_rejected_post_is_not_accepted_and_not_retried(self):
+        self.status=403
+        with self.assertRaisesRegex(NeedsAttention,'结果未知'):self.run_build()
+        self.assertEqual(self.state['runtime']['plugin_formal_dispatch']['http_status'],403)
+        self.assertEqual(self.state['runtime']['plugin_formal_dispatch']['state'],'UNKNOWN')
+        with self.assertRaisesRegex(NeedsAttention,'结果未知'):self.run_build()
+        self.assertEqual(sum(m=='POST' for m,u in self.requests),1)
+        self.worker.detect_new_build.assert_not_called()
+
+    def test_gmx_disabled_final_field_is_not_submitted(self):
+        self.worker.site='gmx';self.worker.conf={'gmx_fields':{name:'#'+name for name in ('ENTITIES','SYNC_UPLOAD','CUSTOM_FOLDER')}}
+        self.extra='<input id="ENTITIES"><input type="checkbox" id="SYNC_UPLOAD"><input id="CUSTOM_FOLDER">'
+        original=self.worker._safe_click
+        def click(text,role,before_click=None):
+            if before_click:
+                check=before_click
+                def disabled(control):
+                    self.worker.page.locator('#CUSTOM_FOLDER').evaluate('(e)=>e.disabled=true')
+                    check(control)
+                before_click=disabled
+            return original(text,role,before_click=before_click)
+        self.worker._safe_click=click
+        with self.assertRaisesRegex(NeedsAttention,'已禁用'):
+            _dispatch_or_reconcile(self.worker,JOB,'t','gmx_formal',with_parameters=True,country='UK',project='PayByBank')
+        self.assertFalse(any(m=='POST' for m,u in self.requests))

@@ -185,7 +185,7 @@ class BrowserTests(unittest.TestCase):
         html='<app-my><div class="my-main main-store"><div class="contents"><div class="main">'
         for label in labels:
             html+='<div class="folder-container large-text"><div class="folder-card large-text"><span class="app-name large-text" title="'+label+'">'+label+'</span></div></div>'
-        html+='</div></div></div></app-my><script>document.querySelectorAll(".folder-card").forEach(e=>e.addEventListener("click",()=>window.chosen=e.querySelector(".app-name").textContent))</script>'
+        html+='</div></div></div></app-my><script>document.querySelectorAll(".folder-card").forEach(e=>e.addEventListener("click",()=>{window.chosen=e.querySelector(".app-name").textContent;const n=document.createElement("nav");n.className="breadcrumb";const label=document.createElement("span");label.textContent=window.chosen;n.append(label);document.body.append(n);}))</script>'
         self.fixture_page(html)
         self.worker._folder('0_A_UK_PayByBank')
         self.assertEqual(self.worker.page.evaluate('window.chosen'),'0_A_UK_PayByBank')
@@ -214,7 +214,7 @@ class BrowserTests(unittest.TestCase):
 
     def test_tree_scope_excludes_same_named_sibling_path(self):
         self.fixture_page('''<div role="tree"><div role="treeitem"><a onclick="">IOS_Upload</a><div role="group">
-        <div role="treeitem"><a onclick="">IOS_Release</a><div role="group"><a onclick="window.chosen='right'">custom_HK</a></div></div>
+        <div role="treeitem"><a onclick="">IOS_Release</a><div role="group"><a onclick="window.chosen='right';document.body.insertAdjacentHTML('beforeend','<nav class=breadcrumb><span>IOS_Upload</span><span>IOS_Release</span><span>custom_HK</span></nav>')">custom_HK</a></div></div>
         <div role="treeitem"><a onclick="">Other</a><div role="group"><a onclick="window.chosen='wrong'">custom_HK</a></div></div>
         </div></div></div>''')
         self.worker._folder('IOS_Upload/IOS_Release/custom_HK')

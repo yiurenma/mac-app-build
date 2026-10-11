@@ -333,7 +333,8 @@ class JenkinsBrowser:
         username, password = self.credentials
         action('AUTH', f'{self.site} 检测到登录页面，尝试自动填写账号密码')
         if not submit_recognized_login(self.page, username, password,
-                                       log=lambda m: operation('PW', m)):
+                                       log=lambda m: operation('PW', m),
+                                       validate_target=lambda url: approved_login_host(url,expected_url,extra)):
             if getattr(self, 'visible', False):
                 return self._wait_manual_login(expected_url)
             raise NeedsAttention(f'{self.site} 登录页控件无法安全识别；'
@@ -640,6 +641,7 @@ class JenkinsBrowser:
         operation('PW', f'SYNC_UPLOAD.{"check" if should_sync else "uncheck"}()')
         JenkinsBrowser._set_checkbox(sync, should_sync, 'SYNC_UPLOAD')
         target = settings.get('CUSTOM_FOLDER') or folder(country, project)
+        validated_values={'ENTITIES':(False,country),'SYNC_UPLOAD':(True,should_sync),'CUSTOM_FOLDER':(False,target)}
         custom = self._find_control('CUSTOM_FOLDER', selectors.get('CUSTOM_FOLDER', ''))
         if custom.evaluate('(el) => el.tagName.toLowerCase()') not in ('input', 'textarea'):
             raise NeedsAttention('CUSTOM_FOLDER 不是文本框')
@@ -660,6 +662,7 @@ class JenkinsBrowser:
             JenkinsBrowser._set_checkbox(control, selected, field)
             if control.is_checked() != selected:
                 raise NeedsAttention(f'{field} 参数回读校验失败')
+            validated_values[field]=(True,selected)
         # CLI tasks that supply no advanced options keep remaining Jenkins defaults.
         # Web tasks provide explicit values and we verify the actual input state.
         for field in ('BUILD_TYPE', 'SIGNING_REPO_BRANCH'):
@@ -684,6 +687,7 @@ class JenkinsBrowser:
                 raise NeedsAttention(f'{field} 输入控件类型不支持')
             if control.input_value() != value:
                 raise NeedsAttention(f'{field} 写入后校验失败')
+            validated_values[field]=(False,value)
         action('FORM', f'GMX 参数设置 ENTITIES={country} SYNC_UPLOAD={str(should_sync).lower()} CUSTOM_FOLDER={target}')
         operation('PW', '验证 SYNC_UPLOAD.is_checked() && CUSTOM_FOLDER.input_value()')
         if sync.is_checked() != should_sync or custom.input_value() != target:
@@ -693,6 +697,19 @@ class JenkinsBrowser:
         if 'BUILD_TYPE' in settings and not str(settings['BUILD_TYPE']).strip():
             raise NeedsAttention('BUILD_TYPE 不能为空，否则 GMX Build 会被禁用')
         print(f'[Jenkins/gmx] ENTITIES={country} SYNC_UPLOAD={str(should_sync).lower()} CUSTOM_FOLDER={target}', flush=True)
+        self._gmx_parameter_snapshot=validated_values
+
+    def _verify_gmx_submission(self):
+        snapshot=getattr(self,'_gmx_parameter_snapshot',None)
+        if not snapshot:raise NeedsAttention('GMX 缺少已验证的参数快照，未派发')
+        selectors=self.conf.get('gmx_fields',{})
+        for name,(checkbox,expected) in snapshot.items():
+            control=self._find_control(name,selectors.get(name,''))
+            if not control.is_enabled():raise NeedsAttention(f'GMX {name} 提交前已禁用，字段不会正常提交，未派发')
+            actual=control.is_checked() if checkbox else control.input_value()
+            if actual!=expected:raise NeedsAttention(f'GMX {name} 在填写后被页面改变，未派发；请检查参数初始化')
+        action('FORM','GMX 提交前参数再次回读一致；不记录字段值')
+
 
     def queued_builds(self, job_url):
         """Read only explicit same-row job and queue links, never infer from HTTP 200."""
@@ -753,6 +770,7 @@ class JenkinsBrowser:
                 target=urlsplit(urljoin(self.page.url,control.get_attribute('href') or ''))
                 if target.scheme!=root.scheme or target.netloc!=root.netloc or target.path.rstrip('/')!=root.path.rstrip('/')+'/build':
                     raise NeedsAttention('Build 链接目标与 Job 不符，未派发')
+            if self.site=='gmx' and with_parameters:self._verify_gmx_submission()
             callback(state='DISPATCHING')
             action('DISPATCH',f'{self.site} 提交检查通过，即将点击；中断后按结果未知处理，禁止盲重发')
         observed=[];post_requests=[]
@@ -1097,6 +1115,9 @@ def _dispatch_or_reconcile(browser,job_url,task_id,key,**parameters):
     if baseline is not None:
         found=sorted(current-set(baseline))
         if len(found)>1:raise NeedsAttention('恢复发现多个新 Build，禁止猜测或重复提交')
+        if found and previous.get('state')=='PREPARING':
+            patch_runtime(task_id,**{key+'_dispatch':{'state':'CONFLICT','job_url':job_url}})
+            raise NeedsAttention('上次明确未派发，此后出现新 Build；不能认领外部构建，需核对')
         if found:
             action('DISPATCH',f'{key} 恢复发现目标 Job 新 Build #{found[0]}，不重复提交')
             return found[0]

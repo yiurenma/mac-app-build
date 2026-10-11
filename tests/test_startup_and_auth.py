@@ -22,10 +22,15 @@ class FakeLocator:
         self.calls = []
     def count(self): return 1
     def is_visible(self): return self.visible
+    def is_enabled(self): return True
+    def is_editable(self): return True
+    def wait_for(self, **kwargs): pass
+    def evaluate(self, script): return True if "checkValidity" in script else []
     def fill(self, value): self.calls.append(('fill', value))
     def click(self): self.calls.append(('click',))
 
 class LoginPage:
+    url = "https://jenkins.invalid/login"
     def __init__(self):
         self.fields = {
             'input[name="j_username"]': FakeLocator(),
