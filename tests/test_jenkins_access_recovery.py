@@ -18,7 +18,7 @@ PATH='/job/release-build/job/release_1_3_202610111410/'
 TARGET=HOST+PATH
 SHELL='<title>Oops! - Jenkins</title><h1>Oops!</h1><h2>Not Found.</h2><p>This page may not exist, or you may not have permission to see it.</p>'
 LINK='<a href="/login?from='+PATH+'">Sign in</a>'
-JOB='<title>Release branch - Jenkins</title><h1>release_1_3_202610111410</h1><button onclick="window.builds=1">Build Now</button>'
+JOB='<title>Release branch - Jenkins</title><h1>release_1_3_202610111410</h1><a href="build" onclick="window.builds=1;return false">Build Now</a>'
 LOGIN='<title>Sign in - Jenkins</title><form action="/j_security_check" method="post"><input name="j_username"><input name="j_password" type="password"><button type="submit">Sign in</button></form>'
 
 
@@ -44,16 +44,23 @@ class CachedSessionRecoveryTests(unittest.TestCase):
         self.mode='expired'
         self.context.route('**/*',self.route)
         self.worker=object.__new__(JenkinsBrowser)
+        self.worker.browser=Mock()
+        def fresh_context(**kwargs):
+            ctx=self.browser.new_context(**kwargs);ctx.route('**/*',self.route)
+            self.addCleanup(ctx.close);return ctx
+        self.worker.browser.new_context.side_effect=fresh_context
         self.worker.context=self.context;self.worker.page=self.context.new_page()
         self.worker.site='plugin';self.worker.credentials=('offline-user','offline-password')
         self.worker.visible=False;self.worker.manual_login=False
-        self.worker.conf={'discover_timeout_minutes':.01,'auth_allowed_hosts':['*.hsbc']}
+        self.worker.conf={'discover_timeout_minutes':.01,'auth_allowed_hosts':['*.hsbc'],'plugin_parent':HOST+'/job/release-build/job/'}
         self.worker.discover_poll=1;self.worker.auth_path=self.auth
 
     def route(self, route):
         path=urlsplit(route.request.url).path
         self.requests.append(path)
-        if path=='/login':
+        if path=='/job/release-build/':
+            route.fulfill(status=403 if self.mode=='parent-shell' else 200,content_type='text/html',body=SHELL if self.mode=='parent-shell' else LOGIN)
+        elif path=='/login':
             route.fulfill(status=200,content_type='text/html',body=LOGIN)
         elif path=='/j_security_check':
             route.fulfill(status=200,headers={'set-cookie':'session=valid; Path=/; Secure'},content_type='text/html',body='<script>location.replace('+json.dumps(TARGET)+')</script>')
@@ -61,7 +68,7 @@ class CachedSessionRecoveryTests(unittest.TestCase):
             route.fulfill(status=200,content_type='text/html',body='<h1>Company SSO</h1><input name="username"><button>Next</button>')
         elif path==PATH:
             authenticated='session=valid' in route.request.headers.get('cookie','')
-            if self.mode=='valid' or (self.mode=='expired' and authenticated):
+            if self.mode=='valid' or (self.mode in ('expired','no-link-expired','parent-shell') and authenticated):
                 route.fulfill(status=200,content_type='text/html',body=JOB)
             elif self.mode=='acl':
                 route.fulfill(status=403,content_type='text/html',body='<h1>Access Denied</h1><p>alice is missing the Job/Read permission</p>'+LINK)
@@ -81,14 +88,80 @@ class CachedSessionRecoveryTests(unittest.TestCase):
         self.assertNotIn('offline-password',output.getvalue())
         self.assertNotIn('session=valid',output.getvalue())
         self.assertEqual(self.worker.page.url,TARGET)
-        self.assertEqual(self.requests.count('/login'),1)
+        self.worker.browser.new_context.assert_called_once_with(accept_downloads=False)
+        self.assertEqual(self.requests.count('/job/release-build/'),1)
         self.assertEqual(self.requests.count('/j_security_check'),1)
-        self.assertTrue(all(path in (PATH,'/login','/j_security_check') for path in self.requests))
+        self.assertTrue(all(path in (PATH,'/login','/j_security_check','/job/release-build/') for path in self.requests))
         self.assertEqual(self.worker.page.evaluate('window.builds||0'),0)
         saved=json.loads(self.auth.read_text())
         self.assertTrue(any(c['name']=='session' and c['value']=='valid' for c in saved['cookies']))
 
+    def test_403_shell_without_link_uses_saved_credentials_automatically(self):
+        self.mode='no-link-expired'
+        self.worker.wait_job(TARGET)
+        self.assertEqual(self.requests.count('/job/release-build/'),1)
+        self.assertEqual(self.requests.count('/j_security_check'),1)
+        self.assertEqual(self.worker.page.url,TARGET)
+        self.assertEqual(self.worker.page.evaluate('window.builds||0'),0)
+        self.assertTrue(any(c['value']=='valid' for c in json.loads(self.auth.read_text())['cookies']))
+
+    def test_auto_login_continues_existing_bootstrap_without_new_build(self):
+        from appbuilder.jenkins import ensure_bootstrap
+        self.mode='no-link-expired'
+        self.worker.request_build=Mock()
+        self.worker.wait_result=Mock(return_value=('SUCCESS',''))
+        self.worker.wait_parameter_mode=Mock()
+        state={'runtime':{'plugin_bootstrap_number':7}}
+        with patch('appbuilder.jenkins.read_state',return_value=state), patch('appbuilder.jenkins.patch_runtime') as save:
+            ensure_bootstrap(self.worker,TARGET,'original-task','plugin')
+        self.worker.request_build.assert_not_called()
+        self.worker.wait_result.assert_called_once_with(TARGET,7)
+        self.assertEqual(self.requests.count('/j_security_check'),1)
+        save.assert_any_call('original-task',plugin_bootstrap_completed=True)
+        self.assertEqual(state,{'runtime':{'plugin_bootstrap_number':7}})
+
+    def test_no_link_recovery_still_denied_is_attempted_only_once(self):
+        self.mode='ambiguous';before=self.auth.read_bytes()
+        for _ in range(2):
+            with self.assertRaisesRegex(NeedsAttention,'HTTP 403'):
+                self.worker.wait_job(TARGET)
+        self.assertEqual(self.requests.count('/job/release-build/'),1)
+        self.assertEqual(self.requests.count('/j_security_check'),1)
+        self.assertEqual(self.auth.read_bytes(),before)
+
+    def test_parent_without_controls_uses_standard_same_origin_login(self):
+        self.mode='parent-shell'
+        self.worker.wait_job(TARGET)
+        self.assertEqual(self.requests.count('/job/release-build/'),1)
+        self.assertEqual(self.requests.count('/login'),1)
+        self.assertEqual(self.requests.count('/j_security_check'),1)
+
+    def test_failed_fresh_auth_preserves_previous_cache_and_context(self):
+        self.mode='no-link-expired';before=self.auth.read_bytes()
+        old_context,old_page=self.worker.context,self.worker.page
+        with patch.object(self.worker,'_login_if_needed',side_effect=NeedsAttention('additional verification')):
+            with self.assertRaisesRegex(NeedsAttention,'additional verification'):
+                self.worker.wait_job(TARGET)
+        self.assertEqual(self.auth.read_bytes(),before)
+        self.assertIs(self.worker.context,old_context)
+        self.assertIs(self.worker.page,old_page)
+        self.assertEqual(self.requests.count('/j_security_check'),0)
+
+    def test_no_saved_credentials_does_not_invent_auto_login(self):
+        self.mode='ambiguous';self.worker.credentials=None
+        with self.assertRaises(NeedsAttention):self.worker.wait_job(TARGET)
+        self.assertEqual(self.requests,[PATH])
+
+    def test_configured_login_origin_and_context_are_checked(self):
+        from appbuilder.jenkins import configured_login_entry
+        self.assertEqual(configured_login_entry({'plugin_parent':HOST+'/jenkins/job/root/job/'},
+            'plugin',HOST+'/jenkins/job/root/job/branch/'),HOST+'/jenkins/login')
+        for parent in ('https://elsewhere.hsbc/job/root/job/',HOST+'/other/job/root/job/',
+                       'http://jenkins.corp.hsbc/job/root/job/'):
+            self.assertIsNone(configured_login_entry({'plugin_parent':parent},'plugin',TARGET))
+
     def test_three_runs_with_expiring_saved_sessions_each_recover_once(self):
+        self.mode='no-link-expired'
         for run in range(3):
             if run:
                 cached=json.loads(self.auth.read_text())
@@ -102,8 +175,33 @@ class CachedSessionRecoveryTests(unittest.TestCase):
             else:worker=self.worker
             worker.wait_job(TARGET)
             self.assertEqual(worker.page.url,TARGET)
-            self.assertEqual(self.requests.count('/login'),run+1)
+            self.assertEqual(self.requests.count('/job/release-build/'),run+1)
             self.assertEqual(worker.page.evaluate('window.builds||0'),0)
+
+    def test_gmx_three_expired_sessions_use_gmx_parent_and_separate_cache(self):
+        plugin_cache=self.auth;before=plugin_cache.read_bytes()
+        self.auth=Path(self.tmp.name)/'gmx.json';self.auth.write_bytes(before)
+        self.worker.site='gmx';self.worker.auth_path=self.auth
+        self.worker.conf['gmx_parent']=self.worker.conf.pop('plugin_parent')
+        self.test_three_runs_with_expiring_saved_sessions_each_recover_once()
+        self.assertEqual(plugin_cache.read_bytes(),before)
+
+    def test_gmx_submitted_baseline_recovers_and_detects_without_reclick(self):
+        from appbuilder.jenkins import formal_build
+        self.mode='no-link-expired';self.worker.site='gmx'
+        self.worker.conf['gmx_parent']=self.worker.conf.pop('plugin_parent')
+        self.worker.auth_path=Path(self.tmp.name)/'gmx.json'
+        self.worker.request_build=Mock()
+        self.worker.build_numbers=Mock(return_value={1,7})
+        self.worker.wait_result=Mock(return_value=('SUCCESS','Finished: SUCCESS'))
+        state={'runtime':{'gmx_formal_baseline':[1]}}
+        with patch('appbuilder.jenkins.read_state',return_value=state), patch('appbuilder.jenkins.patch_runtime') as save:
+            number,_=formal_build(self.worker,TARGET,'original-gmx','gmx')
+        self.assertEqual(number,7)
+        self.worker.request_build.assert_not_called()
+        self.worker.wait_result.assert_called_once_with(TARGET,7)
+        save.assert_any_call('original-gmx',gmx_formal_number=7)
+        self.assertEqual(state,{'runtime':{'gmx_formal_baseline':[1]}})
 
     def test_explicit_acl_denial_does_not_login_or_retry(self):
         self.mode='acl';before=self.auth.read_bytes()
@@ -117,7 +215,8 @@ class CachedSessionRecoveryTests(unittest.TestCase):
             self.worker.wait_job(TARGET)
         self.assertIn('HTTP 403',str(error.exception))
         self.assertIn(TARGET,str(error.exception))
-        self.assertEqual(self.requests,[PATH])
+        self.assertEqual(self.requests.count('/job/release-build/'),1)
+        self.assertEqual(self.requests.count('/j_security_check'),1)
 
     def test_200_soft_not_found_is_not_a_ready_job(self):
         self.mode='soft404';self.worker.conf['discover_timeout_minutes']=.0001
@@ -131,13 +230,14 @@ class CachedSessionRecoveryTests(unittest.TestCase):
         for _ in range(2):
             with self.assertRaisesRegex(NeedsAttention,'HTTP 403'):
                 self.worker.wait_job(TARGET)
-        self.assertEqual(self.requests.count('/login'),1)
+        self.assertEqual(self.requests.count('/job/release-build/'),1)
         self.assertEqual(self.requests.count('/j_security_check'),1)
 
     def test_external_sign_in_link_is_not_followed(self):
         self.mode='external'
         with self.assertRaises(NeedsAttention):self.worker.wait_job(TARGET)
-        self.assertEqual(self.requests,[PATH])
+        self.assertEqual(self.requests.count('/job/release-build/'),1)
+        self.assertNotIn('evil.example',self.worker.page.url)
 
     def test_valid_session_is_reused_without_login_or_cache_rewrite(self):
         self.mode='valid';before=self.auth.read_bytes()
@@ -190,3 +290,33 @@ class SavedTargetTests(unittest.TestCase):
             log_jenkins_targets(params,config)
             self.assertIn('不自动改写',str(log.call_args_list))
         self.assertEqual(params,original)
+
+
+class ConsoleRecoveryTests(unittest.TestCase):
+    def test_both_sites_retry_only_exact_read_after_session_recovery(self):
+        from types import SimpleNamespace
+        from appbuilder.jenkins import read_full_console
+        for site in ('plugin','gmx'):
+            with self.subTest(site=site):
+                url=HOST+'/job/'+site+'/7/consoleText'
+                denied=SimpleNamespace(status=403,url=url,headers={'content-type':'text/html'},dispose=Mock())
+                success=SimpleNamespace(status=200,url=url,headers={'content-type':'text/plain'},text=lambda:'Finished: SUCCESS',dispose=Mock())
+                old=SimpleNamespace(request=SimpleNamespace(get=Mock(return_value=denied)))
+                fresh=SimpleNamespace(request=SimpleNamespace(get=Mock(return_value=success)))
+                worker=SimpleNamespace(context=old,conf={},site=site)
+                def recover(target,timeout):
+                    self.assertEqual(target,url);worker.context=fresh;return 200
+                worker.visit=Mock(side_effect=recover)
+                self.assertEqual(read_full_console(worker,HOST+'/job/'+site+'/',7),'Finished: SUCCESS')
+                worker.visit.assert_called_once()
+                old.request.get.assert_called_once_with(url,timeout=300000)
+                fresh.request.get.assert_called_once_with(url,timeout=300000)
+
+    def test_denial_after_console_recovery_stops_without_second_request(self):
+        from types import SimpleNamespace
+        from appbuilder.jenkins import authenticated_console_response
+        response=SimpleNamespace(status=403,url=TARGET,headers={},dispose=Mock())
+        get=Mock(return_value=response)
+        worker=SimpleNamespace(context=SimpleNamespace(request=SimpleNamespace(get=get)),visit=Mock(return_value=403))
+        with self.assertRaises(NeedsAttention):authenticated_console_response(worker,TARGET,10000)
+        self.assertEqual(get.call_count,1)

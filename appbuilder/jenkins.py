@@ -91,6 +91,19 @@ def same_origin_login_entry(page, target):
     return None
 
 
+def configured_login_entry(conf, site, target):
+    """Normal Jenkins login route from the configured origin/context only."""
+    parent = urlsplit(conf.get(site + '_parent', ''))
+    expected = urlsplit(target)
+    if (parent.scheme != 'https' or parent.netloc != expected.netloc
+            or parent.username or parent.password or '/job/' not in parent.path):
+        return None
+    prefix = parent.path.split('/job/', 1)[0].rstrip('/')
+    if not expected.path.startswith(prefix + '/job/'):
+        return None
+    return parent.scheme + '://' + parent.netloc + prefix + '/login'
+
+
 def final_result_from_console(text):
     """Recognize only the final Jenkins console status line, not quoted log text."""
     end = len(text)
@@ -171,8 +184,12 @@ def saved_auth_path(data_dir: Path, site: str):
     return data_dir / 'auth' / (site + '.json')
 
 
+def login_parent(conf, site):
+    return conf[site + '_parent'].rstrip('/').removesuffix('/job') + '/'
+
+
 def interactive_login(config, data_dir: Path, site: str):
-    parent = config['jenkins'][site + '_parent'].rstrip('/').removesuffix('/job') + '/'
+    parent = login_parent(config['jenkins'], site)
     with sync_playwright() as p:
         browser = p.chromium.launch(**browser_launch_options(config, headless=False))
         ctx = browser.new_context()
@@ -244,6 +261,8 @@ class JenkinsBrowser:
 
     def _cache_login(self):
         """Atomic write; independent workers must never see a partial JSON."""
+        if getattr(self, '_defer_login_cache', False):
+            return
         path = self.auth_path
         path.parent.mkdir(parents=True, exist_ok=True)
         fd, temp = tempfile.mkstemp(prefix='.jenkins-', suffix='.json', dir=path.parent)
@@ -334,6 +353,44 @@ class JenkinsBrowser:
             self._cache_login()
         return True
 
+    def _recover_session(self, target, entry, timeout):
+        """Worker equivalent of login: fresh context, parent, normal auth, target.
+
+        No interactive input(), no subprocess, no deletion of the prior cache.
+        Only a verified target response can replace that cache.
+        """
+        old_context, old_page = self.context, self.page
+        fresh = self.browser.new_context(accept_downloads=False)
+        try:
+            self.context = fresh
+            self.page = fresh.new_page()
+            self.page.set_default_timeout(12000)
+            self._defer_login_cache = True
+            # Use exactly the parent destination used by the interactive CLI.
+            parent = login_parent(self.conf, self.site) if configured_login_entry(self.conf, self.site, target) else entry
+            response = self.page.goto(parent, wait_until='domcontentloaded', timeout=timeout)
+            authenticated = self._login_if_needed(target)
+            if not authenticated and not explicit_acl_denial(self.page):
+                # Some Jenkins error shells omit login controls even on parent.
+                self.page.goto(entry, wait_until='domcontentloaded', timeout=timeout)
+                self._login_if_needed(target)
+            response = self.page.goto(target, wait_until='domcontentloaded', timeout=timeout)
+            if (urlsplit(self.page.url).hostname != urlsplit(target).hostname
+                    or login_route(self.page.url) or has_login_inputs(self.page)):
+                raise NeedsAttention(f'{self.site} 自动登录尚未完成，保留原登录缓存；请完成 Chrome 中的公司验证')
+            self._defer_login_cache = False
+            if response and response.status == 200 and not page_error_kind(self.page):
+                self._cache_login()
+                action('AUTH', f'{self.site} 新会话登录成功，自动继续原任务当前阶段')
+        except Exception:
+            self.context, self.page = old_context, old_page
+            fresh.close()
+            raise
+        finally:
+            self._defer_login_cache = False
+        old_context.close()
+        return response
+
     def visit(self, url, timeout=60000):
         operation('PW', f'page.goto(url={url}, wait_until=domcontentloaded, timeout={timeout})')
         started = time.monotonic()
@@ -342,34 +399,31 @@ class JenkinsBrowser:
             response = self.page.goto(url, wait_until='domcontentloaded', timeout=timeout)
         except PlaywrightTimeout as e:
             raise NeedsAttention(f'Jenkins 页面访问超时: {url}') from e
-        # A stale cookie can produce a same-host 403/Not Found shell with only
-        # a sign-in link. Recover once only when that explicit evidence exists.
+        # Error shells may omit every sign-in control. Saved credentials can
+        # still use the configured Jenkins login route once; this does not
+        # establish authorization and never overrides a concrete ACL denial.
         recovered = False
         status = response.status if response else None
         kind = page_error_kind(self.page)
         if status in (401, 403) or (status == 200 and kind):
             entry = same_origin_login_entry(self.page, url)
+            if not entry and status in (401, 403) and self.credentials:
+                entry = configured_login_entry(self.conf, self.site, url)
             attempted = getattr(self, '_login_recovery_targets', set())
             if entry and url not in attempted and not explicit_acl_denial(self.page):
                 self._login_recovery_targets = attempted | {url}
-                action('AUTH', f'{self.site} HTTP {status} 错误页含同域登录入口；可能是会话失效，仅尝试登录恢复一次，不修改目标 Job URL')
-                try:
-                    self.page.goto(entry, wait_until='domcontentloaded', timeout=timeout)
-                except PlaywrightTimeout as exc:
-                    raise NeedsAttention(f'{self.site} 登录入口超时；请运行 ./app-build login --site {self.site} 后 Resume') from exc
+                action('AUTH', f'{self.site} HTTP {status} 错误页可能是会话失效；通过同域 Jenkins 登录入口仅恢复一次，不修改目标 Job URL')
+                response = self._recover_session(url, entry, timeout)
                 recovered = True
-        # Reuse saved SSO state first; log in again only when it expired.
-        authenticated = self._login_if_needed(url)
-        if authenticated or recovered:
+        # Fresh recovery already verified and revisited the exact target.
+        authenticated = False if recovered else self._login_if_needed(url)
+        if authenticated:
             operation('PW', f'page.goto({url}) 登录后重新加载目标 Job')
             response = self.page.goto(url, wait_until='domcontentloaded', timeout=timeout)
-            # Do not keep retrying invalid credentials.
-            if urlsplit(self.page.url).hostname != urlsplit(url).hostname or \
-                    self.page.locator('input[type="password"]').count() or login_route(self.page.url) or has_login_inputs(self.page):
+            if (urlsplit(self.page.url).hostname != urlsplit(url).hostname
+                    or login_route(self.page.url) or has_login_inputs(self.page)):
                 raise NeedsAttention(f'{self.site} 认证后仍未返回 Jenkins Job 页面')
         code = response.status if response else None
-        if recovered and not authenticated and code == 200 and not page_error_kind(self.page):
-            self._cache_login()
         if code in (401, 403, 404) or page_error_kind(self.page):
             final = urlsplit(self.page.url)
             action('JENKINS-ACCESS', f'{self.site} HTTP={code}; 页面类型={page_error_kind(self.page) or "unknown"}; 最终路径={final.scheme}://{final.netloc}{final.path}; 登录恢复次数={int(url in getattr(self, "_login_recovery_targets", set()))}')
@@ -797,7 +851,7 @@ class JenkinsBrowser:
         url = build_url + 'consoleText'
         operation('PW', f'context.request.get({url}, timeout=10000) [原始日志，非页面渲染]')
         try:
-            response = self.context.request.get(url, timeout=10000)
+            response = authenticated_console_response(self, url, 10000)
             status = response.status
             final_host = urlsplit(response.url).hostname
             if (final_host != urlsplit(url).hostname
@@ -1029,6 +1083,24 @@ def formal_build(browser: JenkinsBrowser, job_url, task_id, site, country='', pr
     return num, console
 
 
+def authenticated_console_response(browser, url, timeout):
+    """Read-only retry after normal browser login; never replay a build POST."""
+    response = browser.context.request.get(url, timeout=timeout)
+    headers = getattr(response, 'headers', {})
+    headers = headers if isinstance(headers, dict) else {}
+    needs_auth = (response.status in (401, 403) or urlsplit(response.url) != urlsplit(url)
+                  or 'html' in headers.get('content-type', '').lower())
+    visit = getattr(browser, 'visit', None)
+    if needs_auth and callable(visit):
+        # visit owns the bounded, site-specific login and explicit ACL guard.
+        if hasattr(response, 'dispose'):
+            response.dispose()
+        if visit(url, timeout=timeout) != 200:
+            raise NeedsAttention('指定 Build 日志认证恢复后仍不可访问')
+        response = browser.context.request.get(url, timeout=timeout)
+    return response
+
+
 def read_full_console(browser, job_url, number, emit=None):
     """Download the whole numbered build log through its authenticated session."""
     url = job_url + str(number) + '/consoleText'
@@ -1040,7 +1112,7 @@ def read_full_console(browser, job_url, number, emit=None):
     report(f'[DOWNLOAD] 完整日志请求：{url}；使用浏览器登录会话，不截取日志尾部')
     timeout = min(1800, max(30, float(getattr(browser, 'conf', {}).get('console_download_timeout_seconds', 300))))
     report(f'[DOWNLOAD] 下载超时={timeout:g}s；请求完整日志，页面只显示提取摘要')
-    response = browser.context.request.get(url, timeout=int(timeout * 1000))
+    response = authenticated_console_response(browser, url, int(timeout * 1000))
     headers = getattr(response, 'headers', {})
     content_type = headers.get('content-type', 'unknown')
     report(f'[HTTP] consoleText={response.status}; type={content_type}; response URL={response.url}')

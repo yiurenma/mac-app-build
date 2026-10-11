@@ -59,7 +59,7 @@ class RawBrowser:
         self.page = RawPage(self)
         self.visits = []
         self.status_checks = 0
-    def visit(self, url):
+    def visit(self, url, **kwargs):
         self.visits.append(url)
         return self.page_code
     def find_callback(self, *args):
@@ -113,8 +113,8 @@ class FastResultTests(unittest.TestCase):
         browser = RawBrowser([PlaywrightTimeout('request timeout')], heading='FAILURE')
         self.assertEqual(JenkinsBrowser.wait_result(browser, 'https://ci.corp/job/p/', 2)[0], 'FAILURE')
 
-    def test_raw_console_403_fails_fast(self):
-        browser = RawBrowser([RawReply('', 403)])
+    def test_raw_console_403_stops_after_one_read_only_retry(self):
+        browser = RawBrowser([RawReply('', 403), RawReply('', 403)])
         with self.assertRaisesRegex(NeedsAttention, 'HTTP 403'):
             JenkinsBrowser.wait_result(browser, 'https://ci.corp/job/p/', 2)
 
