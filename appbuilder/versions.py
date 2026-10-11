@@ -23,12 +23,33 @@ def timestamp_now():
     return datetime.now().strftime("%Y%m%d%H%M")
 
 
-def branch_names(major, stamp):
+def gmx_issue_key(source, explicit=''):
+    """Use an explicit issue or the single unambiguous issue in the source ref."""
+    if explicit:
+        if not re.fullmatch(r'[A-Z]{1,10}-[0-9]+', explicit):
+            raise ValueError('GMX 工单编号必须为大写字母-数字，例如 UKPBB-203745')
+        return explicit
+    keys = set(re.findall(r'(?<![A-Za-z0-9])[A-Z]{1,10}-[0-9]+(?![A-Za-z0-9])', source))
+    if len(keys) > 1:
+        raise ValueError('GMX 源分支含多个工单编号；请填写 GMX Issue Key（或 --gmx-issue-key），使用真实工单编号')
+    return keys.pop() if keys else ''
+
+
+def validate_gmx_target(branch):
+    if (not re.fullmatch(r'upload/[A-Z]{1,10}-[0-9]+[A-Za-z0-9_.-]*', branch)
+            or '..' in branch or branch.endswith(('.', '.lock'))):
+        raise ValueError('GMX 目标分支必须为 upload/工单编号-描述；旧 upload/auto 分支需先修复')
+    return branch
+
+
+def branch_names(major, stamp, gmx_source='', issue_key=''):
     if not MAJOR_RE.fullmatch(major) or not re.fullmatch(r"\d{12}", stamp):
         raise ValueError("无效大版本或时间戳")
+    key = gmx_issue_key(gmx_source, issue_key)
+    target = f"upload/{key}-auto{stamp}" if key else f"upload/AUTO-{stamp}"
     v = f"{major}.{stamp}"
     return {"plugin_version": v, "plugin_branch": f"release/{v}",
-            "gmx_branch": f"upload/auto{stamp}"}
+            "gmx_branch": validate_gmx_target(target)}
 
 
 def job_urls(config, plugin_branch, gmx_branch):

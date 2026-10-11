@@ -123,6 +123,7 @@ def form_defaults(config):
         'max_changed_lines': b.get('max_changed_lines', 100),
         'upload_success_pattern': b.get('upload_success_pattern', ''),
         'max_parallel': b.get('max_parallel', 2),
+        'gmx_issue_key': b.get('gmx_issue_key', ''),
         'gmx_build_type': j.get('gmx_defaults', {}).get('BUILD_TYPE', 'Develop'),
         'gmx_signing_repo_branch': j.get('gmx_defaults', {}).get('SIGNING_REPO_BRANCH', 'master'),
         'gmx_sync_upload': j.get('gmx_defaults', {}).get('SYNC_UPLOAD', True),
@@ -239,6 +240,7 @@ def create_build(body):
     args = SimpleNamespace(
         plugin_branch=_field(body, 'plugin_branch', 200),
         gmx_branch=_field(body, 'gmx_branch', 200),
+        gmx_issue_key=_field(body, 'gmx_issue_key', 50) if body.get('gmx_issue_key') else '',
         plugin_version=_field(body, 'plugin_version', 50),
         project_name=project, country=country,
         plugin_url=github['plugin_url'], gmx_url=github['gmx_url'],

@@ -1,4 +1,10 @@
-# HSBC UK PBB — Mac APP Build Automation (v0.7.6)
+# HSBC UK PBB — Mac APP Build Automation (v0.7.8)
+
+## v0.7.8 — GMX 分支命名修复
+
+GMX 自动分支现在为 `upload/<工单编号>-auto<时间戳>`。默认从 GMX Source Branch 提取唯一的大写工单编号；源分支不含编号时，默认生成 `upload/AUTO-<12位时间戳>`（自动标识，不代表真实工单）。可选填页面 **GMX Issue Key**、CLI `--gmx-issue-key` 或配置 `build.gmx_issue_key` 覆盖。显式填写的编号格式错误或源分支存在多个编号时会提前停止。
+
+已因 `upload/auto...` 被拒绝的旧任务：保留 `.appbuilder` 数据，更新程序后点击 **Resume**。程序在确认旧、新目标分支均未发布后，自动修改本地分支名和任务 Jenkins URL，保留现有提交、Plugin 构建和已完成阶段。源分支不含编号的旧任务会自动改为 `upload/AUTO-<原时间戳>`，无需补填工单。已推送或已构建的旧目标不会自动改名。不会 force-push。
 
 ## v0.7.6 — 完整日志读取与提取诊断
 
@@ -116,7 +122,7 @@ GMX 参数页按现场截图新增 `SKIP_TEST`（默认 true）、`FORCE`（默�
 1. 使用 Plugin 输入源分支创建 `release/<大版本>.<YYYYMMDDHHmm>`，两个 `.xcconfig` 的 `BUNDLE_VERSION_SHORT` 同步设为 `<大版本>.<时间戳>`，精确提交并 Push。
 2. 根据规则 `/` 和 `.` → `_` 定位 Plugin Jenkins 新 Job；如果初次只有 `Build`，先触发初始化构建，再等待 `Build with Parameters`。随后使用默认参数触发正式构建。
 3. 从本次成功 Build（或其关联 Callback）完整 `consoleText` 的 Nexus upload output JSON 中，按 DomainModel 和 Journey 的 `*.tar.gz` 文件名读取**完整 Artifact Version**，要求两个版本一致。不再打开 Jenkins 的 Artifacts 页面（其 `*view*`/`*fingerprint*` 链接会让大 `source.zip` 解压预览超时）。
-4. 使用 GMX 输入源分支创建 `upload/auto<同一时间戳>`。在根目录 `mobile-ci.json` 精准修改两个 `paybybank-ios-plugin` 依赖的 `version` 为**完整 Artifact Version**，不做 `1.3.0` 等转换。
+4. 使用 GMX 输入源分支创建 `upload/<工单编号>-auto<同一时间戳>`。在根目录 `mobile-ci.json` 精准修改两个 `paybybank-ios-plugin` 依赖的 `version` 为**完整 Artifact Version**，不做 `1.3.0` 等转换。
 5. 读取本次 Plugin 成功构建的 Nexus upload output JSON，按插件名与完整版本提取两个 `.tar.gz` 的 `artifactSHA256`；直接更新 `mobile-ci.lock` 对应版本和 SHA256，检查其他依赖未变。无需运行本地 Bootstrap。
 6. 只提交 `mobile-ci.json` 和 `mobile-ci.lock`，推送后根据 `upload/xxx` → `upload%2Fxxx` 定位 GMX Jenkins 新 Job。
 7. 兼容首次普通 `Build` 初始化，正式执行 `Build with Parameters`：`ENTITIES=国家`（默认 UK）、`SYNC_UPLOAD=true`、`CUSTOM_FOLDER=0_A_<国家>_<项目>`；其他保持 Jenkins 默认（如 BUILD_TYPE=Develop、SIGNING_REPO_BRANCH=master）。

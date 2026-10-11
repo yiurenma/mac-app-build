@@ -19,7 +19,7 @@ class FullTraceTests(unittest.TestCase):
     def test_live_flag_enables_all_three_modes(self):
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
-            main(['run', '--plugin-branch', 'develop', '--gmx-branch', 'develop',
+            main(['run', '--plugin-branch', 'develop', '--gmx-branch', 'feature/UKPBB-203745-test',
                   '--plugin-version', '1.3', '--project-name', 'PayByBank',
                   '--dry-run', '--live'])
         self.assertIn('"visible": true', out.getvalue())

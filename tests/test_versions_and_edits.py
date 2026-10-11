@@ -11,12 +11,12 @@ from appbuilder.config import load_config
 class TestVersions(unittest.TestCase):
     def test_job_name_conventions(self):
         c = load_config()
-        b = branch_names('1.3', '202610100030')
+        b = branch_names('1.3', '202610100030', 'feature/UKPBB-203745-test')
         self.assertEqual('release/1.3.202610100030', b['plugin_branch'])
-        self.assertEqual('upload/auto202610100030', b['gmx_branch'])
+        self.assertEqual('upload/UKPBB-203745-auto202610100030', b['gmx_branch'])
         urls = job_urls(c, b['plugin_branch'], b['gmx_branch'])
         self.assertTrue(urls['plugin_job'].endswith('/job/release_1_3_202610100030/'))
-        self.assertTrue(urls['gmx_job'].endswith('/job/upload%2Fauto202610100030/'))
+        self.assertTrue(urls['gmx_job'].endswith('/job/upload%2FUKPBB-203745-auto202610100030/'))
 
     def test_artifacts(self):
         version = '1.3.1-alpha.1-SNAPSHOT.2'

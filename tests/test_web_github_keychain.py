@@ -43,7 +43,7 @@ class WebPATTests(unittest.TestCase):
                 self.assertNotIn('fake-web-pat',Path(env['GIT_ASKPASS']).read_text())
 
     def test_web_accepts_pat_not_saved_in_task_payload(self):
-        payload={'plugin_branch':'develop','gmx_branch':'develop','plugin_version':'1.3',
+        payload={'plugin_branch':'develop','gmx_branch':'feature/UKPBB-203745-test','plugin_version':'1.3',
                  'project_name':'PayByBank','country':'UK','github_token':'WEB_TEST_SECRET',
                  'visible':True,'verbose':True}
         with patch('appbuilder.auth.store_github_token') as store,\

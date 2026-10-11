@@ -10,8 +10,9 @@ import signal
 import time
 import threading
 from pathlib import Path
+from .versions import branch_names, job_urls, validate_gmx_target
 from .config import DATA, load_config, token_or_error
-from .store import task, read_state, patch_runtime, complete, update_task, task_folder
+from .store import task, read_state, patch_runtime, complete, update_task, task_folder, replace_gmx_target
 from .gitops import credentials, clone_branch, git, changed_files, commit_and_push, verify_pushed, recover_pushed_commit
 from .verify import plugin_commit, gmx_commit
 from .edits import edit_plugin_versions, update_mobile_ci, update_lock_from_hashes, validate_lock, ensure_lock_other_entries_unchanged, XCCONFIGS
@@ -143,6 +144,40 @@ def effective_task_config(config, params):
     return conf
 
 
+def repair_legacy_gmx_target(task_id, params, conf, root, env):
+    """Rename only an unpublished legacy target; keep commits and completed stages."""
+    old = params['gmx_branch']
+    if not re.fullmatch(r'upload/auto[0-9]{12}', old):
+        validate_gmx_target(old)
+        return params
+    state = read_state(task_id)
+    if ('GMX_PUSH' in state['completed'] or 'GMX_JENKINS' in state['completed']
+            or state['runtime'].get('gmx_sha') or state['runtime'].get('gmx_build_number')):
+        raise NeedsAttention('旧 GMX 分支已推送或构建，禁止自动改名；请创建新任务')
+    new = branch_names(params['plugin_version_input'], old.removeprefix('upload/auto'),
+                       params['gmx_source'], params.get('gmx_issue_key') or conf['build'].get('gmx_issue_key', ''))['gmx_branch']
+    # Query even without a local checkout; never migrate a published ref.
+    for branch in (old, new):
+        if git(['ls-remote', params['gmx_url'], f'refs/heads/{branch}'], env=env):
+            raise NeedsAttention(f'远端分支已存在，禁止自动改名覆盖: {branch}')
+    if root.exists():
+        if not (root / '.git').exists():
+            raise NeedsAttention('GMX 目录不是完整 Git 仓库，停止自动修复')
+        origin = git(['remote', 'get-url', 'origin'], cwd=root)
+        if origin.removesuffix('.git').rstrip('/') != params['gmx_url'].removesuffix('.git').rstrip('/'):
+            raise NeedsAttention('GMX origin 与任务不一致，停止自动修复')
+        current = git(['branch', '--show-current'], cwd=root)
+        if current == old:
+            git(['branch', '-m', new], cwd=root)
+        elif current != new:
+            raise NeedsAttention('GMX 当前分支与旧目标不一致，停止自动修复')
+        # current==new covers an interruption after rename but before DB update.
+    job = job_urls(conf, params['plugin_branch'], new)['gmx_job']
+    updated = replace_gmx_target(task_id, old, new, job)
+    log(f'[REPAIR] GMX 分支 {old} -> {new}；保留已有 Commit 和已完成阶段')
+    return updated
+
+
 def _run_unlocked(task_id):
     row = task(task_id)
     if row['status'] == 'SUCCESS':
@@ -164,6 +199,8 @@ def _run_unlocked(task_id):
     log(f'[MODE] watch=terminal-observer visible={bool(params.get("visible"))} verbose={bool(params.get("verbose"))}')
     try:
         with credentials(conf.get('github', {}).get('token_env', 'GITHUB_TOKEN')) as env:
+            params = repair_legacy_gmx_target(task_id, params, conf, gmx, env)
+            gmx_branch = params['gmx_branch']
             def plugin_checkout():
                 base = checkout(params, 'plugin', plugin, params['plugin_source'], plugin_branch, env)
                 patch_runtime(task_id, plugin_base_sha=base)

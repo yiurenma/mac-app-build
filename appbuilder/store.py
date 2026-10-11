@@ -55,7 +55,7 @@ def create_task(config, params):
         while stamp in existing:
             stamp = (datetime.strptime(stamp, '%Y%m%d%H%M') + timedelta(minutes=1)).strftime('%Y%m%d%H%M')
         task_id = f"{stamp}-{os.urandom(3).hex()}"
-        generated = branch_names(params['plugin_version_input'], stamp)
+        generated = branch_names(params['plugin_version_input'], stamp, params['gmx_source'], params.get('gmx_issue_key') or config.get('build', {}).get('gmx_issue_key', ''))
         # Resolve branch Jobs using this task's explicit Jenkins defaults, not
         # mutable process-global config. Other concurrent tasks remain isolated.
         job_config = {**config, 'jenkins': {**config['jenkins'], **{
@@ -146,3 +146,16 @@ def complete(task_id, step):
 
 def active_count():
     return sum(r['status'] in ('QUEUED', 'RUNNING') for r in task_list())
+
+
+def replace_gmx_target(task_id, old, new, job):
+    """Persist the renamed target and Jenkins URL together under the worker lease."""
+    with closing(connect()) as db, db:
+        db.execute('BEGIN IMMEDIATE')
+        row = db.execute('SELECT params FROM tasks WHERE id=?', (task_id,)).fetchone()
+        params = json.loads(row['params'])
+        if params['gmx_branch'] != old:
+            raise RuntimeError('GMX 目标分支已改变，停止恢复')
+        params.update(gmx_branch=new, gmx_job=job)
+        db.execute('UPDATE tasks SET params=? WHERE id=?', (json.dumps(params), task_id))
+    return params

@@ -135,7 +135,7 @@ class WebLogicTests(unittest.TestCase):
         self.assertEqual(public['plugin_version'],'1.3')
 
     def test_build_creates_task_and_uses_existing_keychain(self):
-        payload={'plugin_branch':'develop','gmx_branch':'develop','plugin_version':'1.3',
+        payload={'plugin_branch':'develop','gmx_branch':'feature/UKPBB-203745-test','plugin_version':'1.3',
                  'project_name':'PayByBank','country':'UK', 'visible':True,'verbose':True}
         from appbuilder import cli
         with patch.object(cli,'doctor_check',return_value=True),\
@@ -155,7 +155,7 @@ class WebLogicTests(unittest.TestCase):
     def test_invalid_inputs_cannot_spawn_build(self):
         with patch('appbuilder.cli.spawn') as spawn:
             with self.assertRaises(ValueError):
-                web.create_build({'plugin_branch':'develop','gmx_branch':'develop',
+                web.create_build({'plugin_branch':'develop','gmx_branch':'feature/UKPBB-203745-test',
                                   'plugin_version':'1.3','project_name':'PayByBank',
                                   'country':'UK','jenkins_user':'foo'})
             spawn.assert_not_called()

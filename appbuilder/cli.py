@@ -9,7 +9,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 from .config import DATA, ROOT, load_config
-from .versions import validate_args, branch_names, job_urls, folder
+from .versions import validate_args, branch_names, job_urls, folder, gmx_issue_key
 from .store import create_task, task, task_list, update_task, update_task_params, task_folder, active_count
 from .jenkins import interactive_login, saved_auth_path
 from .auth import store_credentials, read_credentials, CredentialError
@@ -25,6 +25,7 @@ def args_parser():
     run.add_argument('--update', action='store_true', help='启动前安全执行 git pull --ff-only（由 ./app-build 处理）')
     run.add_argument('--jenkins-user', help='首次填写 Jenkins 用户名并保存到 Mac Keychain')
     run.add_argument('--jenkins-password', help='首次填写 Jenkins 密码并保存到 Mac Keychain（命令历史可能可见）')
+    run.add_argument('--gmx-issue-key', default='', help='GMX 工单编号；默认从 GMX 源分支提取')
     run.add_argument('--gmx-url', help='覆盖 GMX GitHub URL')
     run.add_argument('--country', default='UK')
     run.add_argument('--dry-run', action='store_true', help='仅预览，不克隆/修改/提交/触发 Jenkins')
@@ -76,6 +77,7 @@ def create_params(a, c):
     country = a.country.upper()
     validate_args(a.plugin_version, a.plugin_branch, a.gmx_branch, country, a.project_name)
     return {'plugin_source': a.plugin_branch, 'gmx_source': a.gmx_branch,
+            'gmx_issue_key': gmx_issue_key(a.gmx_branch, getattr(a, 'gmx_issue_key', '') or c.get('build', {}).get('gmx_issue_key', '')),
             'plugin_version_input': a.plugin_version, 'country': country,
             'project': a.project_name, 'plugin_url': plugin_url, 'gmx_url': gmx_url,
             'visible': bool(a.visible), 'verbose': bool(a.verbose)}
@@ -241,7 +243,7 @@ def main(argv=None):
         params = create_params(a, c)
         if a.dry_run:
             stamp = datetime.now().strftime('%Y%m%d%H%M')
-            generated = branch_names(params['plugin_version_input'], stamp)
+            generated = branch_names(params['plugin_version_input'], stamp, params['gmx_source'], params.get('gmx_issue_key', ''))
             urls = job_urls(c, generated['plugin_branch'], generated['gmx_branch'])
             print(json.dumps({**params, **generated, **urls, 'folder': folder(params['country'], params['project']),
                               'note': '预览而已：没有 Git、Jenkins、文件写入操作。正式任务时间戳由并发管理器分配。'},

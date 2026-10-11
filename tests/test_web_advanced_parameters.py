@@ -17,7 +17,7 @@ class DefaultsTest(unittest.TestCase):
     def setUp(self):
         self.cfg = load_config()
         self.body = {
-            'plugin_branch': 'develop', 'gmx_branch': 'develop',
+            'plugin_branch': 'develop', 'gmx_branch': 'feature/UKPBB-203745-test',
             'plugin_version': '1.3', 'country': 'UK', 'project_name': 'PayByBank',
         }
 

@@ -32,7 +32,7 @@ from appbuilder.config import load_config
 root = Path(sys.argv[1]); store.DATA = root
 while not (root / 'start').exists(): time.sleep(.01)
 cfg = load_config(); cfg['build']['max_parallel'] = 10
-params = dict(plugin_version_input='1.3', plugin_source='develop', gmx_source='develop',
+params = dict(plugin_version_input='1.3', plugin_source='develop', gmx_source='feature/UKPBB-203745-test',
               project='Demo', country='UK', plugin_url=cfg['github']['plugin_url'],
               gmx_url=cfg['github']['gmx_url'])
 print(json.dumps(store.create_task(cfg, params)), flush=True)

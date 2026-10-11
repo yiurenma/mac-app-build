@@ -47,7 +47,7 @@ async function loadLog(reset=false){if(!state.selected)return;const selected=sta
  }catch(e){$('terminal').append(document.createTextNode('\n[WEB] '+e.message));}}
 async function loadScreens(){if(!state.selected)return;const selected=state.selected;try{const data=await api(`/api/tasks/${encodeURIComponent(selected)}/screenshots`);if(selected!==state.selected)return;const root=$('screenshots');root.replaceChildren();for(const filename of data.files){const a=create('a','',`◧ ${filename}`);a.href=`/api/tasks/${encodeURIComponent(selected)}/screenshots/${encodeURIComponent(filename)}`;a.target='_blank';a.rel='noopener noreferrer';root.append(a);}}catch(e){/* Screenshot list is optional */}}
 async function submitBuild(evt){evt.preventDefault();const button=$('submit-build'),form=$('build-form');const data=new FormData(form);
- const body={};for(const name of ['plugin_branch','gmx_branch','plugin_version','country','project_name','jenkins_user','jenkins_password','github_token',
+ const body={};for(const name of ['plugin_branch','gmx_branch','gmx_issue_key','plugin_version','country','project_name','jenkins_user','jenkins_password','github_token',
    'plugin_url','gmx_url','plugin_parent','gmx_parent','browser_channel','gmx_build_type','gmx_signing_repo_branch',
    'gmx_custom_folder','discover_poll_seconds','poll_seconds','result_poll_seconds','console_settle_seconds','discover_timeout_minutes',
    'build_timeout_minutes','callback_timeout_minutes','max_changed_lines','upload_success_pattern',
@@ -70,7 +70,9 @@ function syncSummary(){
   const computed=`0_A_${country}_${project}`;
   if(!customFolderEdited)f.gmx_custom_folder.value=computed;
   $('derived-plugin').textContent=`release/${f.plugin_version.value||'1.3'}.[timestamp]`;
-  $('derived-gmx').textContent='upload/auto[timestamp]';
+  const keys=[...new Set((f.gmx_branch.value.match(/(?<![A-Za-z0-9])[A-Z]{1,10}-[0-9]+(?![A-Za-z0-9])/g)||[]))];
+  const issue=f.gmx_issue_key.value.trim()||(keys.length===1?keys[0]:'');
+  $('derived-gmx').textContent=issue?`upload/${issue}-auto[timestamp]`:'upload/AUTO-[timestamp]';
   $('derived-folder').textContent=f.gmx_custom_folder.value;
 }
 function installDefaults(defaults){
@@ -158,7 +160,7 @@ async function init(){const serverAddress=document.querySelector('.connection st
 document.querySelectorAll('.nav').forEach(e=>e.addEventListener('click',()=>nav(e.dataset.target)));
 $('hero-start').addEventListener('click',()=>nav('new-build'));
 $('build-form').elements.gmx_custom_folder.addEventListener('input',()=>{customFolderEdited=true;syncSummary();});
-for(const field of ['plugin_version','country','project_name'])$('build-form').elements[field].addEventListener('input',syncSummary);
+for(const field of ['plugin_version','country','project_name','gmx_branch','gmx_issue_key'])$('build-form').elements[field].addEventListener('input',syncSummary);
 // Expand collapsed advanced editor if native form validation finds an error.
 $('build-form').addEventListener('invalid',evt=>{
   const panel=evt.target.closest('#advanced-settings');
