@@ -88,6 +88,45 @@ class BrowserTests(unittest.TestCase):
             if self.mode=='permission':card='<article><pre>'+note()+'</pre><button>Enable public sharing</button></article>'
             route.fulfill(content_type='text/html',body=card)
         else:route.fulfill(status=404,body='Not Found')
+    def fixture_page(self, html):
+        self.context.unroute('**/*')
+        self.context.route('**/*', lambda route: route.fulfill(content_type='text/html',body=html))
+
+    def test_apps_entry_and_async_directory_ignore_hidden_and_heading_duplicates(self):
+        self.context.unroute('**/*')
+        def fixture(route):
+            path=route.request.url.split(BASE)[-1]
+            if path=='/my':
+                html='<a href="/apps">APPS</a>'
+            elif path=='/apps':
+                html='''<h1>IOS_Upload</h1><a hidden href="/wrong">IOS_Upload</a><div id="list"></div>
+                <script>setTimeout(()=>document.querySelector('#list').innerHTML='<a href="/folder1">IOS_Upload</a>',250)</script>'''
+            else:return self.route(route)
+            route.fulfill(content_type='text/html',body=html)
+        self.context.route('**/*',fixture)
+        self.worker._folder('IOS_Upload/IOS_Release/custom_HK')
+        self.assertTrue(self.worker.page.url.endswith('/folder3'))
+
+    def test_current_breadcrumb_skips_ancestor_clicks(self):
+        self.fixture_page('<nav aria-label="breadcrumb"><a>APPS</a><a>IOS_Upload</a><a>IOS_Release</a><span aria-current="page">custom_HK</span></nav><h1>custom_HK</h1>')
+        self.worker._folder('IOS_Upload/IOS_Release/custom_HK')
+        self.assertTrue(self.worker.page.url.endswith('/my'))
+
+    def test_tree_scope_excludes_same_named_sibling_path(self):
+        self.fixture_page('''<div role="tree"><div role="treeitem"><a onclick="">IOS_Upload</a><div role="group">
+        <div role="treeitem"><a onclick="">IOS_Release</a><div role="group"><a onclick="window.chosen='right'">custom_HK</a></div></div>
+        <div role="treeitem"><a onclick="">Other</a><div role="group"><a onclick="window.chosen='wrong'">custom_HK</a></div></div>
+        </div></div></div>''')
+        self.worker._folder('IOS_Upload/IOS_Release/custom_HK')
+        self.assertEqual(self.worker.page.evaluate('window.chosen'),'right')
+
+    def test_ambiguous_nodes_report_structure_without_click_or_secrets(self):
+        self.fixture_page('<a href="/a?token=SECRET">IOS_Upload</a><a href="/b?token=SECRET">IOS_Upload</a>')
+        with self.assertRaisesRegex(NeedsAttention,'可见交互候选 2') as error:
+            self.worker._folder('IOS_Upload')
+        self.assertNotIn('SECRET',str(error.exception))
+        self.assertTrue(self.worker.page.url.endswith('/my'))
+
     def test_login_native_csrf_exact_card_and_existing_link(self):
         result=self.worker.find(expected_build(PARAMS,RUNTIME))
         self.assertEqual(result['share_url'],BASE+'/join/current')

@@ -682,11 +682,14 @@ def make_handler(csrf_token):
 
 
 def serve(port=8765, *, open_browser=True, server_factory=ThreadingHTTPServer):
-    """Bind loopback only; no background daemon or external connectivity."""
+    """Bind loopback, then ensure the independent scheduler is available."""
     if not isinstance(port, int) or not (1024 <= port <= 65535):
         raise ValueError('Web 端口必须在 1024–65535 之间')
     token = secrets.token_urlsafe(32)
     with server_factory((HOST, port), make_handler(token)) as httpd:
+        from .scheduler import SchedulerSupervisor
+        supervisor = SchedulerSupervisor()
+        supervisor.start()
         url = f'http://{HOST}:{httpd.server_port}'
         print(f'[WEB] Mac APP Builder v{__version__} | 本地管理页面 {url}', flush=True)
         print('[WEB] 按 Ctrl+C 关闭页面服务；已经启动的后台构建不会停止。', flush=True)
@@ -697,3 +700,6 @@ def serve(port=8765, *, open_browser=True, server_factory=ThreadingHTTPServer):
             httpd.serve_forever(poll_interval=0.3)
         except KeyboardInterrupt:
             print('\n[WEB] 页面服务已关闭；Worker 继续后台执行。', flush=True)
+
+        finally:
+            supervisor.stop()

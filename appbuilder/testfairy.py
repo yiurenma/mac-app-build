@@ -126,6 +126,51 @@ def share_url(raw, base):
     return urlunsplit(('https',u.hostname.lower(),u.path,u.query,''))
 
 
+_FOLDER_SELECTOR = 'a, button, [role="treeitem"], [role="button"], [role="link"], [onclick], [data-folder-id], .folder-node'
+_FOLDER_CANDIDATES = r"""({label,parents,path,selector}) => {
+  const norm=x=>(x||'').replace(/\s+/g,' ').trim();
+  const visible=e=>!!e.getClientRects().length && getComputedStyle(e).visibility!=='hidden';
+  const crumbSelector='nav[aria-label*="readcrumb"], [role="navigation"][aria-label*="readcrumb"], .breadcrumb, .breadcrumbs, [data-breadcrumb]';
+  const name=e=>{
+    if(e.getAttribute('aria-label'))return norm(e.getAttribute('aria-label'));
+    const clone=e.cloneNode(true);
+    clone.querySelectorAll('ul,ol,[role="group"]').forEach(n=>n.remove());
+    return norm(clone.textContent);
+  };
+  const ancestors=e=>{
+    const result=[];
+    for(let p=e.parentElement;p;p=p.parentElement){if(p.matches('[role="treeitem"],li[data-folder-id],.folder-node'))result.unshift(name(p));}
+    return result;
+  };
+  const containsPath=names=>{
+    if(names[0]==='APPS')names=names.slice(1);
+    return names.length>parents.length && [...parents,label].every((n,i)=>names[i]===n);
+  };
+  let current=false;
+  document.querySelectorAll(crumbSelector).forEach(c=>{
+    if(!visible(c))return;
+    const names=Array.from(c.querySelectorAll('a,button,[aria-current],li,span'))
+      .filter(e=>visible(e)&&!e.querySelector('a,button,[aria-current],li,span')).map(e=>norm(e.textContent));
+    if(containsPath(names))current=true;
+  });
+  document.querySelectorAll('[role="treeitem"][aria-selected="true"], [role="treeitem"][aria-current="page"]').forEach(e=>{
+    if(visible(e)&&containsPath([...ancestors(e),name(e)]))current=true;
+  });
+  const all=Array.from(document.querySelectorAll(selector));
+  let candidates=all.map((e,index)=>({e,index})).filter(({e})=>visible(e)&&!e.disabled&&e.getAttribute('aria-disabled')!=='true'&&!e.closest(crumbSelector)&&name(e)===label);
+  // A nested label link and its treeitem represent one node: prefer the interactive leaf.
+  candidates=candidates.filter(({e})=>!candidates.some(x=>x.e!==e&&e.contains(x.e)));
+  const scoped=candidates.filter(({e})=>{
+    let names=ancestors(e);if(names[names.length-1]===label)names=names.slice(0,-1);
+    if(names[0]==='APPS')names=names.slice(1);
+    return names.length===parents.length&&names.every((n,i)=>n===parents[i]);
+  });
+  // A flat directory listing has no tree ancestors. A tree must match the full parent path.
+  candidates=scoped.length?scoped:candidates.filter(({e})=>ancestors(e).length===0);
+  return {current,indices:candidates.map(x=>x.index),summary:candidates.slice(0,8).map(({e})=>({tag:e.tagName.toLowerCase(),role:e.getAttribute('role')||'',treeDepth:ancestors(e).length}))};
+}"""
+
+
 class TestFairyBrowser:
     def __init__(self, config, data, options, *, login_credentials=None, visible=True):
         self.config=config;self.options=options;self.base=approved_target(options['login_url'],config)
@@ -194,11 +239,34 @@ class TestFairyBrowser:
         self.page.goto(self.base+'/my',wait_until='domcontentloaded')
         if not self._same_origin() or self.page.locator('input[type=password]').count():
             raise NeedsAttention('TestFairy 会话已失效，停止查找，构建不会重跑')
-        for label in path.split('/'):
-            item=self.page.get_by_text(label,exact=True)
-            if item.count()!=1:raise NeedsAttention('TestFairy 目录无法唯一定位：'+label+'；请核对实际目录或配置 folder_path')
-            item.click()
-            if not self._same_origin():raise NeedsAttention('TestFairy 目录跳转离开当前租户')
+        labels=path.split('/')
+        selector=self.config.get('testfairy',{}).get('folder_selector',_FOLDER_SELECTOR)
+        root=self.page.evaluate(_FOLDER_CANDIDATES, {'label':labels[0],'parents':[],'path':labels,'selector':selector})
+        if not root['current'] and not root['indices']:
+            apps=self.page.evaluate(_FOLDER_CANDIDATES, {'label':'APPS','parents':[],'path':['APPS'],'selector':selector})
+            if len(apps['indices'])==1:
+                self.page.locator(selector).nth(apps['indices'][0]).click()
+                if not self._same_origin():raise NeedsAttention('APPS 跳转离开当前租户')
+        for depth,label in enumerate(labels):
+            deadline=time.monotonic()+3
+            while True:
+                evidence=self.page.evaluate(_FOLDER_CANDIDATES, {'label':label,'parents':labels[:depth],
+                    'path':labels,'selector':self.config.get('testfairy',{}).get('folder_selector',_FOLDER_SELECTOR)})
+                if evidence['current']:
+                    break  # breadcrumb/tree explicitly proves we are already at this path level
+                if len(evidence['indices'])==1:
+                    self.page.locator(self.config.get('testfairy',{}).get('folder_selector',_FOLDER_SELECTOR)).nth(evidence['indices'][0]).click()
+                    if not self._same_origin():raise NeedsAttention('TestFairy 目录跳转离开当前租户')
+                    break
+                if time.monotonic()>=deadline:
+                    # No page text, href values, credentials or query strings in diagnostics.
+                    raise NeedsAttention('TestFairy 目录无法唯一定位：'+label+
+                        '；已走过 '+('/'.join(labels[:depth]) or 'APPS')+
+                        '；页面路径 '+urlsplit(self.page.url).path+
+                        '；可见交互候选 '+str(len(evidence['indices']))+
+                        '；候选结构 '+json.dumps(evidence['summary'],ensure_ascii=False)+
+                        '；请提供目录树截图或配置 testfairy.folder_selector（仅目录节点）')
+                self.page.wait_for_timeout(200)
     def find(self,expected):
         self.login(expected)
         cfg=self.config.get('testfairy',{})

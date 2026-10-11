@@ -131,7 +131,7 @@ GMX 参数页按现场截图新增 `SKIP_TEST`（默认 true）、`FORCE`（默�
 
 ## 定时任务
 
-在 **New build** 开启「保存为定时任务」，用同一表单输入 cron；**Schedules** 管理已有计划。独立调度器可用 `./app-build scheduler run` 前台运行；按需手动 `./app-build scheduler install` 后在登录 Mac 时自动运行。错过的时间只补跑最近一次，并发已满时排队。详见 [定时任务说明](docs/24-定时任务.md)。
+在 **New build** 开启「保存为定时任务」，用同一表单输入 cron；**Schedules** 管理已有计划。启动 Web 会自动检查并启动独立调度器，关闭 Web 后继续运行，无需额外命令。已有实例会复用；按需手动 `./app-build scheduler install` 后在登录 Mac 时自动运行。错过的时间只补跑最近一次，并发已满时排队。详见 [定时任务说明](docs/24-定时任务.md)。
 
 ## 0. 工作流
 

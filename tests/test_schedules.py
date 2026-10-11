@@ -174,7 +174,11 @@ class SchedulerProcessTests(SchedulerCase):
         with patch.object(scheduler, 'DATA', Path(self.tmp.name)):
             self.assertFalse(scheduler.heartbeat_status()['online'])
             scheduler.write_heartbeat()
-            self.assertTrue(scheduler.heartbeat_status()['online'])
+            self.assertFalse(scheduler.heartbeat_status()['online'])
+            with scheduler.lock_path().open('a+b') as handle:
+                import fcntl
+                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                self.assertTrue(scheduler.heartbeat_status()['online'])
             self.assertFalse(scheduler.heartbeat_status(now=__import__('time').time() + 600)['online'])
 
     def test_run_forever_survives_a_failing_tick_and_single_instance(self):

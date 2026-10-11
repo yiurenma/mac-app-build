@@ -13,7 +13,7 @@ function renderStatus(info,maxParallel,minInterval){
   box.className='diagnose-verdict '+(s.online?'pass':'fail');
   box.textContent=s.online
     ?`调度器在线 · pid ${s.pid} · 并发上限 ${maxParallel}（与手动构建共用）· 最小运行间隔 ${minInterval} 分钟`
-    :`调度器离线 · 并发上限 ${maxParallel} · 最小间隔 ${minInterval} 分钟。定时任务不会触发；可临时运行 ./app-build scheduler run。`;
+    :`调度器离线 · 并发上限 ${maxParallel} · 最小间隔 ${minInterval} 分钟。${s.startup||s.reason||'Web 正在自动检查'}。日志：${s.log_path||'.appbuilder/scheduler.log'}；修复后 Web 自动重试。`;
 }
 function renderRows(){
   const body=el('schedules-body');body.replaceChildren();

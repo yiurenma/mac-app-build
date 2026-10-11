@@ -67,7 +67,16 @@ def start(body):
         if body.get('confirm_send') is not True:raise ValueError('请明确点击发送测试邮件')
         to=recipients(body.get('recipients',''));account=body.get('account','').strip()
         if not to or (account and not valid_address(account)):raise ValueError('请填写有效测试收件人和发件账号')
-        inputs={'to':to,'account':account};secret=None
+        task_id=body.get('task_id','')
+        if not isinstance(task_id,str) or not re.fullmatch(r'\d{12}-[0-9a-f]{6}',task_id):
+            raise ValueError('请选择用于测试报告的历史构建')
+        from .store import task,read_state
+        from .outlook import outcome_preview,read_log_tail
+        row=task(task_id);params=json.loads(row['params'])
+        preview=outcome_preview(row,params,read_state(task_id),read_log_tail(task_id))
+        preview.update(subject='[APP Builder TEST] '+preview['subject'],to=to,account=account)
+        preview['body']='这是您主动发送的历史构建测试报告，不代表重新构建或正式通知。\n\n'+preview['body']
+        inputs={'to':to,'account':account,'task_id':task_id};secret=None
     fingerprint=hashlib.sha256(json.dumps(inputs,sort_keys=True).encode()).hexdigest()
     now=time.time()
     with _LOCK,closing(connect()) as db,db:
@@ -77,6 +86,12 @@ def start(body):
             if existing['fingerprint']!=fingerprint or existing['kind']!=kind:raise ValueError('测试编号已用于不同输入，禁止重复提交')
             return {'id':test_id}
         uncertain=db.execute("SELECT id FROM tests WHERE kind=? AND fingerprint=? AND status IN ('SUBMITTING','UNKNOWN') LIMIT 1",(kind,fingerprint)).fetchone()
+        if kind=='outlook' and not uncertain:
+            # Include older fixed-content tests: changing task must not silently replay an uncertain send.
+            for previous in db.execute("SELECT result FROM tests WHERE kind='outlook' AND status IN ('SUBMITTING','UNKNOWN')"):
+                result=json.loads(previous['result'])
+                if result.get('to')==inputs['to'] and (not inputs['account'] or result.get('account')==inputs['account']):
+                    uncertain=True;break
         if kind=='outlook' and uncertain:
             raise ValueError('同一目标已有结果不明的测试邮件，请先核对 Outlook 发件箱/已发送；禁止盲目重发')
         recent=db.execute('SELECT id,status,created FROM tests WHERE kind=? ORDER BY created DESC LIMIT 1',(kind,)).fetchone()
@@ -101,17 +116,17 @@ def start(body):
                         'requested_url':inputs['url'],'final_url':final,'expected_share_url':inputs['wanted'],
                         'actual_share_url':actual,'task_id':inputs['task_id'],'build_url':app['build_url'],'app_version':app['app_version']})
             else:
-                from .outlook import OutlookAdapter
+                from .outlook import OutlookAdapter,call_diagnostic
                 adapter=OutlookAdapter();account=adapter.resolve(inputs['account'])
                 finish(test_id,'SUBMITTING',{'account':account['email'],'to':inputs['to'],'message':'正在提交测试邮件，尚未确认结果'})
-                preview={'subject':'[APP Builder TEST] Outlook 邮件连通测试 '+test_id[:8],
-                         'body':'这是一封由您点击发送的 APP Builder 测试邮件。不包含构建资料、App 链接或登录凭据。请求编号：'+test_id,
-                         'to':inputs['to']}
                 try:
                     result=adapter.submit(preview,account)
                     if result.get('status')!='SUBMITTED':raise NeedsAttention('unknown')
-                except BaseException:
-                    finish(test_id,'UNKNOWN',{'message':'发送结果不明，请核对 Outlook 发件箱/已发送；不会自动重试','account':account['email'],'to':inputs['to']});return
+                except BaseException as exc:
+                    not_sent=getattr(exc,'not_submitted',False)
+                    finish(test_id,'BLOCKED' if not_sent else 'UNKNOWN',{'message':
+                        ('未调用发送，请修复后手动重试。' if not_sent else '发送结果不明，请核对 Outlook 发件箱/已发送；不会自动重试。')+safe_text(str(exc)),
+                        **call_diagnostic(exc),'account':account['email'],'to':inputs['to'],'task_id':inputs['task_id']});return
                 finish(test_id,'SUBMITTED',{**result,'message':'已提交本机 Outlook；尚未验证服务器发出或收件人送达','account':account['email'],'to':inputs['to']})
         except (NeedsAttention,ValueError) as exc:
             finish(test_id,'BLOCKED',{'message':safe_text(str(exc))})

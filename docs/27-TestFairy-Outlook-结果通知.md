@@ -25,7 +25,7 @@
 
 结果邮件包含真实任务状态、已完成阶段、当前失败阶段、原因、需处理提示、脱敏日志摘要、分支、实际 Plugin 产物版本、Jenkins 编号/URL、SHA、时间。仅任务成功且匹配证据可复核时附 App 链接。失败时不借用历史包链接。邮件状态与构建状态分开记录；通知失败不会抹掉原始构建结果，也不会递归触发失败通知。
 
-发送前持久化 SUBMITTING。同一状态/阶段/构建/链接的通知去重；恢复后从失败变成功会产生新结果通知。提交中断或返回不明标记 UNKNOWN，不自动重发，需人工核对 Outlook 发件箱/已发送。SUBMITTED 只代表原生接口接受提交，不是服务器投递确认。没有真实收件人配置的本轮开发不会发信。
+发送前持久化 SUBMITTING。同一状态/阶段/构建/链接的通知去重；恢复后从失败变成功会产生新结果通知。已证实在 send 前失败会标记 BLOCKED 并保留阶段；提交中断或返回不明标记 UNKNOWN，不自动重发，需人工核对 Outlook 发件箱/已发送。SUBMITTED 只代表原生接口接受提交，不是服务器投递确认。没有真实收件人配置的本轮开发不会发信。
 
 依据：[Microsoft Legacy 支持说明](https://support.microsoft.com/en-us/outlook/end-of-support-for-legacy-outlook-for-mac)、[默认账号说明](https://support.microsoft.com/en-us/outlook/set-an-account-as-the-default-in-outlook-for-mac)。当前没有据以保证所有 New Outlook 版本支持此本机自动化的官方接口承诺，实际客户端能力探测是必要条件。
 
@@ -37,7 +37,7 @@
 
 “校验 TestFairy 分享链接”使用单独的登录入口、临时账号密码、预期 `/join/` 分享链接和所选历史任务。后端复用正式 `find()`，按保存的 GMX URL/编号/SHA/目录查找并提取已有链接，显示预期、实际及 MATCH/MISMATCH，不直接打开预期链接回显。不足时明确要求选择具备目标信息的任务；不取最新包。URL 比较只规范 scheme/主机大小写及 HTTPS 默认端口，保留路径和 query 区别；敏感认证参数被拒绝。
 
-“发送一封 Outlook 测试邮件”由用户明确点击并填写收件人后执行，固定安全内容，无构建、App 链接或秘密。先核验本机接口与账号；提交后只报告 SUBMITTED，不声称已验证发出或送达；UNKNOWN 不自动重试。测试记录在独立 SQLite 中按请求编号幂等，同类并发与短时间重复点击被限制。两种测试都不会创建打包任务或启动 Jenkins。
+“发送一封 Outlook 测试邮件”由用户明确点击并填写收件人后执行，复用所选历史构建的正式报告模板，包含逐步输入/输出/状态/错误和已核验的 App 链接；缺失信息标为未记录，秘密脱敏，主题明确带 TEST，不改正式通知去重记录。先核验本机接口与账号；提交后只报告 SUBMITTED，不声称已验证发出或送达；UNKNOWN 不自动重试。测试记录在独立 SQLite 中按请求编号幂等，同类并发与短时间重复点击被限制。两种测试都不会创建打包任务或启动 Jenkins。
 
 测试接口：POST `/api/delivery-tests/start`（沿用 localhost/Origin/CSRF 防护），GET `/api/delivery-tests/<id>`。TestFairy 只允许 `config.yaml` 的 `testfairy.allowed_hosts` 明确列出的租户，默认仅 `hsbc-mobilex.testfairy.com`，不把公司凭据自动提交到外部重定向。测试密码不入数据库、不默认保存会话。独立包匹配测试等待上传最多 60 秒，MFA 最多 180 秒。
 
@@ -54,3 +54,14 @@
 最终 `./selftest.sh` 三轮各 364 项通过，耗时 70.665 / 67.934 / 65.081 秒。包含 17 项 TestFairy 专项、10 项独立测试 API、10 项 Outlook 通知、7 项逐步报告及 5 项真实 Chromium UI 回归。Python 编译、Shell 语法、CLI dry-run、两个 JavaScript 语法及差异空白检查通过。Python 3.11 grammar 模式通过；此环境实际使用 Python 3.12，未运行 Mac/3.11 实机。
 
 验收中曾出现一项旧 soft-404 测试的 6ms 时间预算不足，导致首次页面检查前即超时；已仅将该测试预算改为 600ms，生产轮询逻辑未改变。最终三轮无失败。全部邮件测试使用 mock，没有向任何真实收件人发送。
+
+
+### 现场诊断
+
+New build 按 01 Plugin、02 GMX、03 TestFairy、04 邮件分组；03 通常只需账号密码，04 只需收件人，例外路径/发件账号折叠在高级设置。两个独立测试位于页面最底部，与 Jenkins/GMX 测试同级，左侧 TestFairy Test / Outlook Test 可直接定位。先在任务列表选择历史构建，再填写测试收件人并点击发送；不需要开启正式自动邮件开关。
+
+TestFairy 先识别 APPS 入口，等待异步目录出现；排除隐藏节点、普通标题和面包屑，按目录树父子路径定位。面包屑或已选树节点证明已到目标路径时不重复点击祖先。多个有效候选不会取第一个，而显示失败层级、页面路径、可见候选数及标签/角色/树深度；不收集整页内容或链接查询参数。自定义 `testfairy.folder_selector` 必须只覆盖实际目录节点。认证后的真实公司 DOM 仍需用户运行验证。
+
+Outlook 的 JXA 返回阶段、错误号及 `send_attempted`。创建邮件、设置账号/收件人、取编号等明确在发送前的异常显示 BLOCKED；调用发送之后异常、超时、返回解析失败仍为 UNKNOWN。原生退出码和有界脱敏错误保留，不能凭唯一发件账号推断已发送。UNKNOWN 应先在 Outlook 的发件箱/已发送核对，程序不会自动重发；更换测试构建也不会绕过同一目标的不明提交保护。旧版本已记录的 UNKNOWN 不能事后推断发送阶段。
+
+开发覆盖生产 JXA 在 Node 模拟宿主中的执行分支、Python 调用边界和真实 Chromium 的离线目录布局；这些不是实际 macOS Outlook/Apple Events 或公司站点的验收。

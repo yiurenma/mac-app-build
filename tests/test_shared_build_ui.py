@@ -49,14 +49,17 @@ class SharedBuildUITests(unittest.TestCase):
         self.form = self.page.locator('#build-form')
 
     def field(self, name):
-        return self.form.locator(f'[name="{name}"]')
+        scope=self.page if name.startswith(('tf_test_','mail_test_')) else self.form
+        return scope.locator(f'[name="{name}"]')
 
     def open_details(self):
         self.form.locator('details').evaluate_all('(nodes)=>nodes.forEach(n=>n.open=true)')
 
     def test_defaults_help_branch_paging_refresh_and_manual_fallback(self):
         p = self.page
-        self.assertEqual(self.form.locator('[data-build]:visible').count(), 5)
+        self.assertEqual(self.form.locator('[data-build]:visible').count(), 11)
+        for name in ['testfairy_login_url','testfairy_folder_path','outlook_account']:
+            self.assertFalse(self.field(name).is_visible())
         self.assertEqual(self.field('country').locator('option').count(), 25)
         self.assertEqual(self.field('country').input_value(), 'UK')
         self.assertEqual(p.locator('#gmx-build-live-form [name=country]').input_value(), 'UK')
@@ -202,7 +205,10 @@ class SharedBuildUITests(unittest.TestCase):
         self.assertFalse(self.errors,self.errors)
 
     def test_independent_link_and_email_buttons_use_test_apis_without_build(self):
-        p=self.page;p.locator('#delivery-tests').evaluate('(x)=>x.open=true')
+        p=self.page
+        self.assertEqual(p.locator('#build-form #tf-test-form, #build-form #mail-test-form').count(),0)
+        self.assertEqual(p.locator('#build-form .group-head:has(span)').all_text_contents(),['01 Plugin','02 GMX','03 TestFairy','04 邮件'])
+        p.locator('.nav[data-target=testfairy-tests]').click()
         self.field('tf_test_user').fill('offline@example.com')
         self.field('tf_test_password').fill('FAKE_TEST_PASSWORD')
         self.field('tf_test_expected').fill('https://hsbc-mobilex.testfairy.com/join/current')
@@ -214,13 +220,16 @@ class SharedBuildUITests(unittest.TestCase):
             self.assertEqual(start.call_args.args[0]['task_id'],'202610111000-abcdef')
             self.assertEqual(start.call_args.args[0]['expected_share_url'],'https://hsbc-mobilex.testfairy.com/join/current')
             self.assertEqual(self.field('tf_test_password').input_value(),'')
+            self.field('mail_test_task').evaluate('(x)=>x.value="202610111000-abcdef"')
             self.field('mail_test_to').fill('recipient@example.com')
             result.update(status='SUBMITTED',result={'message':'已提交 Outlook，未验证投递'})
             p.locator('#test-outlook-send').click()
             expect(p.locator('#mail-test-result')).to_contain_text('SUBMITTED')
             self.assertTrue(start.call_args.args[0]['confirm_send'])
+            self.assertEqual(start.call_args.args[0]['task_id'],'202610111000-abcdef')
             self.assertEqual(start.call_args.args[0]['recipients'],'recipient@example.com')
         self.assertFalse(self.manual)
         self.assertFalse(self.errors,self.errors)
         destination=Path('/tmp/mac-app-build-ui');destination.mkdir(exist_ok=True)
-        p.locator('#delivery-tests').screenshot(path=str(destination/'delivery-tests.png'))
+        p.locator('#testfairy-tests').screenshot(path=str(destination/'testfairy-test.png'))
+        p.locator('#mail-tests').screenshot(path=str(destination/'outlook-test.png'))

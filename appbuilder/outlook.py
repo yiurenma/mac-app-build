@@ -4,6 +4,7 @@ No SMTP/OAuth credentials. A submitted request is not proof of remote delivery.
 """
 from __future__ import annotations
 import json
+import errno
 import os
 import re
 import subprocess
@@ -50,19 +51,42 @@ PROBE_JS='''function run(argv) {
 }'''
 SEND_JS='''ObjC.import('Foundation');
 function run(argv) {
- const raw=$.NSString.stringWithContentsOfFileEncodingError(argv[0],$.NSUTF8StringEncoding,null);
- const p=JSON.parse(ObjC.unwrap(raw));
- const app=Application('Microsoft Outlook');
- const accounts=app.exchangeAccounts().concat(app.imapAccounts(),app.popAccounts());
- const matches=accounts.filter(a=>a.emailAddress().toLowerCase()===p.account.toLowerCase()&&String(a.id())===p.account_id);
- if(matches.length!==1)throw Error('Account changed; no message created');
- const msg=app.OutgoingMessage({subject:p.subject,plainTextContent:p.body,account:matches[0]});
- app.outgoingMessages.push(msg);
- p.to.forEach(address=>msg.toRecipients.push(app.ToRecipient({emailAddress:{address:address}})));
- const id=String(msg.id());
- app.send(msg);
- return JSON.stringify({message_id:id,status:'SUBMITTED'});
+ let stage='read_payload', id='', send_attempted=false;
+ try {
+  const raw=$.NSString.stringWithContentsOfFileEncodingError(argv[0],$.NSUTF8StringEncoding,null);
+  const p=JSON.parse(ObjC.unwrap(raw));
+  const app=Application('Microsoft Outlook');
+  stage='resolve_account';
+  const accounts=app.exchangeAccounts().concat(app.imapAccounts(),app.popAccounts());
+  const matches=accounts.filter(a=>a.emailAddress().toLowerCase()===p.account.toLowerCase()&&String(a.id())===p.account_id);
+  if(matches.length!==1)throw Error('Account changed; no message created');
+  stage='create_message';
+  const msg=app.OutgoingMessage({subject:p.subject,plainTextContent:p.body});
+  app.outgoingMessages.push(msg);
+  stage='set_account';
+  msg.account=matches[0];
+  stage='set_recipients';
+  p.to.forEach(address=>msg.toRecipients.push(app.ToRecipient({emailAddress:{address:address}})));
+  stage='message_id';id=String(msg.id());
+  if(!id||id==='undefined'||id==='null')throw Error('Outlook did not return a message ID');
+  stage='send';send_attempted=true;app.send(msg);
+  stage='response';return JSON.stringify({message_id:id,status:'SUBMITTED'});
+ } catch(e) {
+  return JSON.stringify({status:'ERROR',stage:stage,send_attempted:send_attempted,message_id:id,error:String(e),error_number:e.errorNumber||null});
+ }
 }'''
+
+
+class OutlookCallError(NeedsAttention):
+    def __init__(self, stage, detail, *, not_submitted=False, returncode=None, error_number=None):
+        from .telemetry import safe_text
+        self.stage=stage
+        self.not_submitted=not_submitted
+        self.returncode=returncode
+        self.error_number=error_number if isinstance(error_number,int) else None
+        self.send_attempted=False if not_submitted else (True if stage=='send' else None)
+        super().__init__('Outlook 阶段 '+stage+'：'+safe_text(str(detail))[:800])
+
 
 
 class OutlookAdapter:
@@ -83,10 +107,24 @@ class OutlookAdapter:
     def _script(self,source,args=()):
         try:
             result=subprocess.run(['/usr/bin/osascript','-l','JavaScript','-e',source,*args],capture_output=True,text=True,timeout=60)
-            if result.returncode:raise ValueError()
-            return json.loads(result.stdout)
-        except (OSError,ValueError,subprocess.TimeoutExpired):
-            raise NeedsAttention('Outlook 原生调用未确认成功；请检查应用版本及 macOS 自动化权限，不会自动改用其他邮箱') from None
+        except subprocess.TimeoutExpired:
+            raise OutlookCallError('timeout','原生调用超过 60 秒；发送可能已开始，请核对发件箱/已发送') from None
+        except OSError as exc:
+            raise OutlookCallError('invoke',exc,not_submitted=exc.errno in (errno.ENOENT,errno.EACCES,errno.ENOEXEC)) from None
+        if result.returncode:
+            raise OutlookCallError('native_call',f'退出代码 {result.returncode}: '+(result.stderr or '无错误输出'),returncode=result.returncode)
+        try:
+            payload=json.loads(result.stdout)
+            if not isinstance(payload,dict):raise ValueError()
+        except (ValueError,TypeError):
+            raise OutlookCallError('response_parse','原生返回不是有效 JSON 对象；不回显原始内容，发送结果需人工核对') from None
+        if payload.get('status')=='ERROR':
+            stage=payload.get('stage','native_call')
+            if stage not in {'read_payload','resolve_account','create_message','set_account','set_recipients','message_id','send','response'}:stage='native_call'
+            raise OutlookCallError(stage,payload.get('error','未知原生错误'),
+                not_submitted=payload.get('send_attempted') is False and stage in {
+                    'read_payload','resolve_account','create_message','set_account','set_recipients','message_id'},error_number=payload.get('error_number'))
+        return payload
     def probe(self):
         self._dictionary()
         result=self._script(PROBE_JS)
@@ -101,16 +139,25 @@ class OutlookAdapter:
         return choices[0]
     def submit(self,preview,account):
         payload={**preview,'account':account['email'],'account_id':account['id']}
-        fd,path=tempfile.mkstemp(prefix='app-builder-mail-',suffix='.json')
         try:
-            with os.fdopen(fd,'w') as f:json.dump(payload,f,ensure_ascii=False)
-            os.chmod(path,0o600)
+            fd,path=tempfile.mkstemp(prefix='app-builder-mail-',suffix='.json')
+        except OSError as exc:
+            raise OutlookCallError('prepare_payload',exc,not_submitted=True) from None
+        try:
+            try:
+                with os.fdopen(fd,'w') as f:json.dump(payload,f,ensure_ascii=False)
+                os.chmod(path,0o600)
+            except (OSError,ValueError,TypeError) as exc:
+                raise OutlookCallError('prepare_payload',exc,not_submitted=True) from None
             result=self._script(SEND_JS,(path,))
             if result.get('status')!='SUBMITTED' or not result.get('message_id'):
-                raise NeedsAttention('Outlook 未返回邮件编号，发送结果不明')
+                raise OutlookCallError('response','Outlook 未返回邮件编号，发送结果不明')
             return result
         finally:
-            if os.path.exists(path):os.unlink(path)
+            try:
+                os.unlink(path)
+            except OSError:
+                pass  # cleanup must never turn a confirmed submission into a retryable failure
 
 
 def outcome_preview(row, params, state, log_text=''):
@@ -152,20 +199,31 @@ def outcome_preview(row, params, state, log_text=''):
             'task_id':row['id']}
 
 
+def call_diagnostic(exc):
+    return {'stage':getattr(exc,'stage','submit'), 'send_attempted':getattr(exc,'send_attempted',None),
+            'returncode':getattr(exc,'returncode',None), 'error_number':getattr(exc,'error_number',None)}
+
+
+def read_log_tail(task_id):
+    from .store import task_folder
+    path=task_folder(task_id)/'run.log'
+    try:
+        with path.open('rb') as stream:
+            stream.seek(max(0,path.stat().st_size-16000))
+            return stream.read().decode('utf-8',errors='replace')
+    except OSError:
+        return ''
+
+
 def notify_outcome(task_id, adapter=None):
     import hashlib
-    from .store import read_state,patch_runtime,task,task_folder
+    from .store import read_state,patch_runtime,task
     row=task(task_id)
     if row['status'] not in ('SUCCESS','FAILED','NEEDS_ATTENTION','TIMEOUT','INTERRUPTED'):return
     params=json.loads(row['params']);options=params.get('outlook',{})
     if not options.get('enabled') and not params.get('testfairy',{}).get('enabled'):return
     state=read_state(task_id);runtime=state.get('runtime',{})
-    log_path=task_folder(task_id)/'run.log'
-    try:
-        with log_path.open('rb') as stream:
-            stream.seek(max(0,log_path.stat().st_size-16000));tail=stream.read().decode('utf-8',errors='replace')
-    except OSError:tail=''
-    preview=outcome_preview(row,params,state,tail)
+    preview=outcome_preview(row,params,state,read_log_tail(task_id))
     identity={'status':row['status'],'stage':row['stage'],
               'build':runtime.get('gmx_build_number',runtime.get('gmx_formal_number')),
               'link':runtime.get('testfairy_app',{}).get('share_url') if row['status']=='SUCCESS' else None}
@@ -191,7 +249,11 @@ def notify_outcome(task_id, adapter=None):
     try:
         result=adapter.submit({**preview,'to':options['to']},account)
         if result.get('status')!='SUBMITTED':raise ValueError('unconfirmed submission')
-    except BaseException:
-        record({**base,'status':'UNKNOWN','reason':'提交结果不明，请核对 Outlook 发件箱/已发送；禁止自动重发'})
+    except BaseException as exc:
+        from .telemetry import safe_text
+        not_sent=getattr(exc,'not_submitted',False)
+        record({**base,'status':'BLOCKED' if not_sent else 'UNKNOWN','reason':
+                ('未调用发送，请修复后手动重试。' if not_sent else '提交结果不明，请核对 Outlook 发件箱/已发送；禁止自动重发。')+safe_text(str(exc)),
+                **call_diagnostic(exc)})
         return
     record({**base,**result})

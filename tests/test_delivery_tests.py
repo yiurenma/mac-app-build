@@ -15,12 +15,16 @@ class DeliveryTestAPIs(unittest.TestCase):
         for target,value in [('appbuilder.delivery_tests.DATA',Path(self.tmp.name)),('appbuilder.delivery_tests.threading.Thread',ImmediateThread)]:
             p=patch(target,value);p.start();self.addCleanup(p.stop)
         dt._ACTIVE.clear()
-        self.mail={'kind':'outlook','request_id':'a'*32,'recipients':'work@example.com','confirm_send':True}
+        self.task_id='202610111000-abcdef'
+        self.row={'id':self.task_id,'params':json.dumps({'country':'UK','project':'PayByBank'}),'status':'FAILED','stage':'GMX_JENKINS','created':'now','note':'password=SECRET'}
+        for target,value in [('appbuilder.store.task',lambda _:self.row),('appbuilder.store.read_state',lambda _:{'completed':[],'runtime':{}})]:
+            p=patch(target,value);p.start();self.addCleanup(p.stop)
+        self.mail={'task_id':self.task_id,'kind':'outlook','request_id':'a'*32,'recipients':'work@example.com','confirm_send':True}
     def adapter(self):
         adapter=Mock();adapter.resolve.return_value={'email':'sender@example.com','id':'1'}
         adapter.submit.return_value={'status':'SUBMITTED','message_id':'message-1'}
         return adapter
-    def test_email_click_sends_only_fixed_content_and_returns_submission_not_delivery(self):
+    def test_email_click_sends_history_report_without_rebuilding_or_changing_notifications(self):
         adapter=self.adapter()
         with patch('appbuilder.outlook.OutlookAdapter',return_value=adapter):dt.start(self.mail)
         result=dt.poll('a'*32)
@@ -28,7 +32,26 @@ class DeliveryTestAPIs(unittest.TestCase):
         self.assertIn('尚未验证',result['result']['message'])
         payload=adapter.submit.call_args.args[0]
         self.assertIn('TEST',payload['subject']);self.assertNotIn('/join/',payload['body'])
-        self.assertNotIn('password',json.dumps(payload))
+        self.assertNotIn('SECRET',json.dumps(payload))
+        self.assertIn(self.task_id,payload['body'])
+        self.assertIn('GMX_JENKINS',payload['body'])
+    def test_pre_send_error_is_blocked_with_diagnostics_not_unknown(self):
+        from appbuilder.outlook import OutlookCallError
+        adapter=self.adapter();adapter.submit.side_effect=OutlookCallError('set_recipients','password=SECRET',not_submitted=True,error_number=-1708)
+        with patch('appbuilder.outlook.OutlookAdapter',return_value=adapter),patch('appbuilder.store.patch_runtime') as write:
+            dt.start(self.mail)
+        result=dt.poll('a'*32)
+        self.assertEqual(result['status'],'BLOCKED')
+        self.assertFalse(result['result']['send_attempted'])
+        self.assertEqual(result['result']['error_number'],-1708)
+        self.assertNotIn('SECRET',json.dumps(result))
+        write.assert_not_called()
+
+    def test_test_report_requires_history_and_does_not_restart_build(self):
+        with patch('appbuilder.web.create_build') as build:
+            with self.assertRaisesRegex(ValueError,'历史构建'):dt.start({**self.mail,'task_id':''})
+        build.assert_not_called()
+
     def test_duplicate_id_and_concurrent_clicks_do_not_send_twice(self):
         adapter=self.adapter()
         with patch('appbuilder.outlook.OutlookAdapter',return_value=adapter):
