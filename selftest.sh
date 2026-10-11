@@ -25,7 +25,7 @@ for i in 1 2 3; do
     echo '$ python -m appbuilder run --plugin-version 1.3 --plugin-branch develop --gmx-branch feature/UKPBB-203745-test --country uk --project-name PayByBank --dry-run'
     "$PY" -m appbuilder run --plugin-version 1.3 --plugin-branch develop --gmx-branch feature/UKPBB-203745-test --country uk --project-name PayByBank --dry-run || exit 1
     echo "exit=0"
-  } > "$log" 2>&1 || { echo "第 $i 轮失败，请查看 $log" >&2; exit 1; }
+  } > "$log" 2>&1 || { echo "第 $i 轮失败，请查看 $log" >&2; tail -n 100 "$log" >&2; exit 1; }
   # Keep checked-in evidence whitespace-clean despite unittest's progress output.
   "$PY" -c 'import pathlib,sys; p=pathlib.Path(sys.argv[1]); p.write_text("\n".join(line.rstrip() for line in p.read_text().splitlines())+"\n")' "$log"
   grep -E 'Ran [0-9]+ tests|^OK$' "$log" || true
