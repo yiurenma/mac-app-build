@@ -47,3 +47,9 @@ class StepReportingTests(unittest.TestCase):
             'lock_hashes':{name:'a'*64}}}
         text=render_steps({},state,{'status':'SUCCESS','stage':'FINISHED'})
         self.assertIn('1.2 → 1.3',text);self.assertIn('已写入版本=1.3.2026.7',text);self.assertIn('a'*64,text)
+
+    def test_structured_and_playwright_error_values_are_redacted(self):
+        samples=['Call log: fill("DUMMY_PRIVATE_VALUE")', '{"password": "DUMMY_PRIVATE_VALUE"}',
+                 "{'token': 'DUMMY_PRIVATE_VALUE'}", 'password="DUMMY_PRIVATE_VALUE with spaces"']
+        for sample in samples:
+            with self.subTest(sample=sample):self.assertNotIn('DUMMY_PRIVATE_VALUE',safe_text(sample))
