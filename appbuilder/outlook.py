@@ -1,0 +1,197 @@
+"""Optional native Outlook delivery, fail-closed on unsupported Mac interfaces.
+
+No SMTP/OAuth credentials. A submitted request is not proof of remote delivery.
+"""
+from __future__ import annotations
+import json
+import os
+import re
+import subprocess
+import sys
+import tempfile
+import xml.etree.ElementTree as ET
+from pathlib import Path
+from .jenkins import NeedsAttention
+
+EMAIL=re.compile(r"[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?\.[A-Za-z]{2,63}")
+
+
+def valid_address(value):
+    if not isinstance(value,str) or len(value)>254 or not EMAIL.fullmatch(value):return False
+    local,domain=value.rsplit('@',1)
+    return (len(local)<=64 and not local.startswith('.') and not local.endswith('.') and '..' not in local
+            and all(re.fullmatch(r'[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?',label) for label in domain.split('.')))
+
+
+def recipients(value):
+    if not isinstance(value,str) or len(value)>4000 or '\r' in value or '\n' in value:
+        raise ValueError('收件人须为邮箱地址，以英文逗号或分号分隔，不含换行')
+    parts=[x.strip() for x in re.split(r'[,;]',value) if x.strip()]
+    if len(parts)>50 or any(not valid_address(x) for x in parts):
+        raise ValueError('收件人邮箱格式无效，最多 50 个；不要填写昵称或显示名')
+    return list(dict.fromkeys(parts))
+
+
+def preferences(body):
+    enabled=body.get('outlook_auto_send',False)
+    if not isinstance(enabled,bool):raise ValueError('Outlook 自动发送必须是开关值')
+    to=recipients(body.get('outlook_recipients',''))
+    account=body.get('outlook_account','').strip()
+    if account and not valid_address(account):raise ValueError('Outlook 发件账号必须是完整邮箱地址')
+    if enabled and not to:
+        raise ValueError('自动发送需填写明确收件人')
+    return {'enabled':enabled,'to':to,'account':account}
+
+
+PROBE_JS='''function run(argv) {
+ const app=Application('Microsoft Outlook');
+ const accounts=app.exchangeAccounts().concat(app.imapAccounts(),app.popAccounts());
+ return JSON.stringify({version:app.version(),accounts:accounts.map(a=>({email:a.emailAddress(),id:String(a.id())}))});
+}'''
+SEND_JS='''ObjC.import('Foundation');
+function run(argv) {
+ const raw=$.NSString.stringWithContentsOfFileEncodingError(argv[0],$.NSUTF8StringEncoding,null);
+ const p=JSON.parse(ObjC.unwrap(raw));
+ const app=Application('Microsoft Outlook');
+ const accounts=app.exchangeAccounts().concat(app.imapAccounts(),app.popAccounts());
+ const matches=accounts.filter(a=>a.emailAddress().toLowerCase()===p.account.toLowerCase()&&String(a.id())===p.account_id);
+ if(matches.length!==1)throw Error('Account changed; no message created');
+ const msg=app.OutgoingMessage({subject:p.subject,plainTextContent:p.body,account:matches[0]});
+ app.outgoingMessages.push(msg);
+ p.to.forEach(address=>msg.toRecipients.push(app.ToRecipient({emailAddress:{address:address}})));
+ const id=String(msg.id());
+ app.send(msg);
+ return JSON.stringify({message_id:id,status:'SUBMITTED'});
+}'''
+
+
+class OutlookAdapter:
+    def __init__(self, app_path='/Applications/Microsoft Outlook.app'):
+        self.app_path=app_path
+    def _dictionary(self):
+        if sys.platform!='darwin':raise NeedsAttention('本机不是 macOS，无法验证或调用本地 Outlook；邮件预览已保留')
+        if not Path(self.app_path).is_dir():raise NeedsAttention('未找到本地 Microsoft Outlook，邮件预览已保留')
+        try:
+            result=subprocess.run(['/usr/bin/sdef',self.app_path],capture_output=True,text=True,timeout=20)
+            if result.returncode:raise ValueError()
+            root=ET.fromstring(result.stdout)
+            names={node.get('name') for node in root.iter()}
+            required={'outgoing message','to recipient','exchange account','imap account','pop account','send','email address','plain text content','account'}
+            if not required<=names:raise ValueError()
+        except (OSError,ValueError,ET.ParseError,subprocess.TimeoutExpired):
+            raise NeedsAttention('当前 Outlook 未提供所需原生脚本接口；不保证新版 Outlook 支持，保留预览且不发送') from None
+    def _script(self,source,args=()):
+        try:
+            result=subprocess.run(['/usr/bin/osascript','-l','JavaScript','-e',source,*args],capture_output=True,text=True,timeout=60)
+            if result.returncode:raise ValueError()
+            return json.loads(result.stdout)
+        except (OSError,ValueError,subprocess.TimeoutExpired):
+            raise NeedsAttention('Outlook 原生调用未确认成功；请检查应用版本及 macOS 自动化权限，不会自动改用其他邮箱') from None
+    def probe(self):
+        self._dictionary()
+        result=self._script(PROBE_JS)
+        accounts=result.get('accounts',[])
+        if not accounts or any(not valid_address(a.get('email','')) or not a.get('id') for a in accounts):
+            raise NeedsAttention('Outlook 未返回可核验的已登录账号，不能自动发送')
+        return result
+    def resolve(self,requested=''):
+        result=self.probe();accounts=result['accounts']
+        choices=[a for a in accounts if a['email'].lower()==requested.lower()] if requested else accounts
+        if len(choices)!=1:raise NeedsAttention('Outlook 发件账号不唯一，请在表单明确填写已登录公司邮箱')
+        return choices[0]
+    def submit(self,preview,account):
+        payload={**preview,'account':account['email'],'account_id':account['id']}
+        fd,path=tempfile.mkstemp(prefix='app-builder-mail-',suffix='.json')
+        try:
+            with os.fdopen(fd,'w') as f:json.dump(payload,f,ensure_ascii=False)
+            os.chmod(path,0o600)
+            result=self._script(SEND_JS,(path,))
+            if result.get('status')!='SUBMITTED' or not result.get('message_id'):
+                raise NeedsAttention('Outlook 未返回邮件编号，发送结果不明')
+            return result
+        finally:
+            if os.path.exists(path):os.unlink(path)
+
+
+def outcome_preview(row, params, state, log_text=''):
+    from .telemetry import safe_text
+    from .testfairy import mail_preview,expected_build
+    runtime=state.get('runtime',{})
+    status=row['status'];stage=row['stage']
+    app=runtime.get('testfairy_app')
+    detail=''
+    if status=='SUCCESS' and app:
+        try:
+            expected=expected_build(params,runtime)
+            if all(app.get(k)==expected[k] for k in ('build_url','number','sha','folder')):
+                detail=mail_preview(params,runtime,row['created'])['body']
+        except (NeedsAttention,KeyError,TypeError):
+            pass  # Corrupt or incomplete old metadata cannot authorize a link.
+    if not detail:
+        details=[('国家/地区',params.get('country','')),('项目',params.get('project','')),
+            ('Plugin 来源',params.get('plugin_source','')),('Plugin 构建分支',params.get('plugin_branch','')),
+            ('GMX 来源',params.get('gmx_source','')),('GMX 构建分支',params.get('gmx_branch','')),
+            ('Plugin Job',params.get('plugin_job','')),('Plugin 正式编号',runtime.get('plugin_formal_number','')),
+            ('实际产物版本',runtime.get('artifact_version','')),('GMX Job',params.get('gmx_job','')),
+            ('GMX Build 编号',runtime.get('gmx_build_number',runtime.get('gmx_formal_number',''))),
+            ('GMX SHA',runtime.get('gmx_sha','')),('创建时间',row['created'])]
+        detail='\n'.join(f'{k}: {v}' for k,v in details)+'\nTestFairy 链接: 未提供（尚未完成精确匹配或任务未成功）'
+    reason=safe_text(row.get('note',''))
+    safe_lines=safe_text(log_text).splitlines()
+    relevant=[line for line in safe_lines if re.search(r'\[(?:STEP|DONE|FAILED|NEEDS_ATTENTION|TIMEOUT|JENKINS|ARTIFACT|LOCK|GMX)\]',line)]
+    summary='\n'.join(relevant[-12:])[-6000:] or '未记录可用于邮件的步骤/错误摘要'
+    body=(f"任务: {row['id']}\n实际状态: {status}\n当前阶段: {stage}\n"
+          f"已完成: {', '.join(state.get('completed',[])) or '无'}\n原因: {reason}\n"
+          f"需要处理: {'否（邮件提交不代表送达）' if status=='SUCCESS' else '是，请查看原任务并按失败原因处理；不要重新 Start build'}\n\n"
+          +detail+'\n\n脱敏日志摘要:\n'+summary)
+    from .reporting import render_steps
+    body += '\n\n'+render_steps(params,state,row)
+    return {'subject':f"[{status}] {params.get('country','')} {params.get('project','')} · {row['id']}",
+            'body':safe_text(body),'to':params.get('outlook',{}).get('to',[]),
+            'account':params.get('outlook',{}).get('account',''),'status':'PREVIEW_ONLY','mode':'preview',
+            'task_id':row['id']}
+
+
+def notify_outcome(task_id, adapter=None):
+    import hashlib
+    from .store import read_state,patch_runtime,task,task_folder
+    row=task(task_id)
+    if row['status'] not in ('SUCCESS','FAILED','NEEDS_ATTENTION','TIMEOUT','INTERRUPTED'):return
+    params=json.loads(row['params']);options=params.get('outlook',{})
+    if not options.get('enabled') and not params.get('testfairy',{}).get('enabled'):return
+    state=read_state(task_id);runtime=state.get('runtime',{})
+    log_path=task_folder(task_id)/'run.log'
+    try:
+        with log_path.open('rb') as stream:
+            stream.seek(max(0,log_path.stat().st_size-16000));tail=stream.read().decode('utf-8',errors='replace')
+    except OSError:tail=''
+    preview=outcome_preview(row,params,state,tail)
+    identity={'status':row['status'],'stage':row['stage'],
+              'build':runtime.get('gmx_build_number',runtime.get('gmx_formal_number')),
+              'link':runtime.get('testfairy_app',{}).get('share_url') if row['status']=='SUCCESS' else None}
+    key=hashlib.sha256(json.dumps(identity,sort_keys=True).encode()).hexdigest()
+    ledger=runtime.get('mail_notifications',{})
+    previous=ledger.get(key,{})
+    patch_runtime(task_id,mail_preview=preview)
+    if previous.get('status') in ('SUBMITTING','SUBMITTED','UNKNOWN'):
+        patch_runtime(task_id,mail_delivery=previous);return
+    if not options.get('enabled'):return
+    adapter=adapter or OutlookAdapter()
+    def record(value):
+        ledger[key]=value
+        patch_runtime(task_id,mail_notifications=ledger,mail_delivery=value)
+    try:
+        if not options.get('to'):raise NeedsAttention('未填写明确收件人')
+        account=adapter.resolve(options.get('account',''))
+    except Exception as exc:
+        from .telemetry import safe_text
+        record({'status':'BLOCKED','reason':safe_text(str(exc)),'outcome':row['status']});return
+    base={'account':account['email'],'to':options['to'],'outcome':row['status'],'notification_key':key}
+    record({**base,'status':'SUBMITTING'})
+    try:
+        result=adapter.submit({**preview,'to':options['to']},account)
+        if result.get('status')!='SUBMITTED':raise ValueError('unconfirmed submission')
+    except BaseException:
+        record({**base,'status':'UNKNOWN','reason':'提交结果不明，请核对 Outlook 发件箱/已发送；禁止自动重发'})
+        return
+    record({**base,**result})

@@ -94,3 +94,6 @@
 .schedule-toggle small{font-size:11px;white-space:normal}
 .diagnose-form .label-help{font-size:11px;line-height:1.65}
 .live-checkboxes label{flex-wrap:wrap}.live-checkboxes .label-help{flex-basis:100%}
+/* Delivery previews and test results must wrap long corporate URLs. */
+.advanced-body pre,#active-summary pre{white-space:pre-wrap;overflow-wrap:anywhere;max-width:100%}
+#active-summary{flex-wrap:wrap}#active-summary details{flex-basis:100%;min-width:0}

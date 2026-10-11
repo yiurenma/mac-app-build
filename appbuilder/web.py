@@ -84,7 +84,18 @@ def public_task(row):
         'visible': bool(params.get('visible')),
         'verbose': bool(params.get('verbose')),
         'jenkins_links': _jenkins_links(row, params),
+        'delivery': delivery_result(row['id']),
     }
+
+
+def delivery_result(task_id):
+    from .store import read_state
+    try:
+        runtime=read_state(task_id).get('runtime',{})
+        # Only generated, explicitly nonsecret delivery data is exposed.
+        return {'app':runtime.get('testfairy_app'), 'mail_preview':runtime.get('mail_preview'), 'mail_delivery':runtime.get('mail_delivery')}
+    except (OSError,ValueError):
+        return {}
 
 
 def get_doctor():
@@ -108,6 +119,9 @@ def form_defaults(config):
     j = config.get('jenkins', {})
     b = config.get('build', {})
     return {
+        'outlook_auto_send': False, 'outlook_recipients': '', 'outlook_account': '',
+        'testfairy_enabled': False, 'testfairy_save_credentials': False,
+        'testfairy_login_url': 'https://hsbc-mobilex.testfairy.com/login', 'testfairy_folder_path': '',
         'plugin_branch': 'develop', 'gmx_branch': 'develop',
         'plugin_version': '1.3', 'country': 'UK', 'project_name': 'PayByBank',
         'visible': True, 'verbose': True,
@@ -249,6 +263,10 @@ def validate_build_parameters(body, config):
     params['jenkins_settings'] = jenkins
     params['build_settings'] = build
     params['gmx_parameters'] = gmx
+    from .testfairy import settings
+    params['testfairy'] = settings(body, config)
+    from .outlook import preferences
+    params['outlook'] = preferences(body)
     return params
 
 
@@ -265,6 +283,16 @@ def create_build(body):
     if len(user) > 256 or len(password) > 4096 or len(github_token) > 4096:
         raise ValueError('账号、密码或 Token 长度超限')
     params = validate_build_parameters(body, config)
+    from .testfairy import credentials as testfairy_credentials
+    tf_user = str(body.get('testfairy_user') or '').strip()
+    tf_password = str(body.get('testfairy_password') or '')
+    if bool(tf_user) != bool(tf_password) or len(tf_user)>256 or len(tf_password)>256:
+        raise ValueError('TestFairy 账号密码须同时填写，最长 256 字符')
+    if tf_user and not params['testfairy']['enabled']:
+        raise ValueError('请先启用 TestFairy，再填写账号密码')
+    transient = {'testfairy': [tf_user, tf_password]} if tf_user else None
+    if tf_user and params['testfairy']['save_session']:
+        testfairy_credentials(params['testfairy']['login_url'], (tf_user, tf_password))
     # Persist credentials only after all build parameters are valid.
     if github_token:
         store_github_token(github_token)
@@ -275,7 +303,10 @@ def create_build(body):
     if active_count() >= parallel_limit(config):
         raise ValueError('已达到并发任务上限，请先等待或恢复已有任务')
     created = create_task(config, params)
-    spawn(created['id'], wait=False)
+    if transient:
+        spawn(created['id'], wait=False, transient_credentials=transient)
+    else:
+        spawn(created['id'], wait=False)
     return public_task(task(created['id']))
 
 
@@ -554,6 +585,16 @@ def make_handler(csrf_token):
                 match = re.fullmatch(r'/api/live-tests/status/([A-Za-z0-9_-]{24,64})', p)
                 if match:
                     return self._send(poll_live_test(match[1]))
+                delivery_match = re.fullmatch(r'/api/delivery-tests/([a-f0-9-]{16,64})', p)
+                if delivery_match:
+                    from .delivery_tests import poll
+                    return self._send(poll(delivery_match[1]))
+                if p == '/api/outlook':
+                    from .outlook import OutlookAdapter
+                    try:
+                        return self._send(OutlookAdapter().probe())
+                    except Exception as exc:
+                        return self._failed(400, safe_text(str(exc)))
                 if p == '/api/doctor':
                     return self._send(get_doctor())
                 from .schedule_api import handle_get
@@ -586,6 +627,9 @@ def make_handler(csrf_token):
                 body = json.loads(self.rfile.read(length))
                 if not isinstance(body, dict):
                     raise ValueError('需要 JSON 对象')
+                if self.path == '/api/delivery-tests/start':
+                    from .delivery_tests import start
+                    return self._send(start(body), status=202)
                 if self.path == '/api/live-tests/start':
                     return self._send(start_live_test(body), status=202)
                 if self.path == '/api/diagnose/start':

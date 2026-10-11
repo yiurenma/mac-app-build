@@ -38,7 +38,7 @@ def safe_text(value, env=None):
     s = re.sub(r'https?://[^\s<>\"\']+',
                lambda match: (lambda u: urlunsplit((u.scheme, u.netloc, u.path, '', '')))(urlsplit(match.group())),
                s)
-    s = re.sub(r'(?i)\b(authorization|proxy-authorization|cookie|set-cookie)\s*[:=]\s*[^\s,;]+',
+    s = re.sub(r'(?im)\b(authorization|proxy-authorization|cookie|set-cookie)\s*[:=]\s*[^\r\n]*',
                r'\1=[REDACTED]', s)
     s = re.sub(r'(?i)\b(token|password|passwd|secret|api[_-]?key|access[_-]?key)\s*[:=]\s*[^\s,;&]+',
                r'\1=[REDACTED]', s)

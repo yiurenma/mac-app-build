@@ -25,6 +25,7 @@ function renderTasks(){const list=state.tasks;const counts={total:list.length,ru
 }
 function renderSelection(){const row=state.tasks.find(t=>t.id===state.selected);if(!row)return;
   $('selected-subtitle').textContent=`${row.project} · ${row.country} · ${row.id}`;
+  $('build-form').elements.tf_test_task.value=row.id;
   const box=$('active-summary');box.replaceChildren();const icon=create('div','icon-circle',row.status==='SUCCESS'?'✓':'⌁');const info=create('div');info.append(create('strong','',row.stage+' · '+row.status),create('small','',row.note||'任务已创建'));box.append(icon,info);
   const links=$('jenkins-links');links.replaceChildren();
   for(const link of row.jenkins_links||[]){
@@ -32,6 +33,12 @@ function renderSelection(){const row=state.tasks.find(t=>t.id===state.selected);
       const a=create('a','jenkins-link','↗ '+link.label);a.href=target.href;a.target='_blank';a.rel='noopener noreferrer';links.append(a);
     }catch(e){/* invalid stored URL is never rendered */}
   }
+  if(row.delivery?.app){
+    try{const url=new URL(row.delivery.app.share_url);if(url.protocol==='https:'&&url.hostname.endsWith('.testfairy.com')&&url.pathname.startsWith('/join/')){
+      const a=create('a','jenkins-link','↗ TestFairy '+row.delivery.app.app_version);a.href=url.href;a.target='_blank';a.rel='noopener noreferrer';links.append(a);
+    }}catch(e){}
+  }
+  if(row.delivery?.mail_preview){const details=create('details'),title=create('summary','',row.delivery.mail_delivery?.status==='SUBMITTED'?'邮件预览 · 已提交 Outlook（非送达确认）':row.delivery.mail_delivery?.status==='UNKNOWN'?'邮件预览 · 提交结果不明，禁止自动重发':row.delivery.mail_delivery?.status==='BLOCKED'?'邮件预览 · 发送受阻：'+row.delivery.mail_delivery.reason:'邮件预览 · 尚未发送'),text=create('pre','','To: '+row.delivery.mail_preview.to.join(', ')+'\nFrom: '+(row.delivery.mail_delivery?.account||row.delivery.mail_preview.account||'待本机核验')+'\n'+row.delivery.mail_preview.subject+'\n\n'+row.delivery.mail_preview.body);details.append(title,text);box.append(details);}
   const phases=['PLUGIN_CHECKOUT','PLUGIN_EDIT','PLUGIN_PUSH','PLUGIN_JENKINS','GMX_CHECKOUT','GMX_EDIT','GMX_LOCK','GMX_PUSH','GMX_JENKINS'];const idx=phases.indexOf(row.stage);
   $('stage-strip').querySelectorAll('div').forEach((e,i)=>{e.className='';if(row.status==='SUCCESS'||(idx>=0&&i<idx))e.className='done';else if(i===idx)e.className='current';});
   $('resume-build').hidden=['SUCCESS','RUNNING','QUEUED'].includes(row.status);
@@ -64,7 +71,7 @@ async function submitBuild(evt){evt.preventDefault();
  if($('save-as-schedule').checked)return window.scheduleEditor.submit();
  const button=$('submit-build'),form=$('build-form'),body=buildBody();
  button.disabled=true;button.textContent='Starting build...';$('form-message').textContent='正在检查环境并创建任务...';$('form-message').classList.remove('error');
- try{const res=await api('/api/tasks',{method:'POST',body:JSON.stringify(body)});form.elements.jenkins_password.value='';form.elements.github_token.value='';form.elements.jenkins_user.value='';$('form-message').textContent='任务已创建：'+res.task.id;toast('构建任务已启动 · '+res.task.id);await refreshDoctor();await loadTasks();setSelected(res.task.id);document.getElementById('activity').scrollIntoView({behavior:'smooth',block:'start'});}
+ try{const res=await api('/api/tasks',{method:'POST',body:JSON.stringify(body)});form.elements.testfairy_user.value='';form.elements.testfairy_password.value='';form.elements.jenkins_password.value='';form.elements.github_token.value='';form.elements.jenkins_user.value='';$('form-message').textContent='任务已创建：'+res.task.id;toast('构建任务已启动 · '+res.task.id);await refreshDoctor();await loadTasks();setSelected(res.task.id);document.getElementById('activity').scrollIntoView({behavior:'smooth',block:'start'});}
  catch(e){$('form-message').textContent=e.message;$('form-message').classList.add('error');toast(e.message,true)}finally{button.disabled=false;button.textContent='▶   Start build  ↗';}}
 async function resumeTask(){const id=state.selected;if(!id)return;if(!confirm(`恢复任务 ${id}？\n将复用既有分支和 Jenkins Build，不重新创建任务。`))return;
  try{await api(`/api/tasks/${encodeURIComponent(id)}/resume`,{method:'POST',body:JSON.stringify({visible:true,verbose:true})});toast('已请求恢复任务');state.offset=0;await loadTasks();await loadLog(true);}catch(e){toast(e.message,true);}}
@@ -205,3 +212,19 @@ $('doctor-refresh').addEventListener('click',refreshDoctor);
 $('clear-log').addEventListener('click',()=>loadLog(true));
 setInterval(async()=>{if(!state.csrf)return;await loadTasks();await loadLog();if(state.selected)await loadScreens();},3000);
 init();
+
+$('check-outlook').addEventListener('click',async()=>{const out=$('outlook-status');out.textContent='正在只读检查…';try{const r=await api('/api/outlook');out.textContent='Outlook '+r.version+' · '+r.accounts.map(a=>a.email).join(', ');if(r.accounts.length===1)$('build-form').elements.outlook_account.value=r.accounts[0].email;}catch(e){out.textContent=e.message;}});
+
+async function runDeliveryTest(kind){
+ const f=$('build-form').elements,button=$(kind==='testfairy'?'test-testfairy':'test-outlook-send'),out=$(kind==='testfairy'?'tf-test-result':'mail-test-result');
+ const body={kind,request_id:crypto.randomUUID()};
+ if(kind==='testfairy')Object.assign(body,{url:f.tf_test_url.value,username:f.tf_test_user.value,password:f.tf_test_password.value,task_id:f.tf_test_task.value,expected_share_url:f.tf_test_expected.value});
+ else Object.assign(body,{recipients:f.mail_test_to.value,account:f.outlook_account.value,confirm_send:true});
+ button.disabled=true;out.textContent='正在执行独立测试…';
+ try{const r=await api('/api/delivery-tests/start',{method:'POST',body:JSON.stringify(body)});f.tf_test_password.value='';delete body.password;
+   for(let i=0;i<360;i++){const result=await api('/api/delivery-tests/'+encodeURIComponent(r.id));out.textContent=result.status+' · '+(result.result.message||'执行中')+(result.result.final_url?'\n实际地址（已去除敏感查询参数）：'+result.result.final_url:'')+(result.result.expected_share_url?'\n预期链接：'+result.result.expected_share_url+'\n实际链接：'+result.result.actual_share_url:'')+(result.result.account?'\n发件账号：'+result.result.account:'');if(!['RUNNING','SUBMITTING'].includes(result.status))return;await new Promise(resolve=>setTimeout(resolve,1000));}
+   out.textContent+='\n等待结果超时；不会自动再次发送，请核对原测试结果。';
+ }catch(e){out.textContent=e.message;}finally{button.disabled=false;}
+}
+$('test-testfairy').addEventListener('click',()=>runDeliveryTest('testfairy'));
+$('test-outlook-send').addEventListener('click',()=>runDeliveryTest('outlook'));

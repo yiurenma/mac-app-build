@@ -30,7 +30,13 @@ def step(task_id, name, fn):
         return
     update_task(task_id, stage=name)
     log(f'[STEP] {name}')
-    fn()
+    try:
+        fn()
+    except BaseException as exc:
+        errors = read_state(task_id)['runtime'].get('step_errors', {})
+        errors[name] = safe_text(str(exc))[:1000]
+        patch_runtime(task_id, step_errors=errors)
+        raise
     complete(task_id, name)
     log(f'[DONE] {name}')
 
@@ -127,9 +133,22 @@ def worker_lease(task_id):
             fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
-def run(task_id):
+def run(task_id, transient_credentials=None):
     with worker_lease(task_id):
-        return _run_unlocked(task_id)
+        try:
+            return _run_unlocked(task_id, transient_credentials=transient_credentials)
+        except Exception as exc:
+            current = task(task_id)
+            if current['status'] in ('QUEUED', 'RUNNING'):
+                update_task(task_id, status='FAILED', note=safe_text(str(exc))[:500])
+            raise
+        finally:
+            # Notification errors must never replace the build result/exception.
+            try:
+                from .outlook import notify_outcome
+                notify_outcome(task_id)
+            except Exception:
+                log('[MAIL] 通知处理失败；原构建结果保留，请查看本机任务状态')
 
 
 def effective_task_config(config, params):
@@ -190,7 +209,7 @@ def repair_legacy_gmx_target(task_id, params, conf, root, env):
     return updated
 
 
-def _run_unlocked(task_id):
+def _run_unlocked(task_id, transient_credentials=None):
     row = task(task_id)
     if row['status'] == 'SUCCESS':
         log('任务已经成功完成，不再执行')
@@ -269,7 +288,8 @@ def _run_unlocked(task_id):
                 old_versions = update_mobile_ci(gmx / 'mobile-ci.json', artifact)
                 if set(changed_files(gmx)) - {'mobile-ci.json'}:
                     raise NeedsAttention('修改 GMX JSON 后出现非预期变更')
-                patch_runtime(task_id, gmx_previous_versions=old_versions)
+                patch_runtime(task_id, gmx_previous_versions=old_versions,
+                              gmx_updated_versions={name: artifact for name in old_versions})
             step(task_id, 'GMX_EDIT', gmx_edit)
 
             def gmx_resolve():
@@ -339,6 +359,18 @@ def _run_unlocked(task_id):
                     patch_runtime(task_id, gmx_build_number=num, upload_validation=uploaded)
                     log(f'[GMX] Jenkins SUCCESS #{num} | 上传校验: {uploaded}')
             step(task_id, 'GMX_JENKINS', gmx_build)
+
+        if params.get('testfairy', {}).get('enabled'):
+            from .testfairy import TestFairyBrowser, expected_build
+            def lookup_testfairy():
+                rt = read_state(task_id)['runtime']
+                expected = expected_build(params, rt)
+                supplied = (transient_credentials or {}).get('testfairy')
+                with TestFairyBrowser(conf, DATA, params['testfairy'],
+                                     login_credentials=supplied, visible=params.get('visible', True)) as browser:
+                    app = browser.find(expected)
+                patch_runtime(task_id, testfairy_app=app)
+            step(task_id, 'TESTFAIRY_LOOKUP', lookup_testfairy)
 
         # Persist result before announcing SUCCESS; interrupted result writing
         # can be retried instead of leaving a SUCCESS task with no report.

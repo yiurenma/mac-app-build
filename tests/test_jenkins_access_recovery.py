@@ -238,7 +238,7 @@ class CachedSessionRecoveryTests(unittest.TestCase):
         self.assertEqual(self.requests.count('/j_security_check'),1)
 
     def test_200_soft_not_found_is_not_a_ready_job(self):
-        self.mode='soft404';self.worker.conf['discover_timeout_minutes']=.0001
+        self.mode='soft404';self.worker.conf['discover_timeout_minutes']=.01
         with self.assertRaisesRegex(TimeoutError,'最后 HTTP=200'):
             self.worker.wait_job(TARGET)
         self.assertEqual(page_error_kind(self.worker.page),'not-found')

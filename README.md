@@ -446,3 +446,10 @@ URL 必须属于 `config.yaml` 中配置的 Plugin 或 GMX Jenkins 父 Job；不
 ### 不使用 git pull 的安装方法
 
 直接下载新的 **完整 ZIP**，解压到一个**全新目录**，不要直接覆盖或删除旧目录里的 `.appbuilder`。建议先停止旧 Web Console 和 Worker。**先解压完整新 ZIP 到不同文件夹**，在新文件夹双击 `Import Previous Data.command` 并通过 Finder 选择旧版本文件夹，自动、安全地复制旧 `.appbuilder/`（任务、Build 编号、SSO 缓存和日志）。旧文件夹不删除，新文件夹已有数据也不会被覆盖。也可以手动复制 `.appbuilder/`。如修改过 `config.yaml`，手动比对迁移配置；Keychain 凭据在 Mac 中保存，不随 ZIP 迁移。不要把 `.appbuilder` 上传到 GitHub 或发给别人。此版本的 ZIP 保留可执行的 `Start APP Builder.command`，双击即可启动。
+
+
+## TestFairy 与本机 Outlook 结果通知
+
+New build 的共享表单可独立开启 TestFairy 链接查找及 Outlook 结果通知，默认关闭。TestFairy 只匹配当前 GMX 的完整 Build URL、编号、SHA 和实际目录，保留 App 自身版本；账号密码默认仅供本次 Worker，勾选保存才写独立 Keychain。定时模板不存秘密。
+
+Outlook 自动通知覆盖成功、失败、超时和需人工处理，用户明确填写收件人并开启才调用本机账号。相同结果去重；发送不明不重发；邮件失败不改写构建结果。当前 Mac Outlook 的实际原生能力必须现场探测，不保证 New Outlook 支持，也不把提交当投递成功。详见 [配置、恢复、权限及验证边界](docs/27-TestFairy-Outlook-结果通知.md)。

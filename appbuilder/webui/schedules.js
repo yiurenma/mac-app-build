@@ -64,7 +64,7 @@ function resetForm(){
 async function submit(){
   const f=el('build-form').elements, message=el('form-message'),btn=el('submit-build'),editing=store.editing;
   const template=buildBody();
-  for(const key of ['github_token','jenkins_user','jenkins_password']){
+  for(const key of ['github_token','jenkins_user','jenkins_password','testfairy_user','testfairy_password']){
     if(template[key]){message.textContent='定时模板不保存凭据。请先用手动构建保存到 Mac Keychain，再清空凭据字段后保存计划。';message.classList.add('error');return;}
     delete template[key];
   }

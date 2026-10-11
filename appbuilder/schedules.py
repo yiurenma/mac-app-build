@@ -19,7 +19,7 @@ from contextlib import closing
 from datetime import datetime
 
 from . import cron, store
-from .config import load_config, parallel_limit
+from .config import DATA, load_config, parallel_limit
 from .telemetry import safe_text
 
 MAX_SCHEDULES = 50
@@ -37,7 +37,7 @@ CREATE TABLE IF NOT EXISTS schedule_runs (
 '''
 
 BASIC_KEYS = ('plugin_branch', 'gmx_branch', 'plugin_version', 'country', 'project_name')
-OPTIONAL_TEXT = ('gmx_issue_key', 'plugin_url', 'gmx_url', 'plugin_parent', 'gmx_parent', 'browser_channel',
+OPTIONAL_TEXT = ('outlook_recipients', 'outlook_account', 'testfairy_login_url', 'testfairy_folder_path', 'gmx_issue_key', 'plugin_url', 'gmx_url', 'plugin_parent', 'gmx_parent', 'browser_channel',
                  'gmx_build_type', 'gmx_signing_repo_branch', 'gmx_custom_folder',
                  'upload_success_pattern',
                  'selector_entities', 'selector_sync_upload', 'selector_custom_folder',
@@ -46,8 +46,8 @@ OPTIONAL_TEXT = ('gmx_issue_key', 'plugin_url', 'gmx_url', 'plugin_parent', 'gmx
 OPTIONAL_INT = ('discover_poll_seconds', 'poll_seconds', 'result_poll_seconds',
                 'console_settle_seconds', 'discover_timeout_minutes', 'build_timeout_minutes',
                 'callback_timeout_minutes', 'max_changed_lines')
-OPTIONAL_BOOL = ('visible', 'verbose', 'gmx_sync_upload', 'gmx_skip_test', 'gmx_force', 'gmx_keep_alive')
-SECRET_KEYS = ('jenkins_user', 'jenkins_password', 'github_token')
+OPTIONAL_BOOL = ('outlook_auto_send', 'testfairy_enabled', 'testfairy_save_credentials', 'visible', 'verbose', 'gmx_sync_upload', 'gmx_skip_test', 'gmx_force', 'gmx_keep_alive')
+SECRET_KEYS = ('testfairy_user', 'testfairy_password', 'jenkins_user', 'jenkins_password', 'github_token')
 
 
 def connect():
@@ -87,7 +87,11 @@ def validate_template(body, config=None):
                      for key, value in defaults['gmx_fields'].items()})
     template.update(body)
     # Freeze the same defaults and validate through the immediate-build path.
-    validate_build_parameters(template, config)
+    params = validate_build_parameters(template, config)
+    if params['testfairy']['enabled']:
+        from .testfairy import saved_auth_available
+        if not params['testfairy']['save_session'] or not saved_auth_available(params['testfairy']['login_url'], DATA):
+            raise ValueError('定时 TestFairy 需明确选择保存本机认证，并先保存 Keychain 或可复用会话；临时密码不会留到执行时')
     template['country'] = template['country'].strip().upper()
     return template
 

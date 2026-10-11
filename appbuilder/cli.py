@@ -89,18 +89,24 @@ def create_params(a, c):
             'visible': bool(a.visible), 'verbose': bool(a.verbose)}
 
 
-def spawn(task_id, wait=False):
+def spawn(task_id, wait=False, transient_credentials=None):
     if wait:
         from .runner import run
-        run(task_id)
+        run(task_id, transient_credentials=transient_credentials)
         return
     log_path = task_folder(task_id) / 'run.log'
     cmd = [sys.executable, '-m', 'appbuilder', 'worker', task_id]
     if sys.platform == 'darwin' and shutil.which('caffeinate'):
         cmd = ['caffeinate', '-i', *cmd]
     with log_path.open('ab') as out:
-        p = subprocess.Popen(cmd, cwd=ROOT, stdin=subprocess.DEVNULL,
+        p = subprocess.Popen(cmd, cwd=ROOT, stdin=subprocess.PIPE if transient_credentials else subprocess.DEVNULL,
                              stdout=out, stderr=subprocess.STDOUT, start_new_session=True)
+    if transient_credentials:
+        # Private pipe: never arguments, environment variables or task files.
+        try:
+            p.stdin.write(json.dumps(transient_credentials).encode('utf-8'))
+        finally:
+            p.stdin.close()
     # Only the Worker updates its own pid/status. A fast worker can already
     # have reached SUCCESS before Popen returns; never overwrite it here.
     print(f'任务后台启动: {task_id} (PID={p.pid})\n日志: ./app-build logs {task_id} --follow')
@@ -109,7 +115,7 @@ def spawn(task_id, wait=False):
 
 STAGES = (
     'PLUGIN_CHECKOUT', 'PLUGIN_EDIT', 'PLUGIN_PUSH', 'PLUGIN_JENKINS',
-    'GMX_CHECKOUT', 'GMX_EDIT', 'GMX_LOCK', 'GMX_PUSH', 'GMX_JENKINS', 'FINISHED',
+    'GMX_CHECKOUT', 'GMX_EDIT', 'GMX_LOCK', 'GMX_PUSH', 'GMX_JENKINS', 'TESTFAIRY_LOOKUP', 'FINISHED',
 )
 
 
@@ -294,7 +300,9 @@ def main(argv=None):
         return
     if a.command == 'worker':
         from .runner import run
-        run(a.task_id)
+        raw=sys.stdin.buffer.read(16385)
+        if len(raw)>16384:raise ValueError('Worker 私有输入过大')
+        run(a.task_id, transient_credentials=json.loads(raw) if raw else None)
         return
     if a.command == 'watch':
         task(a.task_id)  # verify ID even when log has not appeared yet

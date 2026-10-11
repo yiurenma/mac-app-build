@@ -98,6 +98,29 @@
 <label class=" ">Jenkins 用户名 · jenkins_user<input data-build name="jenkins_user" placeholder="Corporate username" autocomplete="username" maxlength="256"><small class="label-help">首次填写公司账号，须与密码同时填写；留空使用本机 Keychain。</small></label>
 <label class=" ">Jenkins 密码 · jenkins_password<input data-build name="jenkins_password" type="password" placeholder="••••••••" autocomplete="new-password"><small class="label-help">与用户名一起保存到本机 Keychain；留空使用已保存凭据，定时模板不保存密码。</small></label>
 </div></div></details>
+<details class="advanced-panel" id="testfairy-settings"><summary><span><strong>TestFairy 与邮件预览</strong><small>精确匹配本次构建，不取最新包</small></span></summary><div class="advanced-body"><div class="form-grid">
+<label class="field-toggle span-2">启用 TestFairy · testfairy_enabled<input type="checkbox" data-build name="testfairy_enabled"><small class="label-help">默认关闭；开启后等待本次 GMX 包，核对 Build URL、编号、SHA 和上传目录，生成已有分享链接和邮件预览。邮件默认仅预览；下方另行启用自动发送后才会调用本机 Outlook。</small></label>
+<label class="span-2">登录入口 · testfairy_login_url<input data-build name="testfairy_login_url" type="url"><small class="label-help">使用公司 TestFairy 租户的 HTTPS /login 地址，不填写账号密码或 token。</small></label>
+<label>TestFairy 账号 · testfairy_user<input data-build name="testfairy_user" maxlength="256" autocomplete="username"><small class="label-help">与密码一起填写；与 Jenkins 凭据独立，留空可使用此前授权保存的 Keychain。</small></label>
+<label>TestFairy 密码 · testfairy_password<input data-build name="testfairy_password" type="password" maxlength="256" autocomplete="new-password"><small class="label-help">默认仅通过私有进程管道供本次 Worker 使用，不写任务、计划或日志。</small></label>
+<label class="field-toggle span-2">允许保存本机认证 · testfairy_save_credentials<input type="checkbox" data-build name="testfairy_save_credentials"><small class="label-help">默认不选。选中才保存到独立 Mac Keychain 条目，并保存此租户浏览器会话；供后续任务或定时任务使用。</small></label>
+<label class="span-2">TestFairy 目录 · testfairy_folder_path<input data-build name="testfairy_folder_path" maxlength="512" placeholder="留空按 BUILD_TYPE 与 CUSTOM_FOLDER 推导"><small class="label-help">默认 IOS_Upload/IOS_构建类型/实际上传目录；若公司目录不同，填写逐层名称，以 / 分隔。不会固定 UK 项目。</small></label>
+</div></div></details>
+<details class="advanced-panel" id="outlook-settings"><summary><span><strong>Outlook 邮件</strong><small>本机已登录公司账号 · 默认仅预览</small></span></summary><div class="advanced-body"><div class="form-grid">
+<label class="field-toggle span-2">任务结果自动通知 · outlook_auto_send<input type="checkbox" data-build name="outlook_auto_send"><small class="label-help">明确开启且填写收件人后，成功、失败、超时或需人工处理都会通知。成功并精确匹配才附 App 链接；同一结果去重，发送不明不重发。邮件失败不改写构建结果。</small></label>
+<label class="span-2">收件人 · outlook_recipients<input data-build name="outlook_recipients" maxlength="4000" placeholder="name@company.com, another@company.com"><small class="label-help">填写完整邮箱地址，以英文逗号或分号分隔；最多 50 人。会在邮件预览显示，不通过姓名猜地址。</small></label>
+<label class="span-2">发件账号 · outlook_account<input data-build name="outlook_account" maxlength="256" placeholder="留空仅允许 Outlook 中唯一的已登录账号"><small class="label-help">使用本机 Outlook，不需要 SMTP 密码。若有多个账号，必须填写明确的公司邮箱；原生接口不支持时保留预览并停止。</small></label>
+</div><button type="button" class="ghost-button" id="check-outlook">检查本机 Outlook（不发信）</button><p id="outlook-status" role="status"></p></div></details>
+<details class="advanced-panel" id="delivery-tests"><summary><span><strong>独立连接测试</strong><small>不创建打包任务、不启动 Jenkins</small></span></summary><div class="advanced-body"><div class="form-grid">
+<label class="span-2">TestFairy 登录入口<input name="tf_test_url" type="url" value="https://hsbc-mobilex.testfairy.com/login"><small class="label-help">仅允许本机配置中的明确租户；与预期 App 分享链接分开填写；仅用于正常登录。</small></label>
+<label class="span-2">预期 App 分享链接<input name="tf_test_expected" type="url" placeholder="https://hsbc-mobilex.testfairy.com/join/…"><small class="label-help">程序按所选任务的 GMX 构建信息查找 App，再与此链接比较；不会直接打开此链接并回显当成功。</small></label>
+<label class="span-2">用于匹配的历史任务<input name="tf_test_task" readonly placeholder="请先在任务列表选中已完成 GMX 的任务"><small class="label-help">复用该任务保存的 Job URL、Build 编号、SHA 和目录；信息不足会提示，不取最新包。</small></label>
+<label>测试账号<input name="tf_test_user" autocomplete="username" maxlength="256"><small class="label-help">仅供本次连接测试，不默认保存。</small></label>
+<label>测试密码<input name="tf_test_password" type="password" autocomplete="new-password" maxlength="256"><small class="label-help">临时使用，不写入日志、任务或计划。</small></label>
+</div><button type="button" class="ghost-button" id="test-testfairy">校验 TestFairy 分享链接</button><pre id="tf-test-result" role="status"></pre>
+<div class="form-grid"><label class="span-2">测试收件邮箱<input name="mail_test_to" maxlength="4000" placeholder="name@company.com"><small class="label-help">点击下方按钮会真实发送固定内容的测试邮件；不附构建详情或凭据。发件账号沿用上方 Outlook 账号设置。</small></label></div>
+<button type="button" class="ghost-button" id="test-outlook-send">发送一封 Outlook 测试邮件</button><pre id="mail-test-result" role="status"></pre>
+</div></details>
 <label class="switch-row schedule-toggle"><input type="checkbox" id="save-as-schedule"><span class="toggle"></span><span>保存为定时任务 · schedule<small>关闭：立即构建；开启：只保存计划，按本机时间运行。两种方式使用上方同一份参数。</small></span></label>
 <fieldset id="schedule-settings" hidden disabled>
 <legend>定时设置</legend><div class="form-grid">
@@ -106,7 +129,7 @@
 </div>
 <p id="cron-preview" class="diag-note" role="status">输入 cron 后预览接下来 5 次运行。</p>
 <label class="field-toggle">保存后启用 · enabled<input name="schedule_enabled" type="checkbox" checked><small class="label-help">默认开启：到点自动运行；关闭：只保存，之后在 Schedules 启用。编辑时保留原状态。</small></label>
-<p class="diag-note">Chrome 显示方式沿用「共用高级设置 → visible」，默认开启。凭据仅使用 Mac Keychain；新填凭据需先通过手动构建保存。</p>
+<p class="diag-note">Chrome 显示方式沿用「共用高级设置 → visible」，默认开启。凭据不进入计划。启用 TestFairy 时须选择“允许保存本机认证”，且已有 Keychain 或可复用会话；临时密码不能供将来执行。</p>
 </fieldset>
 <div class="sched-buttons"><button class="btn btn-primary submit-btn" id="submit-build" type="submit">▶ Start build</button><button class="ghost-button" id="schedule-cancel" type="button" hidden>取消编辑</button></div>
 <p id="form-message" role="status" class="form-message"></p>
