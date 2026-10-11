@@ -406,7 +406,7 @@ class JenkinsBrowser:
             if remaining <= 0:
                 break
             delay = min(self.discover_poll, remaining)
-            action('WAIT', f'{self.site} Job 暂未就绪：HTTP {http} / {error_kind or '未识别页面'}，累计等待 {int(time.monotonic()-start)}s，{delay:g}s 后重试（第 {attempts} 次检查）')
+            action('WAIT', f"{self.site} Job 暂未就绪：HTTP {http} / {error_kind or '未识别页面'}，累计等待 {int(time.monotonic()-start)}s，{delay:g}s 后重试（第 {attempts} 次检查）")
             time.sleep(delay)
         raise TimeoutError(
             f'{self.site} Jenkins Job 等待超时（最后 HTTP={last_http}，检查 {attempts} 次）。'
