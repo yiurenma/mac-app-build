@@ -21,6 +21,48 @@ class NeedsAttention(RuntimeError):
     pass
 
 
+class _ControlNotReady(NeedsAttention):
+    pass
+
+
+def _observe_page(browser, read, *, deadline=None, target=None, once=False):
+    """Observe one navigation, without reloads; never turn errors into readiness."""
+    page = getattr(browser, 'page', None)
+    if not isinstance(browser, JenkinsBrowser) or not hasattr(page, 'wait_for_timeout'):
+        if deadline is not None and time.monotonic()>=deadline:return None
+        value=read()
+        return None if deadline is not None and time.monotonic()>=deadline else value
+    end = time.monotonic() + 2
+    if deadline is not None:
+        end = min(end, deadline)
+    target = target or page.url
+    while True:
+        if deadline is not None and time.monotonic() >= deadline:
+            return None
+        if (getattr(browser, '_readiness_http', 200) != 200
+                or not same_target_url(page.url, target) or page_error_kind(page)):
+            raise NeedsAttention('Jenkins 就绪检查发现错误页或离开精确目标，停止操作')
+        if time.monotonic()>=end:return None
+        value = read()
+        if time.monotonic()>=end:return None
+        if (getattr(browser, '_readiness_http', 200) != 200
+                or not same_target_url(page.url, target) or page_error_kind(page)):
+            raise NeedsAttention('Jenkins 就绪读取期间离开精确目标或出现错误页，停止操作')
+        if time.monotonic()>=end:return None
+        if value or once:
+            return value
+        remaining = end - time.monotonic()
+        if remaining <= 0:
+            return value
+        page.wait_for_timeout(min(100, remaining * 1000))
+
+
+def _callback_before(browser, job_url, source, deadline):
+    if isinstance(browser, JenkinsBrowser):
+        return browser.find_callback(job_url, source, deadline=deadline)
+    return browser.find_callback(job_url, source)
+
+
 def page_error_kind(page):
     """Recognize error-page headings, never old messages inside console logs."""
     try:
@@ -438,6 +480,7 @@ class JenkinsBrowser:
             action('JENKINS-ACCESS', f'{self.site} HTTP={code}; 页面类型={page_error_kind(self.page) or "unknown"}; 最终路径={final.scheme}://{final.netloc}{final.path}; 登录恢复次数={int(url in getattr(self, "_login_recovery_targets", set()))}')
         operation('PW', f'page.goto completed: HTTP={code}, elapsed={time.monotonic()-started:.1f}s, title={self.page.title()}')
         debug(f'[BROWSER/{self.site}] HTTP {code} page={self.page.title()}')
+        self._readiness_http = code
         return code
 
     def wait_job(self, job_url):
@@ -480,6 +523,7 @@ class JenkinsBrowser:
         self.visit(job_url)
         # Use actionable links only. Raw page text can contain old log messages
         # like 'Build Now' and must never authorize a build click.
+        _observe_page(self, lambda: self.page.get_by_role('link', name=re.compile(r'Build with Parameters|Build Now|^Build$', re.I)).count(), target=job_url)
         operation('PW', 'page.get_by_role(link, name=Build with Parameters).count()')
         if self.page.get_by_role('link', name=re.compile(r'Build with Parameters', re.I)).count():
             detected = 'parameters'
@@ -547,21 +591,42 @@ class JenkinsBrowser:
         raise NeedsAttention(f'页面找不到唯一的 {role}: {text}，请查看 screenshots')
 
     def _find_control(self, field, config_css=''):
+        missing = []
+        def read():
+            try:
+                return self._find_control_once(field, config_css)
+            except _ControlNotReady as exc:
+                missing[:] = [exc]
+                return None
+        control = _observe_page(self, read)
+        if control is None:
+            if missing:
+                raise missing[0]
+            raise NeedsAttention(f'Jenkins 参数 {field} 在观察预算内尚未就绪')
+        return control
+
+    def _find_control_once(self, field, config_css=''):
         if config_css:
             operation('PW', f'page.locator({config_css!r}) 配置的 {field} 字段')
             chosen = self.page.locator(config_css)
+            if chosen.count() == 0:
+                raise _ControlNotReady(f'未找到 Jenkins 参数 {field}，请配置 jenkins.gmx_fields.{field}')
             if chosen.count() != 1:
                 raise NeedsAttention(f'{field} 配置选择器匹配 {chosen.count()} 个控件（必须为1）')
             return chosen
         # Fields in Jenkins are often not connected to standard <label for>.
         operation('PW', f'page.get_by_label({field}, exact=True).count()')
         by_label = self.page.get_by_label(field, exact=True)
+        if by_label.count() > 1:
+            raise NeedsAttention(f'{field} 有多个同名标签控件，禁止猜测')
         if by_label.count() == 1:
             return by_label
         operation('PW', f'page.get_by_text({field}, exact=True).count()')
         labels = self.page.get_by_text(field, exact=True)
+        if labels.count() > 1:
+            raise NeedsAttention(f'{field} 有多个同名文本标签，禁止猜测')
         if labels.count() < 1:
-            raise NeedsAttention(f'未找到 Jenkins 参数 {field}，请配置 jenkins.gmx_fields.{field}')
+            raise _ControlNotReady(f'未找到 Jenkins 参数 {field}，请配置 jenkins.gmx_fields.{field}')
         for i in range(labels.count()):
             lab = labels.nth(i)
             for depth in range(1, 5):
@@ -570,6 +635,8 @@ class JenkinsBrowser:
                 controls = parent.locator('select, input:not([type="hidden"]), textarea')
                 if controls.count() == 1:
                     return controls.first
+        if controls.count() == 0:
+            raise _ControlNotReady(f'未找到 Jenkins 参数 {field}，请配置 jenkins.gmx_fields.{field}')
         raise NeedsAttention(f'{field} 有多个或没有可识别控件，请配置 jenkins.gmx_fields.{field}')
 
     @staticmethod
@@ -816,9 +883,19 @@ class JenkinsBrowser:
     def detect_new_build(self, job_url, baseline, minutes=12):
         deadline = time.monotonic() + minutes * 60
         start = time.monotonic()
+        observed = False
         while time.monotonic() < deadline:
+            # Read the previous document before replacing it: late async content
+            # may have arrived during the normal poll interval.
+            if observed:
+                candidates = _observe_page(self, lambda: sorted(self.build_numbers(job_url) - set(baseline)), deadline=deadline, target=job_url) or []
+                if len(candidates)>1:raise NeedsAttention(f'发现多个新 Build {candidates}，无法确认哪个属于本次触发')
+                if candidates:return candidates[0]
+            if time.monotonic()>=deadline:break
             self.visit(job_url)
-            candidates = sorted(self.build_numbers(job_url) - set(baseline))
+            if time.monotonic()>=deadline:break
+            observed = True
+            candidates = _observe_page(self, lambda: sorted(self.build_numbers(job_url) - set(baseline)), deadline=deadline, target=job_url) or []
             if len(candidates) == 1:
                 action('JENKINS', f'{self.site} 检测到本次 Build #{candidates[0]}: {job_url}{candidates[0]}/')
                 return candidates[0]
@@ -949,7 +1026,7 @@ class JenkinsBrowser:
             action('WAIT', f'{self.site} Build History #{number} 多个图标状态冲突: {sorted(results)}')
         return None
 
-    def _fast_console_result(self, build_url, number):
+    def _fast_console_result(self, build_url, number, *, deadline=None):
         """Read raw consoleText HTTP response through this browser's cookie context.
 
         No Jenkins REST API, no browser DOM rendering, no public credentials.
@@ -959,7 +1036,7 @@ class JenkinsBrowser:
         url = build_url + 'consoleText'
         operation('PW', f'context.request.get({url}, timeout=10000) [原始日志，非页面渲染]')
         try:
-            response = authenticated_console_response(self, url, 10000)
+            response = authenticated_console_response(self, url, 10000, deadline=deadline)
             status = response.status
             final_host = urlsplit(response.url).hostname
             if (final_host != urlsplit(url).hostname
@@ -991,37 +1068,46 @@ class JenkinsBrowser:
         interval = max(2, min(60, int(getattr(self, 'result_poll', 5))))
         action('JENKINS', f'{self.site} Build #{number}：优先检查绿色状态勾（每 {interval}s），'
                          '日志仅作补充确认')
-        while time.monotonic() < deadline:
-            # The job's Build History is lightweight and contains the green tick
-            # visible next to this EXACT Build number. Probe it BEFORE loading
-            # the often huge consoleText, which can take >10s to download.
-            code = self.visit(job_url)
-            if code in (401, 403):
-                raise NeedsAttention(f'{self.site} Job 页面无访问权限 (HTTP {code})')
-            if code == 200:
+        phase = 'history'
+        previous = None
+        def read_current():
+            if previous == 'history':
                 result = JenkinsBrowser._history_result(self, job_url, number)
-                if result:
-                    return result, ''
-            code = self.visit(build_url)
-            if code in (401, 403):
-                raise NeedsAttention(f'{self.site} Build #{number} 页面无访问权限 (HTTP {code})')
-            if code == 200:
+                if not result and watch_callback:
+                    child = callback_number_from_text(self.page.locator('body').inner_text(),number)
+                    if child is not None:return 'DELEGATED',str(child)
+            else:
                 result = JenkinsBrowser._heading_result(self, number)
-                if result:
-                    return result, ''
-                if watch_callback:
-                    child = self.find_callback(job_url, number)
-                    if child is not None:
-                        action('CALLBACK', f'{self.site} Build #{number} 已创建 Callback #{child}；改为监控 #{child}')
-                        return 'DELEGATED', str(child)
-            # If the icons are not exposed by this Jenkins theme, fall back to
-            # the explicit final marker (never an arbitrary SUCCESS in log text).
-            found = JenkinsBrowser._fast_console_result(self, build_url, number)
-            if found:
-                return found
-            action('WAIT', f'{self.site} Build #{number} 仍未确认终态；已等待 '
-                           f'{int(time.monotonic()-start)}s，{interval}s 后检查状态勾')
-            time.sleep(min(interval, max(0, deadline - time.monotonic())))
+            return (result, '') if result else None
+        while time.monotonic() < deadline:
+            # Preserve the old document through the poll interval, then inspect
+            # it once more BEFORE navigation can cancel its async rendering.
+            if previous is not None and isinstance(self, JenkinsBrowser):
+                target = job_url if previous == 'history' else build_url
+                found = _observe_page(self, read_current,
+                                      deadline=deadline, target=target, once=True)
+                if found:return found
+            if time.monotonic()>=deadline:break
+            target = job_url if phase == 'history' else build_url
+            code = self.visit(target, timeout=max(1,min(60000,int((deadline-time.monotonic())*1000))))
+            if time.monotonic()>=deadline:break
+            if code in (401,403):
+                raise NeedsAttention(f'{self.site} Build #{number} 页面无访问权限 (HTTP {code})')
+            previous = phase
+            if code == 200:
+                found = _observe_page(self, read_current,deadline=deadline,target=target)
+                if found:return found
+            if code != 200:previous = None
+            if time.monotonic()>=deadline:break
+            found = JenkinsBrowser._fast_console_result(self,build_url,number,deadline=deadline)
+            if time.monotonic()>=deadline:break
+            if found:return found
+            if isinstance(self,JenkinsBrowser) and same_target_url(self.page.url,build_url+'consoleText'):
+                previous = None  # authenticated console recovery may navigate here
+            phase = 'heading' if phase == 'history' else 'history'
+            action('WAIT',f'{self.site} Build #{number} 仍未确认终态；已等待 '
+                   f'{int(time.monotonic()-start)}s，{interval}s 后同页复查再导航')
+            time.sleep(min(interval,max(0,deadline-time.monotonic())))
         raise TimeoutError(f'{self.site} Build #{number} 结果未确认，超出构建监控时间；'
                            f'请直接检查 {build_url}consoleText')
 
@@ -1076,11 +1162,23 @@ class JenkinsBrowser:
             time.sleep(min(self.poll, max(0, deadline - time.monotonic())))
         raise TimeoutError(f'Jenkins Build #{number} 在监控超时后仍未确认: {build_url}')
 
-    def find_callback(self, job_url, source_number):
-        self.visit(job_url)
-        operation('PW', 'page.locator(body).inner_text() 查找本次关联的 Callback')
-        text = self.page.locator('body').inner_text()
-        return callback_number_from_text(text, source_number)
+    def find_callback(self, job_url, source_number, *, deadline=None):
+        def read():
+            return callback_number_from_text(self.page.locator('body').inner_text(), source_number)
+        if same_target_url(self.page.url, job_url):
+            child = _observe_page(self, read, deadline=deadline, target=job_url)
+            if child is not None or (deadline is not None and time.monotonic()>=deadline):
+                return child
+        if deadline is not None and time.monotonic()>=deadline:return None
+        code = self.visit(job_url)
+        if code in (401, 403):
+            raise NeedsAttention(f'{self.site} Job 页面无访问权限 (HTTP {code})')
+        if code != 200:
+            return None
+        operation('PW', '同页等待本次关联的 Callback，不重载或触发构建')
+        return _observe_page(self, lambda: callback_number_from_text(
+            self.page.locator('body').inner_text(), source_number),
+            deadline=deadline, target=job_url)
 
 
 def callback_number_from_text(text, source_number):
@@ -1102,6 +1200,19 @@ def callback_number_from_text(text, source_number):
 
 
 
+def _dispatch_evidence(browser, job_url, baseline, initial=None):
+    def read():
+        nonlocal initial
+        current = initial if initial is not None else browser.build_numbers(job_url)
+        initial = None
+        found = sorted(set(current) - set(baseline))
+        if len(found) > 1:
+            raise NeedsAttention('发现多个新 Build，无法证明归属；不会重复提交')
+        queues = browser.queued_builds(job_url) if hasattr(browser, 'queued_builds') else []
+        return (found, queues) if found or queues else None
+    return _observe_page(browser, read, target=job_url) or ([], [])
+
+
 def _dispatch_or_reconcile(browser,job_url,task_id,key,**parameters):
     rt=read_state(task_id)['runtime']
     previous=rt.get(key+'_dispatch',{})
@@ -1113,7 +1224,7 @@ def _dispatch_or_reconcile(browser,job_url,task_id,key,**parameters):
     current=set(browser.build_numbers(job_url))
     baseline=rt.get(key+'_baseline')
     if baseline is not None:
-        found=sorted(current-set(baseline))
+        found, queues = _dispatch_evidence(browser, job_url, baseline, initial=current)
         if len(found)>1:raise NeedsAttention('恢复发现多个新 Build，禁止猜测或重复提交')
         if found and previous.get('state')=='PREPARING':
             patch_runtime(task_id,**{key+'_dispatch':{'state':'CONFLICT','job_url':job_url}})
@@ -1121,7 +1232,6 @@ def _dispatch_or_reconcile(browser,job_url,task_id,key,**parameters):
         if found:
             action('DISPATCH',f'{key} 恢复发现目标 Job 新 Build #{found[0]}，不重复提交')
             return found[0]
-        queues=browser.queued_builds(job_url) if hasattr(browser,'queued_builds') else []
         if queues:
             action('DISPATCH',f'{key} 恢复发现目标 Job 队列 {queues}，不重复提交')
             return browser.detect_new_build(job_url,baseline,minutes=3)
@@ -1142,10 +1252,9 @@ def _dispatch_or_reconcile(browser,job_url,task_id,key,**parameters):
     receipt=read_state(task_id)['runtime'].get(key+'_dispatch',{})
     if receipt.get('state')=='UNKNOWN':
         browser.visit(job_url)
-        found=sorted(set(browser.build_numbers(job_url))-set(baseline))
+        found, queues = _dispatch_evidence(browser, job_url, baseline)
         if len(found)==1:return found[0]
         if len(found)>1:raise NeedsAttention('提交后出现多个新 Build，无法证明归属；不会重复提交')
-        queues=browser.queued_builds(job_url)
         if not queues:raise NeedsAttention('点击后未确认构建 POST 接受/队列或新编号，提交结果未知；停止等待，不自动重发，请核对 Jenkins')
         action('DISPATCH',f'{key} 已观察目标队列 {queues}，等待编号，不重复提交')
     return browser.detect_new_build(job_url,baseline)
@@ -1221,9 +1330,14 @@ def formal_build(browser: JenkinsBrowser, job_url, task_id, site, country='', pr
     return num, console
 
 
-def authenticated_console_response(browser, url, timeout):
+def authenticated_console_response(browser, url, timeout, *, deadline=None):
     """Read-only retry after normal browser login; never replay a build POST."""
-    response = browser.context.request.get(url, timeout=timeout)
+    def remaining_timeout():
+        if deadline is None:return timeout
+        remaining=deadline-time.monotonic()
+        if remaining<=0:raise PlaywrightTimeout('Jenkins console observation budget exhausted')
+        return max(1,min(timeout,int(remaining*1000)))
+    response = browser.context.request.get(url, timeout=remaining_timeout())
     headers = getattr(response, 'headers', {})
     headers = headers if isinstance(headers, dict) else {}
     needs_auth = (response.status in (401, 403) or urlsplit(response.url) != urlsplit(url)
@@ -1233,9 +1347,9 @@ def authenticated_console_response(browser, url, timeout):
         # visit owns the bounded, site-specific login and explicit ACL guard.
         if hasattr(response, 'dispose'):
             response.dispose()
-        if visit(url, timeout=timeout) != 200:
+        if visit(url, timeout=remaining_timeout()) != 200:
             raise NeedsAttention('指定 Build 日志认证恢复后仍不可访问')
-        response = browser.context.request.get(url, timeout=timeout)
+        response = browser.context.request.get(url, timeout=remaining_timeout())
     return response
 
 
@@ -1334,7 +1448,7 @@ def plugin_artifact_info(browser, job_url, source_number, task_id):
         pass
     deadline = time.monotonic() + 60 * float(browser.conf.get('callback_timeout_minutes', 30))
     while time.monotonic() < deadline:
-        child = browser.find_callback(job_url, source_number)
+        child = _callback_before(browser, job_url, source_number, deadline)
         if child is not None:
             patch_runtime(task_id, **{key: child})
             return from_callback(child)

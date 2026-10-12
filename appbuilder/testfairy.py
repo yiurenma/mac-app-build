@@ -493,12 +493,25 @@ class TestFairyBrowser:
 
     def _existing_share(self,card,parsed,expected,deadline):
         self._trace_event('share','start',deadline)
-        links=card.locator('a[href*="/join/"]')
-        if not links.count():
-            # Only open the existing Share view. Never Enable/Create/Save permissions.
+        identity=self._node_cursor(card,deadline)
+        while True:
+            if not self._same_origin() or card.count()!=1 or not card.is_visible():
+                raise NeedsAttention('Share 等待时原 App 卡片或租户已变化')
+            if self._node_cursor(card,deadline)!=identity or parse_candidate(self._lookup_action(card.inner_text,deadline),expected) != parsed:
+                raise NeedsAttention('Share 等待时原 App 卡片身份已变化')
+            links=card.locator('a[href*="/join/"]')
             share=card.get_by_role('button',name=re.compile(r'^Share$',re.I))
-            if share.count()!=1:share=card.get_by_role('link',name=re.compile(r'^Share$',re.I))
-            if share.count()!=1:raise NeedsAttention('匹配 App 的现有 Share 入口无法唯一识别')
+            link_controls=card.get_by_role('link',name=re.compile(r'^Share$',re.I))
+            count=share.count()+link_controls.count()
+            if links.count():break
+            if count>1:raise NeedsAttention('匹配 App 的现有 Share 入口无法唯一识别')
+            if count==1:
+                if not share.count():share=link_controls
+                break
+            if time.monotonic()>=deadline:
+                raise NeedsAttention('匹配 App 的现有 Share 入口无法唯一识别；等待超时')
+            self.page.wait_for_timeout(min(100,max(1,(deadline-time.monotonic())*1000)))
+        if not links.count():
             if self.page.locator('[role="dialog"]:visible, dialog[open]:visible').count():
                 raise NeedsAttention('Share 前已有可见弹窗，无法证明链接归属；请关闭后再测试')
             self._lookup_action(share.click,deadline)
@@ -536,6 +549,8 @@ class TestFairyBrowser:
         summary=dict(self.trace.summary)
         first=summary.get('first_error') or {}
         message=first.get('message','查找失败').split('；目标名称只读结构')[0][:360]
+        if stage=='share':
+            message+='；Share 阶段：不会从整页或其他 App 取链接'
         if getattr(exc,'lookup_budget_exhausted',False):
             message+='；页面操作总等待预算已用尽'
         error=NeedsAttention('TestFairy '+first.get('phase',stage)+'：'+message+'；诊断日志 '+summary['log_path'])
