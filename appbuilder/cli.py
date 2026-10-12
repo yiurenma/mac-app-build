@@ -98,9 +98,16 @@ def spawn(task_id, wait=False, transient_credentials=None):
     cmd = [sys.executable, '-m', 'appbuilder', 'worker', task_id]
     if sys.platform == 'darwin' and shutil.which('caffeinate'):
         cmd = ['caffeinate', '-i', *cmd]
-    with log_path.open('ab') as out:
-        p = subprocess.Popen(cmd, cwd=ROOT, stdin=subprocess.PIPE if transient_credentials else subprocess.DEVNULL,
-                             stdout=out, stderr=subprocess.STDOUT, start_new_session=True)
+    p = None
+    try:
+        with log_path.open('ab') as out:
+            p = subprocess.Popen(cmd, cwd=ROOT, stdin=subprocess.PIPE if transient_credentials else subprocess.DEVNULL,
+                                 stdout=out, stderr=subprocess.STDOUT, start_new_session=True)
+    except Exception:
+        if p is None:
+            # No worker was created. Release both the global and schedule slot.
+            update_task(task_id, status='FAILED', note='Worker 未启动；可恢复此任务，或等待定时计划下一次运行')
+        raise
     if transient_credentials:
         # Private pipe: never arguments, environment variables or task files.
         try:

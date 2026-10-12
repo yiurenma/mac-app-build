@@ -40,7 +40,7 @@ def connect():
     return db
 
 
-def create_task(config, params):
+def create_task(config, params, *, schedule_claim=None):
     """Reserve a unique timestamp and initialize task state in one DB transaction.
 
     On failed filesystem initialization, roll back the reservation and clean up.
@@ -79,6 +79,9 @@ def create_task(config, params):
             save_state(task_id, {'completed': [], 'runtime': {}})
             db.execute('INSERT INTO tasks(id,created,stamp,status,params,stage) VALUES(?,?,?,?,?,?)',
                        (task_id, datetime.now().isoformat(), stamp, 'QUEUED', json.dumps(params), 'INIT'))
+            if schedule_claim is not None:
+                from .schedules import attach_task
+                attach_task(db, schedule_claim, task_id)
         except BaseException:
             shutil.rmtree(workdir)
             raise
@@ -114,6 +117,8 @@ def reserve_resume(config, task_id):
                            (task_id,)).fetchone()[0]
         if count >= parallel_limit(config):
             raise ValueError('并发任务已达到上限')
+        from .schedules import check_resume_slot
+        check_resume_slot(db, task_id)
         # The launching process owns the reservation until the worker takes it.
         db.execute("UPDATE tasks SET status='QUEUED', pid=?, note='等待恢复 Worker' WHERE id=?",
                    (os.getpid(), task_id))
@@ -127,6 +132,9 @@ def update_task(task_id, **values):
     with closing(connect()) as db, db:
         db.execute('UPDATE tasks SET ' + ', '.join(k+'=?' for k in values) + ' WHERE id=?',
                    (*values.values(), task_id))
+        if values.get('status') == 'SUCCESS':
+            from .schedules import reconcile_successes
+            reconcile_successes(db)
 
 
 def update_task_params(task_id, *, visible=None, verbose=None):

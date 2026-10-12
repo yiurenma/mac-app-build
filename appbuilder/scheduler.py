@@ -207,6 +207,7 @@ def run_forever(interval=INTERVAL_SECONDS, *, max_loops=None, sleep=time.sleep, 
                     for s in (signal.SIGTERM, signal.SIGINT)}
         try:
             print(f'[SCHEDULER] 启动 v{__version__} pid={os.getpid()}；每 {interval}s 检查一次到期任务', flush=True)
+            schedules.recover_startup()
             loops = 0
             while not stopping:
                 try:

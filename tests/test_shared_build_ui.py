@@ -11,7 +11,8 @@ from playwright.sync_api import sync_playwright, expect
 from appbuilder import schedules, store, web
 
 
-class SharedBuildUITests(unittest.TestCase):
+class SharedBuildUIFixture:
+    headless = True
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
@@ -38,7 +39,7 @@ class SharedBuildUITests(unittest.TestCase):
         self.addCleanup(self.server.server_close)
         self.addCleanup(self.server.shutdown)
         self.engine = sync_playwright().start(); self.addCleanup(self.engine.stop)
-        self.browser = self.engine.chromium.launch(executable_path='/usr/bin/chromium', headless=True,
+        self.browser = self.engine.chromium.launch(executable_path='/usr/bin/chromium', headless=self.headless,
                                                    args=['--no-sandbox'])
         self.addCleanup(self.browser.close)
         self.page = self.browser.new_page(viewport={'width': 1440, 'height': 1000})
@@ -55,6 +56,8 @@ class SharedBuildUITests(unittest.TestCase):
     def open_details(self):
         self.form.locator('details').evaluate_all('(nodes)=>nodes.forEach(n=>n.open=true)')
 
+
+class SharedBuildUITests(SharedBuildUIFixture, unittest.TestCase):
     def test_defaults_help_branch_paging_refresh_and_manual_fallback(self):
         p = self.page
         self.assertEqual(self.form.locator('[data-build]:visible').count(), 11)

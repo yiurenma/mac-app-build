@@ -270,7 +270,7 @@ def validate_build_parameters(body, config):
     return params
 
 
-def create_build(body):
+def create_build(body, *, schedule_claim=None):
     """Use the same validations and persistent job engine as CLI run."""
     from .cli import doctor_check, spawn
     from .auth import store_credentials, store_github_token
@@ -302,7 +302,7 @@ def create_build(body):
     token_or_error(config)
     if active_count() >= parallel_limit(config):
         raise ValueError('已达到并发任务上限，请先等待或恢复已有任务')
-    created = create_task(config, params)
+    created = create_task(config, params, schedule_claim=schedule_claim) if schedule_claim is not None else create_task(config, params)
     if transient:
         spawn(created['id'], wait=False, transient_credentials=transient)
     else:

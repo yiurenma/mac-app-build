@@ -30,10 +30,14 @@ def _public_run(run):
 
 
 def public_schedule(row):
-    template = schedules.validate_template(json.loads(row['params']))
+    # Reading/copying a non-secret template must not require a live TF session.
+    # Full validation (including existing auth references) still runs on save/start.
+    template = json.loads(row['params'])
     run = schedules.last_run(row['id'])
     return {'id': row['id'], 'name': row['name'], 'cron': row['cron'], 'enabled': bool(row['enabled']),
             'next_run': row['next_run'], 'created': row['created'],
+            'stop_after_success': bool(row['stop_after_success']), 'revision': row['revision'],
+            'success_task_id': row['success_task_id'], 'stopped_at': row['stopped_at'],
             'template': {k: v for k, v in template.items() if k in (
                 *schedules.BASIC_KEYS, *schedules.OPTIONAL_TEXT, *schedules.OPTIONAL_INT, *schedules.OPTIONAL_BOOL)},
             'last_run': _public_run(run) if run else None}
@@ -84,7 +88,8 @@ def _template_from(body):
 def handle_post(path, body):
     if path == '/api/schedules':
         row = schedules.create_schedule(body.get('name'), body.get('cron') or '', _template_from(body),
-                                        enabled=body.get('enabled', True) is True)
+                                        enabled=body.get('enabled', True) is True,
+                                        stop_after_success=body.get('stop_after_success', True))
         return 201, {'schedule': public_schedule(row)}
     m = re.fullmatch(r'/api/schedules/([^/]+)/(update|toggle|delete|run-now)', path)
     if not m:
@@ -94,12 +99,13 @@ def handle_post(path, body):
         row = schedules.update_schedule(
             schedule_id, name=body.get('name'), expression=body.get('cron'),
             template=_template_from(body) if 'template' in body else None,
-            enabled=body['enabled'] if isinstance(body.get('enabled'), bool) else None)
+            enabled=body['enabled'] if isinstance(body.get('enabled'), bool) else None,
+            stop_after_success=body.get('stop_after_success'), expected_revision=body.get('expected_revision'))
         return 200, {'schedule': public_schedule(row)}
     if action == 'toggle':
         if not isinstance(body.get('enabled'), bool):
             raise ValueError('enabled 必须是 true 或 false')
-        return 200, {'schedule': public_schedule(schedules.update_schedule(schedule_id, enabled=body['enabled']))}
+        return 200, {'schedule': public_schedule(schedules.update_schedule(schedule_id, enabled=body['enabled'], restart_cycle=body['enabled'], expected_revision=body.get('expected_revision')))}
     if action == 'delete':
         schedules.delete_schedule(schedule_id)
         return 200, {'deleted': schedule_id}

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import os
+import uuid
 from contextlib import closing
 from datetime import datetime
 
@@ -54,6 +55,18 @@ def connect():
     db = store.connect()
     try:
         db.executescript(SCHEMA)
+        db.execute('BEGIN IMMEDIATE')
+        additions = {
+            'schedules': {'stop_after_success': 'INTEGER NOT NULL DEFAULT 0',
+                          'generation': 'INTEGER NOT NULL DEFAULT 1',
+                          'success_task_id': 'TEXT', 'stopped_at': 'TEXT', 'revision': 'INTEGER NOT NULL DEFAULT 0'},
+            'schedule_runs': {'generation': 'INTEGER NOT NULL DEFAULT 1', 'claim_token': 'TEXT'},
+        }
+        for table, columns in additions.items():
+            existing = {row['name'] for row in db.execute(f'PRAGMA table_info({table})')}
+            for name, definition in columns.items():
+                if name not in existing:
+                    db.execute(f'ALTER TABLE {table} ADD COLUMN {name} {definition}')
         db.commit()
     except BaseException:
         db.close()
@@ -118,10 +131,12 @@ def _name(value):
     return value.strip()
 
 
-def create_schedule(name, expression, template, *, enabled=True, now=None, config=None):
+def create_schedule(name, expression, template, *, enabled=True, stop_after_success=True, now=None, config=None):
     config = config if config is not None else load_config()
     now = now or datetime.now()
     name = _name(name)
+    if not isinstance(stop_after_success, bool):
+        raise ValueError("stop_after_success 必须是 true 或 false")
     _, first = check_cron(expression, now, config)
     expression = expression.strip()
     template = validate_template(template, config)
@@ -130,10 +145,10 @@ def create_schedule(name, expression, template, *, enabled=True, now=None, confi
         db.execute('BEGIN IMMEDIATE')
         if db.execute('SELECT COUNT(*) FROM schedules').fetchone()[0] >= MAX_SCHEDULES:
             raise ValueError(f'最多保存 {MAX_SCHEDULES} 个定时任务')
-        db.execute('INSERT INTO schedules(id,name,cron,enabled,params,next_run,created,updated) '
-                   'VALUES(?,?,?,?,?,?,?,?)',
+        db.execute('INSERT INTO schedules(id,name,cron,enabled,params,next_run,created,updated,stop_after_success) '
+                   'VALUES(?,?,?,?,?,?,?,?,?)',
                    (schedule_id, name, expression, int(bool(enabled)), json.dumps(template),
-                    _iso(first) if enabled else None, _iso(now), _iso(now)))
+                    _iso(first) if enabled else None, _iso(now), _iso(now), int(stop_after_success)))
     return get_schedule(schedule_id)
 
 
@@ -151,24 +166,41 @@ def list_schedules():
 
 
 def update_schedule(schedule_id, *, name=None, expression=None, template=None, enabled=None,
-                    now=None, config=None):
+                    stop_after_success=None, expected_revision=None, restart_cycle=False, now=None, config=None):
     config = config if config is not None else load_config()
     now = now or datetime.now()
-    current = get_schedule(schedule_id)
-    new_name = _name(name) if name is not None else current['name']
-    new_cron = expression if expression is not None else current['cron']
-    new_template = validate_template(template, config) if template is not None else json.loads(current['params'])
-    new_enabled = bool(current['enabled']) if enabled is None else bool(enabled)
-    _, first = check_cron(new_cron, now, config)
-    new_cron = new_cron.strip()
-    # Any edit or re-enable restarts the clock from "now": no catch-up for the
-    # period during which the schedule was off or being edited.
-    reschedule = new_enabled and (expression is not None or not current['enabled'])
-    next_run = (_iso(first) if reschedule else current['next_run']) if new_enabled else None
+    clean_template = validate_template(template, config) if template is not None else None
+    if stop_after_success is not None and not isinstance(stop_after_success, bool):
+        raise ValueError('stop_after_success 必须是 true 或 false')
     with closing(connect()) as db, db:
-        db.execute('UPDATE schedules SET name=?, cron=?, params=?, enabled=?, next_run=?, updated=? WHERE id=?',
-                   (new_name, new_cron, json.dumps(new_template), int(new_enabled), next_run,
-                    _iso(now), schedule_id))
+        db.execute('BEGIN IMMEDIATE')
+        current = db.execute('SELECT * FROM schedules WHERE id=?', (schedule_id,)).fetchone()
+        if current is None:
+            raise ValueError('定时任务不存在: ' + schedule_id)
+        if expected_revision is not None and (type(expected_revision) is not int or expected_revision != current['revision']):
+            raise ValueError('计划已变化（可能已成功停止）；请重新打开编辑后保存')
+        if current['success_task_id'] and enabled is True and not restart_cycle:
+            raise ValueError('本轮已成功停止；请使用列表的重新启用开启新一轮')
+        new_name = _name(name) if name is not None else current['name']
+        new_cron = expression if expression is not None else current['cron']
+        _, first = check_cron(new_cron, now, config)
+        new_enabled = bool(current['enabled']) if enabled is None else bool(enabled)
+        new_stop = bool(current['stop_after_success']) if stop_after_success is None else stop_after_success
+        # Explicit re-enable starts a fresh generation. Old workers cannot stop it.
+        enabling_stop = new_stop and not current['stop_after_success']
+        restart = new_enabled and (not current['enabled'] or enabling_stop)
+        new_round = restart or enabling_stop
+        generation = current['generation'] + int(new_round)
+        next_run = (_iso(first) if restart or expression is not None else current['next_run']) if new_enabled else None
+        db.execute('UPDATE schedules SET name=?,cron=?,params=?,enabled=?,next_run=?,updated=?, '
+                   'stop_after_success=?,generation=?,success_task_id=?,stopped_at=?,revision=revision+1 WHERE id=?',
+                   (new_name, new_cron.strip(), json.dumps(clean_template) if clean_template is not None else current['params'],
+                    int(new_enabled), next_run, _iso(now), int(new_stop), generation,
+                    None if new_round else current['success_task_id'], None if new_round else current['stopped_at'], schedule_id))
+        if new_round or not new_enabled:
+            db.execute("UPDATE schedule_runs SET status='CANCELLED',note='计划已停用或开启新一轮',claim_token=NULL "
+                       "WHERE schedule_id=? AND status IN ('PENDING','CLAIMED')", (schedule_id,))
+        reconcile_successes(db, now=now)
     return get_schedule(schedule_id)
 
 
@@ -192,12 +224,18 @@ def last_run(schedule_id):
 
 
 def run_now(schedule_id, now=None):
-    """Queue one extra run immediately (still subject to the concurrency limit)."""
+    """Manual runs of a success-stopped cycle require an explicit new cycle."""
     now = now or datetime.now()
-    get_schedule(schedule_id)
     with closing(connect()) as db, db:
-        cur = db.execute("INSERT OR IGNORE INTO schedule_runs(schedule_id,planned,status,note,created) "
-                         "VALUES(?,?, 'PENDING', '手动触发', ?)", (schedule_id, _iso(now), _iso(now)))
+        db.execute('BEGIN IMMEDIATE')
+        reconcile_successes(db, now=now)
+        row = db.execute('SELECT * FROM schedules WHERE id=?', (schedule_id,)).fetchone()
+        if row is None:
+            raise ValueError('定时任务不存在: ' + schedule_id)
+        if row['success_task_id']:
+            raise ValueError('此轮已成功停止；请先重新启用，开启新一轮')
+        cur = db.execute("INSERT OR IGNORE INTO schedule_runs(schedule_id,planned,status,note,created,generation) "
+                         "VALUES(?,?, 'PENDING', '手动触发', ?,?)", (schedule_id, _iso(now), _iso(now), row['generation']))
         if cur.rowcount == 0:
             raise ValueError('刚刚已经触发过一次，请稍候再试')
     return {'queued': True, 'run_id': cur.lastrowid, 'status': 'PENDING'}
@@ -208,15 +246,16 @@ def enqueue_due(now):
     queued = 0
     with closing(connect()) as db, db:
         db.execute('BEGIN IMMEDIATE')
+        reconcile_successes(db, now=now)
         due = db.execute('SELECT * FROM schedules WHERE enabled=1 AND next_run IS NOT NULL AND next_run<=?',
                          (_iso(now),)).fetchall()
         for row in due:
             spec = cron.parse(row['cron'])
             planned, missed = cron.latest_due(spec, _parse_iso(row['next_run']), now)
             note = f'错过 {missed} 次，仅补跑最近一次' if missed else ''
-            cur = db.execute("INSERT OR IGNORE INTO schedule_runs(schedule_id,planned,status,note,missed,created) "
-                             "VALUES(?,?, 'PENDING', ?, ?, ?)",
-                             (row['id'], _iso(planned), note, missed, _iso(now)))
+            cur = db.execute("INSERT OR IGNORE INTO schedule_runs(schedule_id,planned,status,note,missed,created,generation) "
+                             "VALUES(?,?, 'PENDING', ?, ?, ?, ?)",
+                             (row['id'], _iso(planned), note, missed, _iso(now), row['generation']))
             queued += cur.rowcount
             following = cron.next_after(spec, now)
             db.execute('UPDATE schedules SET next_run=? WHERE id=?',
@@ -228,50 +267,151 @@ def _is_capacity_error(exc):
     return '并发' in str(exc)
 
 
-def _default_start(body):
+def _default_start(body, claim):
     from .web import create_build
-    return create_build(body)
+    return create_build(body, schedule_claim=claim)
 
 
-def _finish(run_id, status, *, task_id=None, note='', now=None):
-    now = now or datetime.now()
+class RunUnavailable(ValueError):
+    """A cancelled, already-owned or obsolete run must never launch a new task."""
+
+
+def reconcile_successes(db, *, now=None):
+    """Called within the caller's write transaction, including task SUCCESS commit."""
+    # Ordinary manual tasks can finish before any schedules have been created.
+    if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='schedule_runs'").fetchone():
+        return
+    if 'generation' not in {r['name'] for r in db.execute('PRAGMA table_info(schedule_runs)')}:
+        return  # scheduler startup migrates and reconciles older databases
+    rows = db.execute("SELECT s.id,t.id AS task_id FROM schedules s "
+                      "JOIN schedule_runs r ON r.schedule_id=s.id AND r.generation=s.generation "
+                      "JOIN tasks t ON t.id=r.task_id WHERE s.stop_after_success=1 "
+                      "AND s.success_task_id IS NULL AND t.status='SUCCESS' AND t.stage='FINISHED' "
+                      "ORDER BY r.id").fetchall()
+    for row in rows:
+        changed = db.execute('UPDATE schedules SET enabled=0,next_run=NULL,success_task_id=?,stopped_at=?,updated=?,revision=revision+1 '
+                             'WHERE id=? AND success_task_id IS NULL',
+                             (row['task_id'], _iso(now or datetime.now()), _iso(now or datetime.now()), row['id'])).rowcount
+        if changed:
+            db.execute("UPDATE schedule_runs SET status='CANCELLED',note='本轮已成功，取消未启动运行',claim_token=NULL "
+                       "WHERE schedule_id=? AND status IN ('PENDING','CLAIMED')", (row['id'],))
+
+
+def check_resume_slot(db, task_id):
+    if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='schedules'").fetchone():
+        return
+    if 'stop_after_success' not in {r['name'] for r in db.execute('PRAGMA table_info(schedules)')}:
+        return
+    owner = db.execute('SELECT r.schedule_id FROM schedule_runs r JOIN schedules s ON s.id=r.schedule_id '
+                       'WHERE r.task_id=? AND s.stop_after_success=1', (task_id,)).fetchone()
+    if owner and db.execute("SELECT 1 FROM schedule_runs r LEFT JOIN tasks t ON t.id=r.task_id "
+                            "WHERE r.schedule_id=? AND (r.task_id IS NULL OR r.task_id<>?) "
+                            "AND (r.status='CLAIMED' OR t.status IN ('QUEUED','RUNNING')) LIMIT 1",
+                            (owner['schedule_id'], task_id)).fetchone():
+        raise ValueError('本计划已有未完成任务，不能同时恢复另一任务')
+
+
+def recover_startup():
+    """Only the exclusive scheduler owner may release pre-task crash claims."""
     with closing(connect()) as db, db:
-        db.execute('UPDATE schedule_runs SET status=?, task_id=?, note=CASE WHEN ?<>\'\' THEN ? ELSE note END, '
-                   'started=? WHERE id=?', (status, task_id, note, note, _iso(now), run_id))
+        db.execute('BEGIN IMMEDIATE')
+        reconcile_successes(db)
+        db.execute("UPDATE schedule_runs SET status='PENDING',claim_token=NULL "
+                   "WHERE status='CLAIMED' AND task_id IS NULL")
+        # STARTED tasks are never automatically spawned again: their worker may
+        # already exist, or have dispatched Jenkins before a local crash.
+
+
+def _claim_pending(run_id, now):
+    with closing(connect()) as db, db:
+        db.execute('BEGIN IMMEDIATE')
+        reconcile_successes(db, now=now)
+        row = db.execute('SELECT r.*,s.params,s.enabled,s.stop_after_success,s.success_task_id, '
+                         's.generation AS current_generation FROM schedule_runs r '
+                         'JOIN schedules s ON s.id=r.schedule_id WHERE r.id=?', (run_id,)).fetchone()
+        if row is None or row['status'] != 'PENDING':
+            return None
+        if row['generation'] != row['current_generation'] or row['success_task_id']:
+            db.execute("UPDATE schedule_runs SET status='CANCELLED',note='旧轮次或已成功停止' WHERE id=?", (run_id,))
+            return None
+        if not row['enabled'] and row['note'] != '手动触发':
+            db.execute("UPDATE schedule_runs SET status='CANCELLED',note='计划已停用' WHERE id=?", (run_id,))
+            return None
+        if row['stop_after_success'] and db.execute(
+                "SELECT 1 FROM schedule_runs r LEFT JOIN tasks t ON t.id=r.task_id "
+                "WHERE r.schedule_id=? AND r.id<>? AND (r.status='CLAIMED' OR t.status IN ('QUEUED','RUNNING')) LIMIT 1",
+                (row['schedule_id'], run_id)).fetchone():
+            return None
+        token = uuid.uuid4().hex
+        db.execute("UPDATE schedule_runs SET status='CLAIMED',claim_token=? WHERE id=?", (token, run_id))
+        return (run_id, token), json.loads(row['params'])
+
+
+def attach_task(db, claim, task_id):
+    """Link under the SAME transaction that inserts the task, before spawn."""
+    run_id, token = claim
+    reconcile_successes(db)
+    row = db.execute('SELECT r.*,s.generation AS current_generation,s.success_task_id,s.stop_after_success FROM schedule_runs r '
+                     'JOIN schedules s ON s.id=r.schedule_id WHERE r.id=?', (run_id,)).fetchone()
+    if (row is None or row['status'] != 'CLAIMED' or row['claim_token'] != token
+            or row['generation'] != row['current_generation'] or row['success_task_id']):
+        raise RunUnavailable('运行已取消、已认领或所属轮次已停止')
+    if row['stop_after_success'] and db.execute(
+            "SELECT 1 FROM schedule_runs r JOIN tasks t ON t.id=r.task_id "
+            "WHERE r.schedule_id=? AND r.id<>? AND t.status IN ('QUEUED','RUNNING') LIMIT 1",
+            (row['schedule_id'], run_id)).fetchone():
+        raise RunUnavailable('本计划已有未完成任务，本次不重复启动')
+    db.execute("UPDATE schedule_runs SET task_id=?,status='STARTED',started=?,claim_token=NULL WHERE id=?",
+               (task_id, _iso(datetime.now()), run_id))
+
+
+def _release_claim(claim, status, note='', task_id=None, now=None):
+    # Never overwrite a real task's already-committed association after spawn.
+    with closing(connect()) as db, db:
+        db.execute('BEGIN IMMEDIATE')
+        db.execute('UPDATE schedule_runs SET status=?,claim_token=NULL,task_id=?, '
+                   "note=CASE WHEN ?<>'' THEN ? ELSE note END,started=? "
+                   "WHERE id=? AND status='CLAIMED' AND claim_token=?",
+                   (status, task_id, note, note, _iso(now or datetime.now()), *claim))
 
 
 def dispatch_pending(now=None, start=None, config=None):
-    """Start queued runs oldest-first until the shared concurrency limit is hit."""
-    start = start or _default_start
     now = now or datetime.now()
     config = config if config is not None else load_config()
     limit = parallel_limit(config)
-    with closing(connect()) as db, db:
-        pending = [dict(r) for r in db.execute(
-            "SELECT * FROM schedule_runs WHERE status='PENDING' ORDER BY planned, id")]
+    with closing(connect()) as db:
+        pending = [r['id'] for r in db.execute("SELECT id FROM schedule_runs WHERE status='PENDING' ORDER BY planned,id")]
     started = 0
-    for run in pending:
-        active=store.active_count()
-        if active >= limit:
-            print(f'[SCHEDULER] run_id={run["id"]} PENDING；并发 {active}/{limit}，尚未创建新构建/Worker；不是 Jenkins 等待',flush=True)
+    for run_id in pending:
+        if store.active_count() >= limit:
+            print(f'[SCHEDULER] run_id={run_id} PENDING；并发已满，尚未创建新构建/Worker', flush=True)
             break
-        try:
-            schedule = get_schedule(run['schedule_id'])
-        except ValueError:
-            _finish(run['id'], 'FAILED', note='定时任务已被删除', now=now)
+        claimed = _claim_pending(run_id, now)
+        if claimed is None:
             continue
-        template = json.loads(schedule['params'])
-        # Legacy templates also use the shared defaults; explicit choices survive.
+        claim, template = claimed
         try:
             body = validate_template(template, config)
-            created = start(body)
-        except Exception as exc:  # noqa: BLE001 - recorded, never crashes the daemon
-            if _is_capacity_error(exc):
+            created = _default_start(body, claim) if start is None else start(body)
+        except Exception as exc:
+            busy = _is_capacity_error(exc)
+            _release_claim(claim, 'PENDING' if busy else 'FAILED',
+                           '' if busy else safe_text(f'{type(exc).__name__}: {exc}')[:500], now=now)
+            if not busy:
+                with closing(connect()) as db, db:
+                    task = db.execute('SELECT t.status FROM tasks t JOIN schedule_runs r ON r.task_id=t.id WHERE r.id=?', (run_id,)).fetchone()
+                    note = ('Worker 未启动；下次计划可继续：' if task and task['status'] == 'FAILED'
+                            else '任务已创建，启动结果需人工核对；不自动重发：')
+                    db.execute("UPDATE schedule_runs SET note=? WHERE id=? AND status='STARTED' AND task_id IS NOT NULL",
+                               (note + safe_text(str(exc))[:300], run_id))
+            if busy:
                 break
-            _finish(run['id'], 'FAILED', note=safe_text(f'{type(exc).__name__}: {exc}')[:500], now=now)
             continue
-        _finish(run['id'], 'STARTED', task_id=created['id'], now=now)
-        print(f'[SCHEDULER] run_id={run["id"]} → task_id={created["id"]}；visible={body.get("visible")}；日志 {store.task_folder(created["id"])/"run.log"}',flush=True)
+        # Injectable offline starters do not create real tasks. Production has
+        # already attached its task atomically inside store.create_task().
+        if start is not None:
+            _release_claim(claim, 'STARTED', task_id=created['id'], now=now)
+        print(f'[SCHEDULER] run_id={run_id} → task_id={created["id"]}；日志 {store.task_folder(created["id"])/"run.log"}', flush=True)
         started += 1
     return started
 

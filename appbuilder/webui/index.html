@@ -108,6 +108,7 @@
 <label>运行时间 · cron<input name="schedule_cron" required maxlength="100" placeholder="0 9 * * 1-5" spellcheck="false"><small class="label-help">按本机时区填写 分 时 日 月 周；示例为工作日 09:00。默认最小间隔 30 分钟。</small></label>
 </div>
 <p id="cron-preview" class="diag-note" role="status">输入 cron 后预览接下来 5 次运行。</p>
+<label class="field-toggle">成功一次后停止<input name="schedule_stop_after_success" type="checkbox" checked><small class="label-help">新建与拷贝默认开启；本计划同时只跑一个任务。整条打包成功（含启用的 TestFairy）后停止并取消尚未启动的排队；邮件失败不重跑打包。重新启用会开启新一轮。</small></label>
 <label class="field-toggle">保存后启用 · enabled<input name="schedule_enabled" type="checkbox" checked><small class="label-help">默认开启：到点自动运行；关闭：只保存，之后在 Schedules 启用。编辑时保留原状态。</small></label>
 <p class="diag-note">Chrome 显示方式沿用「共用高级设置 → visible」，默认开启。凭据不进入计划。启用 TestFairy 时须选择“允许保存本机认证”，且已有 Keychain 或可复用会话；临时密码不能供将来执行。</p>
 </fieldset>
