@@ -167,10 +167,24 @@ class RealCreateBuildHandOffTests(unittest.TestCase):
             self.assertEqual((params['plugin_source'], params['gmx_source'], params['project'], params['country']),
                              ('develop', 'develop', 'PayByBank', 'UK'))
             self.assertIs(params['visible'], web.form_defaults(web.load_config())['visible'])
-            self.assertTrue(params['plugin_branch'].startswith('release/1.3.'))
+            self.assertTrue(params['plugin_branch'].startswith('feature/1.3.'))
             spawn.assert_called_once_with(tasks[0]['id'], wait=False)
             run = schedules.last_run(row['id'])
             self.assertEqual((run['status'], run['task_id']), ('STARTED', tasks[0]['id']))
+
+    def test_saved_old_default_schedule_creates_feature_task_without_rewriting_template(self):
+        from appbuilder.versions import PLUGIN_RELEASE_PARENT, PLUGIN_FEATURE_PARENT
+        with tempfile.TemporaryDirectory() as tmp, patch.object(store, 'DATA', Path(tmp)), \
+                patch('appbuilder.cli.doctor_check', return_value=True), \
+                patch('appbuilder.cli.spawn'), patch('appbuilder.web.token_or_error', return_value='t'):
+            template = {**TEMPLATE, 'plugin_parent': PLUGIN_RELEASE_PARENT}
+            row = schedules.create_schedule('legacy template', '0 * * * *', template, now=datetime(2026, 10, 10, 10, 15))
+            before = schedules.get_schedule(row['id'])['params']
+            self.assertEqual(schedules.tick(datetime(2026, 10, 10, 11, 0, 5)), {'queued': 1, 'started': 1})
+            params = json.loads(store.task_list()[0]['params'])
+            self.assertEqual(params['plugin_job'], PLUGIN_FEATURE_PARENT + 'feature_1_3_' + params['stamp'] + '/')
+            self.assertEqual(params['jenkins_settings']['plugin_parent'], PLUGIN_FEATURE_PARENT)
+            self.assertEqual(schedules.get_schedule(row['id'])['params'], before)
 
     def test_default_concurrency_limit_is_shared_with_manual_builds(self):
         with tempfile.TemporaryDirectory() as tmp, patch.object(store, 'DATA', Path(tmp)), \

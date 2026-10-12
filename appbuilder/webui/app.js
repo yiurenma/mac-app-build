@@ -83,7 +83,7 @@ function syncSummary(){
   const project=(f.project_name.value||'PayByBank').trim();
   const computed=`0_A_${country}_${project}`;
   if(!customFolderEdited)f.gmx_custom_folder.value=computed;
-  $('derived-plugin').textContent=`release/${f.plugin_version.value||'1.3'}.[timestamp]`;
+  $('derived-plugin').textContent=`feature/${f.plugin_version.value||'1.3'}.[timestamp]`;
   const keys=[...new Set((f.gmx_branch.value.match(/(?<![A-Za-z0-9])[A-Z]{1,10}-[0-9]+(?![A-Za-z0-9])/g)||[]))];
   const issue=f.gmx_issue_key.value.trim()||(keys.length===1?keys[0]:'');
   $('derived-gmx').textContent=issue?`upload/${issue}-auto[timestamp]`:'upload/AUTO-[timestamp]';

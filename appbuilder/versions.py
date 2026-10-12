@@ -7,6 +7,19 @@ MAJOR_RE = re.compile(r"^[0-9]+\.[0-9]+$")
 BRANCH_RE = re.compile(r"^[A-Za-z0-9_./-]+$")
 ARTIFACTS = ("PayByBankDomainModelPluginKit", "PayByBankJourneyPluginKit")
 
+# Only the shipped Plugin project has a known release -> feature folder migration.
+PLUGIN_RELEASE_PARENT = ('https://mobile-premier01-jenkins.build-mobile.iwpb.euw2.prod.aws.cloud.hsbc/'
+                         'job/IWPB_Transaction_Banking/job/Domestic_Payment_and_Transfer_Mobile_Global_12824743/'
+                         'job/Lib/job/mobile_paybybank-ios-plugin/job/release-build/job/')
+PLUGIN_FEATURE_PARENT = PLUGIN_RELEASE_PARENT.replace('/release-build/', '/feature-build/')
+
+
+def plugin_parent_for_branch(parent, branch):
+    if branch.startswith('feature/') and parent.rstrip('/') + '/' == PLUGIN_RELEASE_PARENT:
+        return PLUGIN_FEATURE_PARENT
+    return parent
+
+
 
 def validate_args(major, plugin_source, gmx_source, country, project):
     if not MAJOR_RE.fullmatch(major):
@@ -48,12 +61,12 @@ def branch_names(major, stamp, gmx_source='', issue_key=''):
     key = gmx_issue_key(gmx_source, issue_key)
     target = f"upload/{key}-auto{stamp}" if key else f"upload/AUTO-{stamp}"
     v = f"{major}.{stamp}"
-    return {"plugin_version": v, "plugin_branch": f"release/{v}",
+    return {"plugin_version": v, "plugin_branch": f"feature/{v}",
             "gmx_branch": validate_gmx_target(target)}
 
 
 def job_urls(config, plugin_branch, gmx_branch):
-    parent1 = config['jenkins']['plugin_parent'].rstrip('/') + '/'
+    parent1 = plugin_parent_for_branch(config['jenkins']['plugin_parent'], plugin_branch).rstrip('/') + '/'
     parent2 = config['jenkins']['gmx_parent'].rstrip('/') + '/'
     plugin_job = plugin_branch.replace('/', '_').replace('.', '_')
     gmx_job = quote(gmx_branch, safe='')

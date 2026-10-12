@@ -8,7 +8,7 @@ import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from .config import DATA, parallel_limit
-from .versions import branch_names, job_urls
+from .versions import branch_names, job_urls, plugin_parent_for_branch
 
 
 def connect():
@@ -62,6 +62,13 @@ def create_task(config, params):
             k: v for k, v in params.get('jenkins_settings', {}).items()
             if k in ('plugin_parent', 'gmx_parent')
         }}}
+        old_parent = job_config['jenkins']['plugin_parent']
+        parent = plugin_parent_for_branch(old_parent, generated['plugin_branch'])
+        if parent != old_parent:
+            # Old saved forms/schedules may still contain the shipped release default.
+            # Snapshot the new parent only on this newly-created task, not its template.
+            job_config['jenkins']['plugin_parent'] = parent
+            params = {**params, 'jenkins_settings': {**params.get('jenkins_settings', {}), 'plugin_parent': parent}}
         urls = job_urls(job_config, generated['plugin_branch'], generated['gmx_branch'])
         params = {**params, **generated, **urls, 'stamp': stamp, 'id': task_id}
         workdir = task_folder(task_id)

@@ -285,6 +285,8 @@ class SavedTargetTests(unittest.TestCase):
     def test_screenshot_path_mapping_and_resume_snapshot_are_preserved(self):
         from appbuilder.config import load_config
         config=load_config()
+        # Historical release snapshot, independent of the current feature default.
+        config['jenkins']['plugin_parent']=config['jenkins']['plugin_parent'].replace('/feature-build/', '/release-build/')
         plugin='release/1.3.202610111410';gmx='upload/TRANSACT-667788-auto202610111410'
         urls=job_urls(config,plugin,gmx)
         self.assertTrue(urls['plugin_job'].endswith('/job/release-build/job/release_1_3_202610111410/'))
