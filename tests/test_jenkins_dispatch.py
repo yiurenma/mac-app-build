@@ -1,7 +1,8 @@
 """Offline browser dispatch receipts and resumable pre-submit state."""
+import time
 import unittest
 from unittest.mock import patch,Mock
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 from appbuilder.jenkins import JenkinsBrowser,NeedsAttention,_dispatch_or_reconcile
 
 JOB='https://jenkins.invalid/job/release%252F123/'
@@ -142,9 +143,43 @@ class DispatchTests(unittest.TestCase):
         self.assertEqual(self.state['runtime']['plugin_formal_dispatch']['state'],'ACCEPTED')
 
     def test_visible_disabled_submit_waits_until_enabled_and_posts_once(self):
-        self.extra='<script>addEventListener("DOMContentLoaded",()=>{const b=document.querySelector("button");b.disabled=true;setTimeout(()=>b.disabled=false,350);});</script>'
+        # Allow actionability polling/backoff after the fixture's 350ms delay.
+        # The suite's 500ms negative-case timeout can expire before its next poll.
+        self.worker.page.set_default_timeout(2000)
+        self.extra='<script>addEventListener("DOMContentLoaded",()=>{document.querySelector("button").disabled=true;});</script>'
+        original=self.worker._safe_click
+        entered=[]
+        def click(text,role,before_click=None):
+            if role=='button':
+                control=self.worker.page.get_by_role('button',name='Build',exact=True)
+                self.assertTrue(control.is_disabled())
+                self.assertEqual(self.state['runtime']['plugin_formal_dispatch']['state'],'PREPARING')
+                self.assertFalse(any(m=='POST' for m,u in self.requests))
+                entered.append(True)
+                # Start the timer at the wait boundary, not during page loading.
+                self.worker.page.evaluate("setTimeout(()=>document.querySelector('button').disabled=false,350)")
+                checked=before_click
+                def enabled(control):
+                    self.assertTrue(control.is_enabled())
+                    self.assertFalse(any(m=='POST' for m,u in self.requests))
+                    checked(control)
+                before_click=enabled
+            return original(text,role,before_click=before_click)
+        self.worker._safe_click=click
         self.assertEqual(self.run_build(),7)
+        self.assertEqual(entered,[True])
         self.assertEqual(sum(m=='POST' for m,u in self.requests),1)
+        self.assertEqual(self.state['runtime']['plugin_formal_dispatch']['state'],'ACCEPTED')
+
+    def test_permanently_disabled_submit_times_out_before_dispatch(self):
+        self.extra='<script>addEventListener("DOMContentLoaded",()=>{document.querySelector("button").disabled=true;});</script>'
+        started=time.monotonic()
+        with self.assertRaises(PlaywrightTimeoutError):self.run_build()
+        self.assertLess(time.monotonic()-started,3)
+        self.assertTrue(self.worker.page.get_by_role('button',name='Build',exact=True).is_disabled())
+        self.assertEqual(self.state['runtime']['plugin_formal_dispatch']['state'],'PREPARING')
+        self.assertFalse(any(m=='POST' for m,u in self.requests))
+        self.worker.detect_new_build.assert_not_called()
 
     def test_rejected_post_is_not_accepted_and_not_retried(self):
         self.status=403
