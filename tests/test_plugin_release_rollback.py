@@ -1,4 +1,4 @@
-"""New Plugin naming must not migrate saved release tasks or GMX refs."""
+"""Release rollback preserves saved tasks and GMX refs."""
 import copy
 import json
 import tempfile
@@ -14,40 +14,40 @@ from appbuilder.versions import branch_names, job_urls, PLUGIN_RELEASE_PARENT, P
 from appbuilder.diagnose import parse_target
 
 
-class PluginFeatureBranchTests(unittest.TestCase):
+class PluginReleaseRollbackTests(unittest.TestCase):
     def test_version_and_gmx_naming_remain_independent(self):
         for source, expected in [('develop', 'upload/AUTO-202610120930'),
                                  ('feature/UKPBB-123-work', 'upload/UKPBB-123-auto202610120930')]:
             names = branch_names('2.4', '202610120930', source)
             self.assertEqual(names, {'plugin_version': '2.4.202610120930',
-                                     'plugin_branch': 'feature/2.4.202610120930',
+                                     'plugin_branch': 'release/2.4.202610120930',
                                      'gmx_branch': expected})
 
-    def test_exact_feature_job_urls_use_branch_child_not_folder(self):
+    def test_exact_release_job_urls_use_branch_child_not_folder(self):
         config = load_config()
         parent = ('https://mobile-premier01-jenkins.build-mobile.iwpb.euw2.prod.aws.cloud.hsbc/'
                   'job/IWPB_Transaction_Banking/job/Domestic_Payment_and_Transfer_Mobile_Global_12824743/'
-                  'job/Lib/job/mobile_paybybank-ios-plugin/job/feature-build/job/')
+                  'job/Lib/job/mobile_paybybank-ios-plugin/job/release-build/job/')
         self.assertEqual(config['jenkins']['plugin_parent'], parent)
-        for branch, job in [('feature/TRANSACT-122556', 'feature_TRANSACT-122556'),
-                            ('feature/1.3.202610120930', 'feature_1_3_202610120930')]:
+        for branch, job in [('release/2.4.202610120930', 'release_2_4_202610120930'),
+                            ('release/1.3.202610120930', 'release_1_3_202610120930')]:
             urls = job_urls(config, branch, 'upload/UKPBB-123-auto202610120930')
             self.assertEqual(urls['plugin_job'], parent + job + '/')
             self.assertEqual(urls['gmx_job'], config['jenkins']['gmx_parent'] + 'upload%2FUKPBB-123-auto202610120930/')
 
-    def test_new_task_uses_feature_parent_and_preserves_explicit_override(self):
+    def test_new_task_uses_release_parent_and_preserves_explicit_override(self):
         config = load_config()
-        for override in (None, PLUGIN_RELEASE_PARENT, 'https://ci.fixture.invalid/job/custom/job/'):
+        for override in (None, PLUGIN_RELEASE_PARENT, PLUGIN_FEATURE_PARENT, 'https://ci.fixture.invalid/job/custom/job/'):
             with self.subTest(override=override), tempfile.TemporaryDirectory() as tmp, patch.object(store, 'DATA', Path(tmp)):
                 inputs = {'plugin_version_input': '1.3', 'gmx_source': 'feature/UKPBB-123-work'}
                 if override:
                     inputs['jenkins_settings'] = {'plugin_parent': override}
                 params = store.create_task(config, inputs)
-                self.assertEqual(params['plugin_branch'], 'feature/1.3.' + params['stamp'])
-                self.assertEqual(params['plugin_job'], (PLUGIN_FEATURE_PARENT if override == PLUGIN_RELEASE_PARENT else override or config['jenkins']['plugin_parent']) + 'feature_1_3_' + params['stamp'] + '/')
+                self.assertEqual(params['plugin_branch'], 'release/1.3.' + params['stamp'])
+                self.assertEqual(params['plugin_job'], (PLUGIN_RELEASE_PARENT if override == PLUGIN_FEATURE_PARENT else override or config['jenkins']['plugin_parent']) + 'release_1_3_' + params['stamp'] + '/')
                 self.assertEqual(params['gmx_branch'], 'upload/UKPBB-123-auto' + params['stamp'])
-                if override == PLUGIN_RELEASE_PARENT:
-                    self.assertEqual(effective_task_config(config, params)['jenkins']['plugin_parent'], PLUGIN_FEATURE_PARENT)
+                if override == PLUGIN_FEATURE_PARENT:
+                    self.assertEqual(effective_task_config(config, params)['jenkins']['plugin_parent'], PLUGIN_RELEASE_PARENT)
 
     def test_diagnosis_accepts_exact_current_and_historical_project_only(self):
         config = load_config()
@@ -70,11 +70,12 @@ class PluginFeatureBranchTests(unittest.TestCase):
     def test_resume_keeps_saved_release_branch_url_and_runtime(self):
         config = load_config()
         legacy_parent = 'https://ci.fixture.invalid/job/plugin/job/release-build/job/'
-        for saved_settings in (False, True):
+        for branch_kind, saved_settings in [(kind, saved) for kind in ('release', 'feature') for saved in (False, True)]:
             with self.subTest(saved_settings=saved_settings), tempfile.TemporaryDirectory() as tmp, patch.object(store, 'DATA', Path(tmp)):
                 params = store.create_task(config, {'plugin_version_input': '1.3', 'gmx_source': 'develop'})
-                params['plugin_branch'] = 'release/1.3.202610110930'
-                params['plugin_job'] = legacy_parent + 'release_1_3_202610110930/'
+                params['plugin_branch'] = branch_kind + '/1.3.202610110930'
+                legacy_parent = 'https://ci.fixture.invalid/job/plugin/job/' + branch_kind + '-build/job/'
+                params['plugin_job'] = legacy_parent + branch_kind + '_1_3_202610110930/'
                 if saved_settings:
                     params['jenkins_settings'] = {'plugin_parent': legacy_parent}
                 with closing(store.connect()) as db, db:

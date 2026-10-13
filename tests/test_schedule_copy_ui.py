@@ -7,6 +7,7 @@ from datetime import datetime
 from unittest.mock import patch
 from playwright.sync_api import expect
 from appbuilder import schedules, store, web
+from appbuilder.versions import PLUGIN_FEATURE_PARENT
 import test_shared_build_ui as shared
 
 
@@ -16,6 +17,7 @@ class CopyScenarios(shared.SharedBuildUIFixture):
         auth = patch('appbuilder.testfairy.saved_auth_available', return_value=True)
         auth.start(); self.addCleanup(auth.stop)
         template = {**web.form_defaults(web.load_config()), 'country':'ALL', 'project_name':'CopiedApp',
+                    'plugin_parent':PLUGIN_FEATURE_PARENT,
                     'gmx_issue_key':'UKPBB-77','plugin_branch':'feature/source','visible':False,
                     'testfairy_enabled':True,'testfairy_save_credentials':True,
                     'outlook_auto_send':True,'outlook_recipients':'fixture@example.com'}
@@ -42,6 +44,8 @@ class CopyScenarios(shared.SharedBuildUIFixture):
         self.assertEqual(self.field('testfairy_password').input_value(), '')
         self.assertEqual(self.field('country').input_value(), 'ALL')
         self.assertEqual(self.field('plugin_branch').input_value(), 'feature/source')
+        self.assertEqual(self.field('plugin_parent').input_value(), PLUGIN_FEATURE_PARENT)
+        expect(self.page.locator('#derived-plugin')).to_have_text('release/1.3.[timestamp]')
         self.assertTrue(self.field('schedule_stop_after_success').is_checked())
         self.assertFalse(self.field('schedule_enabled').is_checked())
         self.assertTrue(self.field('testfairy_enabled').is_checked())

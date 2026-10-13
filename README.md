@@ -135,7 +135,7 @@ GMX 参数页按现场截图新增 `SKIP_TEST`（默认 true）、`FORCE`（默�
 
 ## 0. 工作流
 
-1. 使用 Plugin 输入源分支创建 `feature/<大版本>.<YYYYMMDDHHmm>`，两个 `.xcconfig` 的 `BUNDLE_VERSION_SHORT` 同步设为 `<大版本>.<时间戳>`，精确提交并 Push。
+1. 使用 Plugin 输入源分支创建 `release/<大版本>.<YYYYMMDDHHmm>`，两个 `.xcconfig` 的 `BUNDLE_VERSION_SHORT` 同步设为 `<大版本>.<时间戳>`，精确提交并 Push。
 2. 根据规则 `/` 和 `.` → `_` 定位 Plugin Jenkins 新 Job；如果初次只有 `Build`，先触发初始化构建，再等待 `Build with Parameters`。随后使用默认参数触发正式构建。
 3. 从本次成功 Build（或其关联 Callback）完整 `consoleText` 的 Nexus upload output JSON 中，按 DomainModel 和 Journey 的 `*.tar.gz` 文件名读取**完整 Artifact Version**，要求两个版本一致。不再打开 Jenkins 的 Artifacts 页面（其 `*view*`/`*fingerprint*` 链接会让大 `source.zip` 解压预览超时）。
 4. 使用 GMX 输入源分支创建 `upload/<工单编号>-auto<同一时间戳>`。在根目录 `mobile-ci.json` 精准修改两个 `paybybank-ios-plugin` 依赖的 `version` 为**完整 Artifact Version**，不做 `1.3.0` 等转换。
@@ -454,9 +454,7 @@ New build 的共享表单可独立开启 TestFairy 链接查找及 Outlook 结�
 
 Outlook 自动通知覆盖成功、失败、超时和需人工处理，用户明确填写收件人并开启才调用本机账号。相同结果去重；发送不明不重发；邮件失败不改写构建结果。当前 Mac Outlook 的实际原生能力必须现场探测，不保证 New Outlook 支持，也不把提交当投递成功。详见 [配置、恢复、权限及验证边界](docs/27-TestFairy-Outlook-结果通知.md)。
 
-新建 Plugin 任务默认使用 `feature-build/job/feature_<大版本（点号换为下划线）>_<时间戳>/` 分支 Job。`feature-build/` 本身只是文件夹，不能作为具体构建目标。已有任务 Resume 保留已保存的分支与 Jenkins URL，不迁移旧 release 任务；自定义父路径仍按任务配置使用。
-
-旧表单或定时模板若保存的是本项目原始 `release-build/job/` 默认父路径，新建 feature 任务时会精确映射到 `feature-build/job/`，并记录到新任务；不改写模板或历史运行记录，也不改写其他项目的自定义父路径。只读诊断同时接受本项目这两个已知目录下的具体分支 Job/Build。
+新建 Plugin 任务已恢复 `release/<大版本>.<时间戳>` 和 `release-build/job/release_<版本与时间戳>/`。此前保存的本项目默认 `feature-build/job/` 配置仅在创建新任务时映射回 release 父路径；不改写计划模板、历史任务或其他项目的自定义路径。已有 release/feature 任务 Resume 保留原分支、Jenkins URL 和进度；只读诊断继续支持这两个已知目录下的具体分支 Job/Build。
 
 ### 定时任务成功后停止与拷贝
 

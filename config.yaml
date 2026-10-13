@@ -10,7 +10,7 @@ jenkins:
   # 只允许向以下经过核准的 HTTPS 登录域名填写 Keychain 凭据；外部 SSO 请先核实再加。
   auth_allowed_hosts:
     - "*.hsbc"
-  plugin_parent: "https://mobile-premier01-jenkins.build-mobile.iwpb.euw2.prod.aws.cloud.hsbc/job/IWPB_Transaction_Banking/job/Domestic_Payment_and_Transfer_Mobile_Global_12824743/job/Lib/job/mobile_paybybank-ios-plugin/job/feature-build/job/"
+  plugin_parent: "https://mobile-premier01-jenkins.build-mobile.iwpb.euw2.prod.aws.cloud.hsbc/job/IWPB_Transaction_Banking/job/Domestic_Payment_and_Transfer_Mobile_Global_12824743/job/Lib/job/mobile_paybybank-ios-plugin/job/release-build/job/"
   gmx_parent: "https://mobile-platform-jenkins.build-mobile.iwpb.euw2.prod.aws.cloud.hsbc/job/mobilex-global-uploads/job/global-ios-upload/job/"
   discover_timeout_minutes: 30
   # 等待新分支 Jenkins Job 时每 10 秒重试（404 在 Job 创建前通常正常）。

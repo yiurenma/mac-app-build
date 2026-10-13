@@ -65,7 +65,7 @@ def create_task(config, params, *, schedule_claim=None):
         old_parent = job_config['jenkins']['plugin_parent']
         parent = plugin_parent_for_branch(old_parent, generated['plugin_branch'])
         if parent != old_parent:
-            # Old saved forms/schedules may still contain the shipped release default.
+            # Saved forms/schedules may still contain the reverted feature default.
             # Snapshot the new parent only on this newly-created task, not its template.
             job_config['jenkins']['plugin_parent'] = parent
             params = {**params, 'jenkins_settings': {**params.get('jenkins_settings', {}), 'plugin_parent': parent}}
