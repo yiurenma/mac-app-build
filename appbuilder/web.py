@@ -128,8 +128,7 @@ def form_defaults(config):
     b = config.get('build', {})
     return {
         'outlook_auto_send': False, 'outlook_recipients': '', 'outlook_account': '',
-        'testfairy_enabled': True, 'testfairy_save_credentials': False,
-        'testfairy_login_url': 'https://hsbc-mobilex.testfairy.com/login', 'testfairy_folder_path': '',
+        'testfairy_enabled': True,
         'plugin_branch': 'develop', 'gmx_branch': 'develop',
         'plugin_version': '1.3', 'country': 'UK', 'project_name': 'PayByBank',
         'visible': True, 'verbose': True,
@@ -284,11 +283,14 @@ def create_build(body, *, schedule_claim=None):
     from .auth import store_credentials, store_github_token
     config = load_config()
     github_token = str(body.get('github_token') or '').strip()
+    body = dict(body)
+    jira_token = str(body.pop('jira_token', '') or '').strip()   # Keychain only; never part of task params
+    jenkins_api_token = str(body.pop('jenkins_api_token', '') or '').strip()
     user = str(body.get('jenkins_user') or '').strip()
     password = str(body.get('jenkins_password') or '')
     if bool(user) != bool(password):
         raise ValueError('Jenkins 账号和密码必须同时填写，或同时留空使用 Keychain')
-    if len(user) > 256 or len(password) > 4096 or len(github_token) > 4096:
+    if len(user) > 256 or len(password) > 4096 or len(github_token) > 4096 or len(jira_token) > 4096 or len(jenkins_api_token) > 512:
         raise ValueError('账号、密码或 Token 长度超限')
     params = validate_build_parameters(body, config)
     from .testfairy import credentials as testfairy_credentials
@@ -304,6 +306,12 @@ def create_build(body, *, schedule_claim=None):
     # Persist credentials only after all build parameters are valid.
     if github_token:
         store_github_token(github_token)
+    if jira_token:
+        from .auth import store_jira_token
+        store_jira_token(jira_token)
+    if jenkins_api_token:
+        from .auth import store_jenkins_api_token
+        store_jenkins_api_token(jenkins_api_token)
     if user:
         store_credentials(user, password)
     doctor_check(config, strict=True)

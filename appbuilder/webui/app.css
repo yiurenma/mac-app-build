@@ -120,3 +120,4 @@
 .fold.collapsed{display:none}
 #jira-form textarea{display:block;width:100%;margin-top:7px;border:1px solid #35465e;background:#161f30;color:#f0f4fc;border-radius:8px;padding:10px 13px;font:12px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;resize:vertical;min-width:0}
 #jira-form textarea:focus{border-color:#71dcd3;outline:none}
+#build-jenkins-status,#build-jira-status{margin:10px 0 22px}

@@ -63,7 +63,7 @@ class VersionTests(unittest.TestCase):
         self.pages['/my']=''.join(card(100+i,share='/join/wrong') for i in range(101))+card(2)
         self.assertEqual(self.find()['share_url'],BASE+'/join/history')
     def test_unknown_pagination_reports_incomplete_not_not_found(self):
-        self.worker.config['testfairy']['wait_seconds']=1
+        self.worker.config['testfairy']['wait_seconds']=10  # 1s raced the budget on slow CI runners
         self.pages['/my']='<div class="app-card"><a href="/versions">See all versions</a></div>'
         self.pages['/versions']=card(9)+'<div class="unknown-pagination">Older</div>'
         with self.assertRaisesRegex(NeedsAttention,'INCOMPLETE'):self.find()

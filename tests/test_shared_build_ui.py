@@ -84,8 +84,8 @@ class SharedBuildUITests(SharedBuildUIFixture, unittest.TestCase):
 
     def test_defaults_help_branch_paging_refresh_and_manual_fallback(self):
         p = self.page
-        self.assertEqual(self.form.locator('[data-build]:visible').count(), 11)
-        for name in ['testfairy_login_url','testfairy_folder_path','outlook_account']:
+        self.assertEqual(self.form.locator('[data-build]:visible').count(), 8)  # 03: switch + Jenkins token; 04: Jira token
+        for name in ['outlook_auto_send','outlook_recipients','outlook_account']:
             self.assertFalse(self.field(name).is_visible())
         self.assertEqual(self.field('country').locator('option').count(), 25)
         self.assertEqual(self.field('country').input_value(), 'UK')
@@ -144,7 +144,7 @@ class SharedBuildUITests(SharedBuildUIFixture, unittest.TestCase):
         self.field('gmx_force').uncheck();self.field('gmx_keep_alive').check()
         self.field('country').select_option('ALL')
         expected=p.evaluate('buildBody()')
-        for key in ['github_token','jenkins_user','jenkins_password','testfairy_user','testfairy_password']:expected.pop(key)
+        for key in ['github_token','jenkins_user','jenkins_password','jira_token','jenkins_api_token']:expected.pop(key)
         p.locator('#save-as-schedule').check()
         self.field('schedule_name').fill('nightly')
         self.field('schedule_cron').fill('* * * * *')
@@ -160,7 +160,7 @@ class SharedBuildUITests(SharedBuildUIFixture, unittest.TestCase):
         self.assertFalse(row['enabled'])
         self.show_all();p.locator('#schedules-body button', has_text='编辑').click()
         actual=p.evaluate('buildBody()')
-        for key in ['github_token','jenkins_user','jenkins_password','testfairy_user','testfairy_password']:actual.pop(key)
+        for key in ['github_token','jenkins_user','jenkins_password','jira_token','jenkins_api_token']:actual.pop(key)
         self.assertEqual(actual, expected)
         self.field('schedule_name').fill('renamed')
         p.locator('#submit-build').click()
@@ -242,7 +242,7 @@ class SharedBuildUITests(SharedBuildUIFixture, unittest.TestCase):
     def test_independent_link_and_email_buttons_use_test_apis_without_build(self):
         p=self.page
         self.assertEqual(p.locator('#build-form #tf-test-form, #build-form #mail-test-form').count(),0)
-        self.assertEqual(p.locator('#build-form .group-head:has(span)').all_text_contents(),['01 Plugin','02 GMX','03 TestFairy','04 邮件'])
+        self.assertEqual(p.locator('#build-form .group-head:has(span)').all_text_contents(),['01 Plugin','02 GMX','03 App 链接','04 Jira 回填'])
         p.locator('.nav[data-target=testfairy-tests]').click()
         self.assertEqual(p.locator('#tf-test-form input[type=password]').count(),0)
         self.field('tf_test_expected').fill('https://hsbc-mobilex.testfairy.com/join/current')

@@ -383,6 +383,21 @@ def process_ticket(client, key, info, link, build_label, conf, llm, dry_run):
 
 
 def notify_jira(task_id, client=None, llm=None, config=None, preview=None):
+    """Serialise formal runs: two builds finishing together must not read the same ledger."""
+    if preview is not None:
+        return _notify_jira(task_id, client, llm, config, preview)
+    import fcntl
+    lock_path = LEDGER.with_suffix('.lock')
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(lock_path, 'a+') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            return _notify_jira(task_id, client, llm, config, preview)
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
+
+
+def _notify_jira(task_id, client=None, llm=None, config=None, preview=None):
     """preview=N: web-page rehearsal on a finished task. Looks at its last N commits, never
     writes to Jira, the ledger or the task state, and returns the report."""
     row = task(task_id)

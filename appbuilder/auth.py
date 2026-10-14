@@ -259,3 +259,38 @@ def read_jira_token():
         ['security', 'find-generic-password', '-s', JIRA_SERVICE, '-a', 'enterprise', '-w'],
         text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     return (result.stdout.strip() or None) if result.returncode == 0 else None
+
+
+JENKINS_API_SERVICE = 'mac-app-builder.jenkins-api-token'
+
+
+def store_jenkins_api_token(token: str):
+    """Jenkins user API token for read-only REST/console access; Keychain only."""
+    token = str(token or '').strip()
+    if not token or len(token) > 512 or any(c.isspace() for c in token):
+        raise CredentialError('Jenkins API Token 不能为空、过长或包含空白')
+    if sys.platform != 'darwin':
+        raise CredentialError('保存 Jenkins API Token 目前仅支持 macOS Keychain')
+    result = subprocess.run(
+        ['security', 'add-generic-password', '-U', '-s', JENKINS_API_SERVICE, '-a', 'default', '-w', token],
+        text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    if result.returncode:
+        raise CredentialError('Jenkins API Token 保存到 Mac Keychain 失败')
+
+
+def read_jenkins_api_token():
+    if sys.platform != 'darwin':
+        return None
+    result = subprocess.run(
+        ['security', 'find-generic-password', '-s', JENKINS_API_SERVICE, '-a', 'default', '-w'],
+        text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    return (result.stdout.strip() or None) if result.returncode == 0 else None
+
+
+def read_jenkins_username():
+    """The saved Jenkins account name (no password read)."""
+    if sys.platform != 'darwin':
+        return None
+    result = subprocess.run(['security', 'find-generic-password', '-s', SERVICE + '.account',
+                             '-a', 'default', '-w'], text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    return (result.stdout.strip() or None) if result.returncode == 0 else None

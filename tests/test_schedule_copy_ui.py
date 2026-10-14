@@ -19,7 +19,7 @@ class CopyScenarios(shared.SharedBuildUIFixture):
         template = {**web.form_defaults(web.load_config()), 'country':'ALL', 'project_name':'CopiedApp',
                     'plugin_parent':PLUGIN_FEATURE_PARENT,
                     'gmx_issue_key':'UKPBB-77','plugin_branch':'feature/source','visible':False,
-                    'testfairy_enabled':True,'testfairy_save_credentials':True,
+                    'testfairy_enabled':True,
                     'outlook_auto_send':True,'outlook_recipients':'fixture@example.com'}
         allowed = set(schedules.BASIC_KEYS+schedules.OPTIONAL_TEXT+schedules.OPTIONAL_INT+schedules.OPTIONAL_BOOL)
         template = {k:v for k,v in template.items() if k in allowed}
@@ -39,9 +39,9 @@ class CopyScenarios(shared.SharedBuildUIFixture):
 
     def test_copy_cancel_repeat_click_and_save_new_identity(self):
         # Unsaved credentials from an unrelated draft must not leak into a copy.
-        self.field('testfairy_password').fill('draft-secret', force=True)
+        self.field('jira_token').fill('draft-secret', force=True)
         self.copy()
-        self.assertEqual(self.field('testfairy_password').input_value(), '')
+        self.assertEqual(self.field('jira_token').input_value(), '')
         self.assertEqual(self.field('country').input_value(), 'ALL')
         self.assertEqual(self.field('plugin_branch').input_value(), 'feature/source')
         self.assertEqual(self.field('plugin_parent').input_value(), PLUGIN_FEATURE_PARENT)

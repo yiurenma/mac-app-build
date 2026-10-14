@@ -69,7 +69,7 @@ async function submit(){
   if(store.saving)return;
   if(store.copyName!==null && (!f.schedule_name.value.trim() || f.schedule_name.value.trim()===store.copyName)){message.textContent='请为拷贝的计划填写不同名称后保存';message.classList.add('error');return;}
   const template=buildBody();
-  for(const key of ['github_token','jenkins_user','jenkins_password','testfairy_user','testfairy_password']){
+  for(const key of ['github_token','jenkins_user','jenkins_password','testfairy_user','testfairy_password','jira_token','jenkins_api_token']){
     if(template[key]){message.textContent='定时模板不保存凭据。请先用手动构建保存到 Mac Keychain，再清空凭据字段后保存计划。';message.classList.add('error');return;}
     delete template[key];
   }
