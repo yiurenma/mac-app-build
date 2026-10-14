@@ -233,3 +233,29 @@ def read_github_token():
     if result.returncode:
         return None
     return result.stdout.strip() or None
+
+
+JIRA_SERVICE = 'mac-app-builder.jira-token'
+
+
+def store_jira_token(token: str):
+    """Store the Jira PAT in the local Keychain; never in the page, task params or logs."""
+    token = str(token or '').strip()
+    if not token or len(token) > 4096 or '\n' in token or '\r' in token:
+        raise CredentialError('Jira Token 不能为空、过长或包含换行')
+    if sys.platform != 'darwin':
+        raise CredentialError('保存 Jira Token 目前仅支持 macOS Keychain')
+    result = subprocess.run(
+        ['security', 'add-generic-password', '-U', '-s', JIRA_SERVICE, '-a', 'enterprise', '-w', token],
+        text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    if result.returncode:
+        raise CredentialError('Jira Token 保存到 Mac Keychain 失败')
+
+
+def read_jira_token():
+    if sys.platform != 'darwin':
+        return None
+    result = subprocess.run(
+        ['security', 'find-generic-password', '-s', JIRA_SERVICE, '-a', 'enterprise', '-w'],
+        text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    return (result.stdout.strip() or None) if result.returncode == 0 else None

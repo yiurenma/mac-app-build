@@ -190,6 +190,31 @@ class GitAndFlowTests(unittest.TestCase):
             if code == 500:
                 self.assertNotIsInstance(caught.exception, J.JiraNotFound)
 
+    def test_preview_reads_recent_commits_and_never_writes(self):
+        jira = FakeJira()
+        data = Path(self.tmp.name) / 'data'
+        data.mkdir()
+        row = {'status': 'SUCCESS', 'params': json.dumps({'plugin_source': 'develop'})}
+        state = {'runtime': {'plugin_source_sha': self.shas[2], 'gmx_build_number': 7,
+                             'testfairy_app': {'share_url': 'https://tf/app'}}}
+        patched = {}
+        with patch.object(J, 'LEDGER', data / 'jira_ledger.json'), patch.object(J, 'task', return_value=row), \
+                patch.object(J, 'read_state', return_value=state), \
+                patch.object(J, 'task_folder', return_value=Path(self.tmp.name)), \
+                patch.object(J, 'patch_runtime', side_effect=lambda tid, **kw: patched.update(kw)):
+            report = J.notify_jira('T1', client=jira, llm=None, preview=5,
+                                   config={'jira': {'enabled': False, 'base_url': 'https://j.example.com'}})
+        self.assertEqual(report['status'], 'PREVIEW')
+        self.assertEqual(sorted(t['key'] for t in report['tickets']), ['PBB-1', 'PBB-2'])
+        self.assertEqual(jira.calls, [])
+        self.assertEqual(patched, {})
+        self.assertFalse((data / 'jira_ledger.json').exists())
+
+    def test_preview_refuses_unfinished_builds(self):
+        with patch.object(J, 'task', return_value={'status': 'RUNNING', 'params': '{}'}):
+            with self.assertRaises(ValueError):
+                J.notify_jira('T1', preview=5, config={})
+
     def test_client_requires_https_and_credentials(self):
         with self.assertRaises(ValueError):
             J.JiraClient('http://jira.example.com', env={'JIRA_TOKEN': 'x'})

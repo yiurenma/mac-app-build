@@ -562,7 +562,7 @@ def make_handler(csrf_token):
             try:
                 if p == '/':
                     return self._asset('index.html')
-                if p in ('/app.css', '/app.js', '/schedules.js'):
+                if p in ('/app.css', '/app.js', '/schedules.js', '/jira.js'):
                     return self._asset(p[1:])
                 if p == '/api/health':
                     return self._send({'app': 'mac-app-builder', 'service': 'web-console', 'version': __version__})
@@ -613,6 +613,10 @@ def make_handler(csrf_token):
                         return self._failed(400, safe_text(str(exc)))
                 if p == '/api/doctor':
                     return self._send(get_doctor())
+                from .jira_api import handle_get as jira_get
+                handled = jira_get(p, parse_qs(u.query))
+                if handled is not None:
+                    return self._send(handled[1], status=handled[0])
                 from .schedule_api import handle_get
                 handled = handle_get(p, parse_qs(u.query))
                 if handled is not None:
@@ -692,6 +696,10 @@ def make_handler(csrf_token):
                 m = re.fullmatch(r'/api/tasks/([^/?]+)/resume', self.path)
                 if m:
                     return self._send({'task': resume_build(m[1], body)})
+                from .jira_api import handle_post as jira_post
+                handled = jira_post(self.path, body)
+                if handled is not None:
+                    return self._send(handled[1], status=handled[0])
                 from .schedule_api import handle_post
                 handled = handle_post(self.path, body)
                 if handled is not None:

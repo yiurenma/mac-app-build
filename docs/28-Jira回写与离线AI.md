@@ -8,6 +8,15 @@
 
 失败、需人工处理等非 SUCCESS 结果不会触碰 Jira。Jira 步骤出错不会改变构建结果。
 
+## 在页面里设置和测试（推荐）
+启动 Web Console 后，左侧导航点 **Jira**：
+- 填写 Jira 地址、Token，勾选启用/演练模式、流转状态名称等，点“保存设置”。Token 存入 Mac 钥匙串，页面和文件里都不会再出现。
+- “测试连接”：只读，显示当前 Token 对应的 Jira 用户。
+- “查询 ticket”：输入 TRANSACT-210390，只读显示标题、状态、Reporter，以及能否流转到你设置的状态。
+- “用已成功的历史构建演练”：选一个成功的构建，按当前设置列出它会处理哪些 ticket、Jira 号从哪里找到的。只读，不改 Jira，也不影响正式记录。
+
+页面保存的设置优先于 config.yaml，保存在本机 `.appbuilder/jira_settings.json`。环境变量 `JIRA_TOKEN` 仍可用，且优先于钥匙串。
+
 ## 默认安全
 `config.yaml` 的 `jira.enabled=false`、`jira.dry_run=true`。先开启 enabled 保持 dry_run，查看任务 `state.json` 的 `runtime.jira_report`（会做什么、哪些提交归属不明），确认后再把 `dry_run` 改为 false。
 

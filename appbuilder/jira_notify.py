@@ -22,10 +22,29 @@ from .local_llm import get_llm, pick_primary_ticket, tester_summary
 
 DEFAULT_KEY = r'\b[A-Z][A-Z0-9]{1,9}-\d{1,7}\b'
 LEDGER = DATA / 'jira_ledger.json'
+SETTINGS_FILE = DATA / 'jira_settings.json'
+EDITABLE = {'enabled': bool, 'dry_run': bool, 'base_url': str, 'transition_name': str, 'assign_to_reporter': bool,
+            'use_pr_lookup': bool, 'key_pattern': str, 'first_run_commits': int, 'max_tickets_per_run': int,
+            'flavor': str}
+
+
+def _type_ok(key, value):
+    kind = EDITABLE[key]
+    return isinstance(value, kind) and not (kind is int and isinstance(value, bool))
+
+
+def saved_settings():
+    """Settings saved from the web page; they override config.yaml."""
+    try:
+        data = json.loads(SETTINGS_FILE.read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return {}
+    return {k: v for k, v in data.items() if k in EDITABLE and _type_ok(k, v)} if isinstance(data, dict) else {}
 
 
 def settings(config):
     j = dict((config or {}).get('jira') or {})
+    j.update(saved_settings())
     j.setdefault('enabled', False)
     j.setdefault('dry_run', True)
     j.setdefault('flavor', 'server')            # server / data center (name) or cloud (accountId)
@@ -187,15 +206,19 @@ class JiraClient:
         self.flavor = flavor
         self.timeout = timeout
         self.ca_bundle = ca_bundle
+        use_keychain = env is None
         env = env if env is not None else os.environ
         token = env.get('JIRA_TOKEN', '').strip()
+        if not token and use_keychain and not (env.get('JIRA_USER') and env.get('JIRA_API_TOKEN')):
+            from .auth import read_jira_token
+            token = (read_jira_token() or '').strip()
         user, api = env.get('JIRA_USER', '').strip(), env.get('JIRA_API_TOKEN', '').strip()
         if token:
             self.auth = 'Bearer ' + token
         elif user and api:
             self.auth = 'Basic ' + base64.b64encode(f'{user}:{api}'.encode()).decode()
         else:
-            raise ValueError('未设置 JIRA_TOKEN（或 JIRA_USER + JIRA_API_TOKEN）环境变量')
+            raise ValueError('未设置 Jira Token：请在页面 Jira 面板保存，或设置 JIRA_TOKEN 环境变量')
 
     def _call(self, method, path, body=None):
         data = json.dumps(body).encode() if body is not None else None
@@ -212,6 +235,12 @@ class JiraClient:
             message = f'Jira {method} {path.split("?")[0]} -> HTTP {exc.code}'
             raise (JiraNotFound(message) if exc.code == 404 else RuntimeError(message)) from None
         return json.loads(raw) if raw else {}
+
+    def myself(self):
+        return self._call('GET', '/rest/api/2/myself')
+
+    def transitions(self, key):
+        return self._call('GET', f'/rest/api/2/issue/{quote(key)}/transitions').get('transitions', [])
 
     def issue(self, key):
         return self._call('GET', f'/rest/api/2/issue/{quote(key)}?fields=reporter,status,summary')
@@ -263,13 +292,19 @@ def process_ticket(client, key, info, link, build_label, conf, llm, dry_run):
     return result
 
 
-def notify_jira(task_id, client=None, llm=None, config=None):
+def notify_jira(task_id, client=None, llm=None, config=None, preview=None):
+    """preview=N: web-page rehearsal on a finished task. Looks at its last N commits, never
+    writes to Jira, the ledger or the task state, and returns the report."""
     row = task(task_id)
     if row['status'] != 'SUCCESS':
+        if preview is not None:
+            raise ValueError('只能对状态为 SUCCESS 的构建做演练')
         return
     config = config or load_config()
     conf = settings(config)
-    if not conf['enabled']:
+    if preview is not None:
+        conf = {**conf, 'dry_run': True}
+    elif not conf['enabled']:
         return
     params = json.loads(row['params'])
     state = read_state(task_id)
@@ -278,16 +313,24 @@ def notify_jira(task_id, client=None, llm=None, config=None):
     link = (runtime.get('testfairy_app') or {}).get('share_url') or params.get('gmx_job')
     build = runtime.get('gmx_build_number', runtime.get('gmx_formal_number', task_id))
     if not source_sha or not link:
-        patch_runtime(task_id, jira_report={'status': 'SKIPPED', 'reason': '缺少来源提交或 App 链接'})
+        report = {'status': 'SKIPPED', 'reason': '缺少来源提交或 App 链接'}
+        if preview is not None:
+            return report
+        patch_runtime(task_id, jira_report=report)
         return
-    if (runtime.get('jira_report') or {}).get('status') in ('DONE', 'DRY_RUN'):
+    if preview is None and (runtime.get('jira_report') or {}).get('status') in ('DONE', 'DRY_RUN'):
         return
     repo = task_folder(task_id) / 'plugin'
+    if preview is not None and not repo.exists():
+        raise ValueError('该任务的本地 Plugin 克隆已不存在，无法演练')
     branch = params.get('plugin_source') or 'unknown'
     ledger = _read_ledger()
     old = (ledger.get(branch) or {}).get('last_sha')
     llm = llm if llm is not None else get_llm(config)
-    if old is None:
+    if preview is not None:
+        old = None
+        commits = recent_commits(repo, source_sha, int(preview))
+    elif old is None:
         commits = recent_commits(repo, source_sha, conf['first_run_commits']) if conf['first_run_commits'] else []
         if not commits:
             ledger[branch] = {'last_sha': source_sha}
@@ -321,10 +364,13 @@ def notify_jira(task_id, client=None, llm=None, config=None):
         except Exception as exc:
             errors.append({'key': key, 'error': safe_text(str(exc))[:200]})
             action('JIRA', safe_text(f'{key} 处理失败: {exc}'))
-    report = {'status': 'DRY_RUN' if dry else ('DONE' if not errors else 'PARTIAL'), 'tickets': results,
+    report = {'status': 'PREVIEW' if preview is not None else ('DRY_RUN' if dry else ('DONE' if not errors else 'PARTIAL')),
+              'commits_scanned': len(commits), 'tickets': results,
               'errors': errors, 'ignored_keys': ignored, 'ambiguous_commits': ambiguous, 'from': old, 'to': source_sha,
               'ticket_sources': {k: found[k].get('source') for k in keys},
               'pr_lookup': ('未启用' if not prs else (prs.error or f'正常，查询 {prs.calls} 次'))}
+    if preview is not None:
+        return report
     patch_runtime(task_id, jira_report=report)
     if not dry and not errors:
         ledger[branch] = {'last_sha': source_sha}
