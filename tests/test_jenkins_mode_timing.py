@@ -25,13 +25,16 @@ class ModeTimingTests(unittest.TestCase):
     def tearDownClass(cls):cls.engine.stop();cls.tmp.cleanup()
     def setUp(self):
         self.posts=[]
+        self.binding_release=threading.Event();self.binding_release.set()
+        binding_release=self.binding_release
         posts=self.posts
         class Handler(BaseHTTPRequestHandler):
             def log_message(self,*args):pass
             def do_GET(self):
                 if self.path=='/bind.js':
+                    if not binding_release.wait(5): return
                     time.sleep(.5)
-                    body=b'document.querySelector("form").addEventListener("submit",()=>fetch("/job/demo/build",{method:"POST"}));'
+                    body=b'document.querySelector("form").addEventListener("submit",()=>fetch("/job/demo/build",{method:"POST"}));window.fixtureBound=true;'
                     kind='application/javascript'
                 else:
                     body=b'''<a href="#params" onclick="document.querySelector('form').hidden=false">Build with Parameters</a>
@@ -53,13 +56,16 @@ class ModeTimingTests(unittest.TestCase):
         worker=JenkinsBrowser.__new__(JenkinsBrowser);worker.page=context.new_page();worker.site='plugin';worker.visible=not headless
         worker.visit=lambda url:worker.page.goto(url,wait_until='domcontentloaded')
         return worker
-    def legacy_sequence(self,worker):
+    def legacy_sequence(self,worker,*,hold_binding=False):
+        if hold_binding:self.binding_release.clear()
         worker.visit(self.job)
         worker._safe_click('Build with Parameters','link')
         worker._safe_click('Build','button')
-        worker.page.wait_for_timeout(1100)
+        self.binding_release.set()
+        worker.page.wait_for_function('() => window.fixtureBound === true')
+        worker.page.wait_for_timeout(100)
     def test_fast_click_before_async_binding_reproduces_no_post(self):
-        self.legacy_sequence(self.worker())
+        self.legacy_sequence(self.worker(),hold_binding=True)
         self.assertEqual(self.posts,[])
     def test_visible_slow_mo_setting_masks_same_fixture_race(self):
         # This isolates the production timing difference, not a headed claim.
@@ -78,5 +84,5 @@ class ModeTimingTests(unittest.TestCase):
 
     @unittest.skipUnless(os.environ.get('DISPLAY'),'Actual headed Chromium requires X server/DISPLAY; unavailable here')
     def test_actual_headed_without_slow_mo_exposes_same_race(self):
-        self.legacy_sequence(self.worker(headless=False,slow_mo=0))
+        self.legacy_sequence(self.worker(headless=False,slow_mo=0),hold_binding=True)
         self.assertEqual(self.posts,[])
