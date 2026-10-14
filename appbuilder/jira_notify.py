@@ -170,6 +170,14 @@ def tickets_from_commits(commits, pattern, llm=None, prs=None):
     return found, ambiguous
 
 
+class JiraNotFound(RuntimeError):
+    """HTTP 404 from Jira (no such issue, or not visible to this token)."""
+
+
+class UnknownTicket(Exception):
+    """The key looked like a ticket but Jira has no such issue; it is ignored, not an error."""
+
+
 class JiraClient:
     def __init__(self, base_url, *, flavor='server', timeout=30, ca_bundle=None, env=None):
         parts = urlsplit(base_url)
@@ -201,7 +209,8 @@ class JiraClient:
             with urllib.request.urlopen(req, timeout=self.timeout, context=ctx) as r:
                 raw = r.read()
         except urllib.error.HTTPError as exc:
-            raise RuntimeError(f'Jira {method} {path.split("?")[0]} -> HTTP {exc.code}') from None
+            message = f'Jira {method} {path.split("?")[0]} -> HTTP {exc.code}'
+            raise (JiraNotFound(message) if exc.code == 404 else RuntimeError(message)) from None
         return json.loads(raw) if raw else {}
 
     def issue(self, key):
@@ -229,7 +238,10 @@ class JiraClient:
 def process_ticket(client, key, info, link, build_label, conf, llm, dry_run):
     marker = f'[app-build:{build_label}]'
     result = {'key': key, 'steps': []}
-    issue = client.issue(key)
+    try:
+        issue = client.issue(key)
+    except JiraNotFound:
+        raise UnknownTicket(key) from None
     fields = issue.get('fields', {})
     reporter = fields.get('reporter') or {}
     status = (fields.get('status') or {}).get('name', '')
@@ -296,18 +308,21 @@ def notify_jira(task_id, client=None, llm=None, config=None):
     found, ambiguous = tickets_from_commits(commits, conf['key_pattern'], llm, prs)
     keys = list(found)[:conf['max_tickets_per_run']]
     dry = bool(conf['dry_run'])
-    results, errors = [], []
+    results, errors, ignored = [], [], []
     if keys:
         client = client or JiraClient(conf.get('base_url', ''), flavor=conf['flavor'],
                                       timeout=conf['timeout_seconds'], ca_bundle=conf.get('ca_bundle'))
     for key in keys:
         try:
             results.append(process_ticket(client, key, found[key], link, build, conf, llm, dry))
+        except UnknownTicket:
+            ignored.append(key)
+            action('JIRA', f'{key} 在 Jira 中查不到，已忽略')
         except Exception as exc:
             errors.append({'key': key, 'error': safe_text(str(exc))[:200]})
             action('JIRA', safe_text(f'{key} 处理失败: {exc}'))
     report = {'status': 'DRY_RUN' if dry else ('DONE' if not errors else 'PARTIAL'), 'tickets': results,
-              'errors': errors, 'ambiguous_commits': ambiguous, 'from': old, 'to': source_sha,
+              'errors': errors, 'ignored_keys': ignored, 'ambiguous_commits': ambiguous, 'from': old, 'to': source_sha,
               'ticket_sources': {k: found[k].get('source') for k in keys},
               'pr_lookup': ('未启用' if not prs else (prs.error or f'正常，查询 {prs.calls} 次'))}
     patch_runtime(task_id, jira_report=report)

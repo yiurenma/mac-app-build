@@ -156,6 +156,40 @@ class GitAndFlowTests(unittest.TestCase):
         self.assertIsNone(report)
         self.assertEqual(jira.calls, [])
 
+    def test_unknown_ticket_is_ignored_not_failed_and_ledger_advances(self):
+        class Missing(FakeJira):
+            def issue(self, key):
+                raise J.JiraNotFound('HTTP 404')
+        jira = Missing()
+        report, ledger = self.run_notify({'dry_run': False}, ledger={'develop': {'last_sha': self.shas[0]}}, client=jira)
+        self.assertEqual(report['status'], 'DONE')
+        self.assertEqual(report['ignored_keys'], ['PBB-2'])
+        self.assertEqual(report['errors'], [])
+        self.assertEqual(jira.calls, [])
+        self.assertEqual(ledger['develop']['last_sha'], self.shas[2])
+
+    def test_other_http_errors_still_count_as_failures(self):
+        class Broken(FakeJira):
+            def issue(self, key):
+                raise RuntimeError('HTTP 500')
+        jira = Broken()
+        report, ledger = self.run_notify({'dry_run': False}, ledger={'develop': {'last_sha': self.shas[0]}}, client=jira)
+        self.assertEqual(report['status'], 'PARTIAL')
+        self.assertEqual(report['ignored_keys'], [])
+        self.assertEqual(ledger['develop']['last_sha'], self.shas[0])
+
+    def test_http_404_maps_to_not_found_and_500_stays_runtime_error(self):
+        import urllib.error
+        client = J.JiraClient('https://jira.example.com', env={'JIRA_TOKEN': 'x'})
+        for code, expected in ((404, J.JiraNotFound), (500, RuntimeError)):
+            def boom(req, timeout=None, context=None, code=code):
+                raise urllib.error.HTTPError('u', code, 'x', {}, None)
+            with patch.object(J.urllib.request, 'urlopen', boom):
+                with self.assertRaises(expected) as caught:
+                    client.issue('UTF-8')
+            if code == 500:
+                self.assertNotIsInstance(caught.exception, J.JiraNotFound)
+
     def test_client_requires_https_and_credentials(self):
         with self.assertRaises(ValueError):
             J.JiraClient('http://jira.example.com', env={'JIRA_TOKEN': 'x'})
