@@ -83,6 +83,8 @@ def settings(body, config=None):
 
 
 def expected_build(params, runtime):
+    from .reuse_flow import effective_params
+    params = effective_params(params, runtime)
     number=runtime.get('gmx_build_number') or runtime.get('gmx_formal_number')
     sha=runtime.get('gmx_sha','')
     if not isinstance(number,int) or isinstance(number,bool) or number<1 or not re.fullmatch(r'[0-9a-fA-F]{40}',sha):
@@ -669,6 +671,8 @@ class TestFairyBrowser:
 
 
 def mail_preview(params,runtime,created):
+    from .reuse_flow import effective_params
+    params = effective_params(params, runtime)
     app=runtime['testfairy_app']
     subject=f"[{params['country']}] {params['project']} {app['app_version']} ({app['app_build']})"
     rows=[('App 分享链接',app['share_url']),('App 版本',app['app_version']+' ('+app['app_build']+')'),

@@ -8,6 +8,7 @@ import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from .config import DATA, parallel_limit
+from .lifecycle import admitted
 from .versions import branch_names, job_urls, plugin_parent_for_branch
 
 
@@ -40,6 +41,7 @@ def connect():
     return db
 
 
+@admitted
 def create_task(config, params, *, schedule_claim=None):
     """Reserve a unique timestamp and initialize task state in one DB transaction.
 
@@ -56,6 +58,8 @@ def create_task(config, params, *, schedule_claim=None):
             stamp = (datetime.strptime(stamp, '%Y%m%d%H%M') + timedelta(minutes=1)).strftime('%Y%m%d%H%M')
         task_id = f"{stamp}-{os.urandom(3).hex()}"
         generated = branch_names(params['plugin_version_input'], stamp, params['gmx_source'], params.get('gmx_issue_key') or config.get('build', {}).get('gmx_issue_key', ''))
+        if generated['plugin_branch'] == params.get('plugin_source'):
+            raise ValueError('Plugin 来源分支不能与构建目标相同')
         # Resolve branch Jobs using this task's explicit Jenkins defaults, not
         # mutable process-global config. Other concurrent tasks remain isolated.
         job_config = {**config, 'jenkins': {**config['jenkins'], **{
@@ -70,13 +74,13 @@ def create_task(config, params, *, schedule_claim=None):
             job_config['jenkins']['plugin_parent'] = parent
             params = {**params, 'jenkins_settings': {**params.get('jenkins_settings', {}), 'plugin_parent': parent}}
         urls = job_urls(job_config, generated['plugin_branch'], generated['gmx_branch'])
-        params = {**params, **generated, **urls, 'stamp': stamp, 'id': task_id}
+        params = {**params, **generated, **urls, 'stamp': stamp, 'id': task_id, 'plugin_flow_version': 2}
         workdir = task_folder(task_id)
         # mkdir before INSERT: a missing working directory must never become
         # a committed QUEUED database row.
         workdir.mkdir(parents=True, exist_ok=False)
         try:
-            save_state(task_id, {'completed': [], 'runtime': {}})
+            save_state(task_id, {'completed': [], 'runtime': {'dispatch_policy':'receipt-v1'}})
             db.execute('INSERT INTO tasks(id,created,stamp,status,params,stage) VALUES(?,?,?,?,?,?)',
                        (task_id, datetime.now().isoformat(), stamp, 'QUEUED', json.dumps(params), 'INIT'))
             if schedule_claim is not None:
@@ -101,6 +105,7 @@ def task_list():
         return [dict(r) for r in db.execute('SELECT * FROM tasks ORDER BY created DESC')]
 
 
+@admitted
 def reserve_resume(config, task_id):
     """Atomically reserve a shared slot before launching a resumed worker."""
     from .cli import alive

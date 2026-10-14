@@ -45,7 +45,7 @@ class CopyScenarios(shared.SharedBuildUIFixture):
         self.assertEqual(self.field('country').input_value(), 'ALL')
         self.assertEqual(self.field('plugin_branch').input_value(), 'feature/source')
         self.assertEqual(self.field('plugin_parent').input_value(), PLUGIN_FEATURE_PARENT)
-        expect(self.page.locator('#derived-plugin')).to_have_text('release/1.3.[timestamp]')
+        expect(self.page.locator('#derived-plugin')).to_have_text('release/v1.3.[timestamp]')
         self.assertTrue(self.field('schedule_stop_after_success').is_checked())
         self.assertFalse(self.field('schedule_enabled').is_checked())
         self.assertTrue(self.field('testfairy_enabled').is_checked())

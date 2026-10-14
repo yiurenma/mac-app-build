@@ -30,7 +30,7 @@ class ResumeCapacityTests(unittest.TestCase):
             self.assertEqual(store.active_count(),10)
             self.assertEqual(store.task(ids[-1])['params'],original)
             self.assertEqual(len(store.task_list()),11)
-            self.assertEqual(store.read_state(ids[-1]),{'completed':[],'runtime':{}})
+            self.assertEqual(store.read_state(ids[-1]),{'completed':[],'runtime':{'dispatch_policy':'receipt-v1'}})
 
     def test_limit_is_ten_even_if_old_configuration_requests_more(self):
         self.assertEqual(parallel_limit({}),10)

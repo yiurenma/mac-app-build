@@ -21,11 +21,11 @@ class DispatchTests(unittest.TestCase):
         self.worker.site='plugin';self.worker.visible=False;self.worker.poll=.01
         self.worker.visit=lambda url:self.worker.page.goto(url)
         self.worker.detect_new_build=Mock(return_value=7)
-        self.state={'runtime':{}};self.requests=[];self.status=201;self.entry=True;self.button=True;self.extra='';self.button_type='submit';self.prevent=False
+        self.state={'runtime':{}};self.requests=[];self.status=201;self.entry=True;self.button=True;self.extra='';self.button_type='submit';self.prevent=False;self.location='/queue/item/91/'
         def route(r):
             self.requests.append((r.request.method,r.request.url))
             if r.request.method=='POST':
-                r.fulfill(status=self.status,headers={'Location':'/queue/item/91/'} if self.status==201 else {},body='<main>Job</main>');return
+                r.fulfill(status=self.status,headers={'Location':self.location} if self.status in (201,302,303) else {},body='<main>Job</main>');return
             if r.request.url.endswith('/build?delay=0sec'):
                 r.fulfill(content_type='text/html',body='<form method="post" action="build" '+('onsubmit="event.preventDefault()"' if self.prevent else '')+'>'+self.extra+'<button type="'+self.button_type+'">'+('Build' if self.button else 'Missing')+'</button></form>');return
             r.fulfill(content_type='text/html',body='<a href="build?delay=0sec">Build with Parameters</a>' if self.entry else '<main>No entry</main>')
@@ -206,3 +206,32 @@ class DispatchTests(unittest.TestCase):
         with self.assertRaisesRegex(NeedsAttention,'已禁用'):
             _dispatch_or_reconcile(self.worker,JOB,'t','gmx_formal',with_parameters=True,country='UK',project='PayByBank')
         self.assertFalse(any(m=='POST' for m,u in self.requests))
+
+    def test_strict_direct_build_receipt_from_real_browser_response(self):
+        for status in (201,302):
+            with self.subTest(status=status):
+                self.state['runtime']={'dispatch_policy':'receipt-v1'}
+                self.requests=[];self.status=status;self.location=JOB+'17/'
+                self.assertEqual(self.run_build(),17)
+                self.assertEqual(self.run_build(),17)
+                self.assertEqual(sum(m=='POST' for m,u in self.requests),1)
+                self.worker.detect_new_build.assert_not_called()
+                self.assertEqual(self.state['runtime']['plugin_formal_identity']['kind'],'DIRECT_BUILD')
+
+    def test_strict_queue_without_mapping_and_unknown_resume_never_resubmit(self):
+        self.worker.resolve_queue_build = None
+        self.state['runtime']={'dispatch_policy':'receipt-v1'}
+        for _ in range(2):
+            with self.assertRaises(NeedsAttention):self.run_build()
+        self.assertEqual(sum(m=='POST' for m,u in self.requests),1)
+        self.worker.detect_new_build.assert_not_called()
+
+    def test_strict_duplicate_posts_are_conflict_and_resume_does_not_submit(self):
+        self.state['runtime']={'dispatch_policy':'receipt-v1'}
+        self.prevent=True;self.location=JOB+'17/'
+        self.extra='<script>addEventListener("load",()=>{document.querySelector("form").addEventListener("submit",()=>{fetch("build",{method:"POST"});fetch("build",{method:"POST"});});});</script>'
+        with self.assertRaises(NeedsAttention):self.run_build()
+        self.assertEqual(self.state['runtime']['plugin_formal_dispatch']['state'],'CONFLICT')
+        with self.assertRaises(NeedsAttention):self.run_build()
+        self.assertEqual(sum(m=='POST' for m,u in self.requests),2)
+        self.worker.detect_new_build.assert_not_called()

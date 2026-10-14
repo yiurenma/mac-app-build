@@ -1,4 +1,4 @@
-"""Jenkins automation through visible browser pages (NO Jenkins REST API).
+"""Jenkins browser automation with a read-only exact queue-item lookup.
 
 Real corporate SSO and customized Jenkins DOM can differ. Unrecognized screens
 raise NeedsAttention rather than clicking a potentially incorrect control.
@@ -792,6 +792,70 @@ class JenkinsBrowser:
                 if target.scheme==root.scheme and target.netloc==root.netloc and match:result.add(int(match[1]))
         return sorted(result)
 
+    def resolve_queue_build(self, job_url, queue_id):
+        """Resolve only the submitted queue item using the existing session.
+
+        No history-number inference, API credentials, redirects or build POSTs.
+        Authentication/transport failures preserve the receipt for later Resume.
+        """
+        from .dispatch_identity import build_number, queue_url
+        root = urlsplit(job_url)
+        if (root.scheme != 'https' or not root.hostname or root.username or root.password
+                or root.query or root.fragment or '/job/' not in root.path
+                or type(queue_id) is not int or queue_id < 1):
+            raise NeedsAttention('队列查询目标或排队编号无效')
+        url = queue_url(job_url, queue_id) + 'api/json'
+        fields = 'id,cancelled,task[url],executable[number,url]'
+        deadline = time.monotonic() + 60 * max(0.001, min(180, float(
+            getattr(self, 'conf', {}).get('queue_timeout_minutes', 12))))
+        while time.monotonic() < deadline:
+            response = None
+            try:
+                response = self.context.request.get(url, params={'tree': fields},
+                    max_redirects=0, timeout=max(1, min(30000, int((deadline-time.monotonic())*1000))))
+                status = response.status
+                if status in (401, 403):
+                    raise NeedsAttention('队列只读查询认证失效或无权限；保留回执，登录恢复后 Resume，不重新提交')
+                if status in (404, 410):
+                    raise NeedsAttention('本次队列记录已消失，无法确定 Build；保留回执，不猜编号或重新提交')
+                actual = urlsplit(response.url)
+                if (status != 200 or actual.scheme != root.scheme or actual.netloc != root.netloc
+                        or actual.path != urlsplit(url).path
+                        or 'application/json' not in response.headers.get('content-type', '').lower()):
+                    raise NeedsAttention('队列查询返回非 JSON、跳转或异常 HTTP；保留回执，不重新提交')
+                try:
+                    item = response.json()
+                except ValueError as exc:
+                    raise NeedsAttention('队列查询 JSON 无法解析；保留回执') from exc
+            except (PlaywrightTimeout, PlaywrightError) as exc:
+                raise NeedsAttention('队列只读查询网络失败或超时；保留回执，Resume 不重新提交') from exc
+            finally:
+                if response is not None:
+                    response.dispose()
+            if time.monotonic() >= deadline:
+                break
+            if not isinstance(item, dict) or type(item.get('id')) is not int or item['id'] != queue_id:
+                raise NeedsAttention('队列响应编号与本次回执不一致；禁止关联 Build')
+            if item.get('cancelled') is True:
+                raise NeedsAttention('本次排队任务已取消；保留回执，不自动重新提交')
+            if 'cancelled' in item and type(item['cancelled']) is not bool:
+                raise NeedsAttention('队列取消状态无效；禁止关联 Build')
+            task = item.get('task')
+            if not isinstance(task, dict) or task.get('url') != job_url:
+                raise NeedsAttention('队列响应 Job 与本次提交不一致；禁止跨 Job 关联')
+            executable = item.get('executable')
+            if executable is not None:
+                number = build_number(job_url, executable.get('url')) if isinstance(executable, dict) else None
+                if (not number or type(executable.get('number')) is not int
+                        or executable['number'] != number):
+                    raise NeedsAttention('队列 executable URL 或编号无效、跨 Job 或不一致')
+                action('QUEUE', f'{self.site} 本次 queue {queue_id} 明确关联 Build #{number}')
+                return dict(queue_id=queue_id, job_url=job_url, relation='executable',
+                            build_url=job_url.rstrip('/')+'/'+str(number)+'/')
+            action('QUEUE', f'{self.site} 本次 queue {queue_id} 仍在排队；只读等待，不重新提交')
+            time.sleep(min(max(0.01, getattr(self, 'poll', 10)), max(0, deadline-time.monotonic())))
+        raise NeedsAttention('等待本次队列对应 Build 超时；保留回执，Resume 继续同一队列，不重新提交')
+
     def _wait_build_ready(self):
         # DOMContentLoaded does not wait for async scripts that bind Jenkins controls.
         # Use an observable load boundary in both modes, not visible-only slow_mo.
@@ -810,14 +874,17 @@ class JenkinsBrowser:
         action('JENKINS', f'{self.site} 准备构建；mode={"visible" if self.visible else "headless"}；尚未派发')
         self.visit(job_url)
         self._wait_build_ready()
-        before = self.build_numbers(job_url)
+        strict=getattr(self,'build_strict_dispatch',False)
+        before = set() if strict else self.build_numbers(job_url)
         root=urlsplit(job_url)
         callback=getattr(self,'build_dispatch_checkpoint',None) or (lambda **fields:None)
         expected_baseline=getattr(self,'build_expected_baseline',None)
         if expected_baseline is not None and set(before)!=set(expected_baseline):
             callback(state='CONFLICT')
             raise NeedsAttention('提交前 Build 历史已变化，可能是自动或外部构建；未派发，不关联新增编号')
+        armed=False
         def before_submit(control):
+            nonlocal armed
             current=urlsplit(self.page.url)
             if current.scheme!=root.scheme or current.netloc!=root.netloc or not current.path.startswith(root.path.rstrip('/')+'/'):
                 raise NeedsAttention('构建提交页面不属于目标 Job，未派发')
@@ -839,21 +906,36 @@ class JenkinsBrowser:
                     raise NeedsAttention('Build 链接目标与 Job 不符，未派发')
             if self.site=='gmx' and with_parameters:self._verify_gmx_submission()
             callback(state='DISPATCHING')
+            armed=True
             action('DISPATCH',f'{self.site} 提交检查通过，即将点击；中断后按结果未知处理，禁止盲重发')
         observed=[];post_requests=[]
         def request_seen(request):
             target=urlsplit(request.url)
-            if request.method=='POST' and target.scheme==root.scheme and target.netloc==root.netloc and target.path.rstrip('/') in (root.path.rstrip('/')+'/build',root.path.rstrip('/')+'/buildWithParameters'):
-                post_requests.append(True)
+            if armed and request.method=='POST' and target.scheme==root.scheme and target.netloc==root.netloc and target.path.rstrip('/') in (root.path.rstrip('/')+'/build',root.path.rstrip('/')+'/buildWithParameters'):
+                post_requests.append(request)
+                if len(post_requests) > 1:
+                    callback(state='CONFLICT')
                 action('DISPATCH',f'{self.site} 已观察目标构建 POST；接受状态待确认，不记录表单/认证内容')
         def response_seen(response):
             target=urlsplit(response.url)
-            if (response.request.method=='POST' and target.scheme==root.scheme and target.netloc==root.netloc
+            if (response.request in post_requests and response.request.method=='POST' and target.scheme==root.scheme and target.netloc==root.netloc
                     and target.path.rstrip('/') in (root.path.rstrip('/')+'/build',root.path.rstrip('/')+'/buildWithParameters')):
                 location=urlsplit(urljoin(response.url,response.headers.get('location','')))
                 match=re.search(r'/queue/item/(\d+)/?$',location.path)
-                queue=int(match[1]) if match and location.netloc==root.netloc and location.scheme==root.scheme else None
-                observed.append({'http_status':response.status,'queue_id':queue})
+                queue=int(match[1]) if match and location.netloc==root.netloc and location.scheme==root.scheme and not location.query and not location.fragment and not location.username and not location.password else None
+                from .dispatch_identity import build_number, queue_url
+                expected_queue = queue_url(job_url, queue)
+                if not expected_queue or location.path.rstrip('/') != urlsplit(expected_queue).path.rstrip('/'):
+                    queue = None
+                raw=urljoin(response.url,response.headers.get('location',''))
+                direct=build_number(job_url,raw)
+                receipt={'http_status':response.status,'queue_id':queue}
+                if queue:receipt['queue_url']=expected_queue
+                if direct:receipt['build_url']=job_url.rstrip('/')+'/'+str(direct)+'/'
+                observed.append(receipt)
+                # Persist immediately: the process can stop before click returns.
+                accepted=(queue or direct) and response.status in (201,302,303)
+                callback(state='CONFLICT' if len(post_requests)!=1 or len(observed)!=1 else 'ACCEPTED' if accepted else 'UNKNOWN',**receipt)
                 action('DISPATCH',f'{self.site} 构建 POST 返回 HTTP {response.status}；queue_id={queue}；不记录请求内容')
         self.page.on('response',response_seen)
         self.page.on('request',request_seen)
@@ -873,8 +955,8 @@ class JenkinsBrowser:
             while not observed and time.monotonic()<deadline:self.page.wait_for_timeout(100)
             action('DISPATCH',f'{self.site} clicked=true；POST_observed={bool(post_requests)}；response_observed={bool(observed)}')
             receipt=observed[-1] if observed else {}
-            callback(state='ACCEPTED' if receipt.get('queue_id') and receipt.get('http_status') in (201,302,303) else 'UNKNOWN',**receipt)
-            action('DISPATCH',f'{self.site} 点击结束；确认队列={receipt.get("queue_id")}；现在核对目标 Job 的新编号，不把页面 HTTP200 当成功')
+            callback(state='CONFLICT' if len(post_requests)>1 or len(observed)>1 else 'ACCEPTED' if (receipt.get('queue_id') or receipt.get('build_url')) and receipt.get('http_status') in (201,302,303) else 'UNKNOWN',**receipt)
+            action('DISPATCH',f'{self.site} 点击结束；确认队列={receipt.get("queue_id")}；按任务归属策略核对回执，不把页面 HTTP200 当成功')
             return before
         finally:
             self.page.remove_listener('response',response_seen)
@@ -1215,6 +1297,9 @@ def _dispatch_evidence(browser, job_url, baseline, initial=None):
 
 def _dispatch_or_reconcile(browser,job_url,task_id,key,**parameters):
     rt=read_state(task_id)['runtime']
+    if rt.get('dispatch_policy') == 'receipt-v1':
+        from .dispatch_identity import reconcile
+        return reconcile(browser,job_url,task_id,key,read_state,patch_runtime,**parameters)
     previous=rt.get(key+'_dispatch',{})
     if previous.get('job_url') and previous['job_url']!=job_url:
         raise NeedsAttention('保存的派发 Job 与当前目标不一致，禁止提交或复用编号')
@@ -1275,7 +1360,7 @@ def ensure_bootstrap(browser: JenkinsBrowser, job_url: str, task_id: str, site: 
     if mode != 'build':
         raise NeedsAttention(f'{site} Jenkins 未显示 Build 或 Build with Parameters')
     num = rt.get(key + '_number')
-    if not num:
+    if not num or rt.get('dispatch_policy') == 'receipt-v1':
         num = _dispatch_or_reconcile(browser,job_url,task_id,key,with_parameters=False)
         patch_runtime(task_id, **{key + '_number': num})
     if site == 'gmx':
@@ -1300,7 +1385,7 @@ def formal_build(browser: JenkinsBrowser, job_url, task_id, site, country='', pr
     rt = read_state(task_id)['runtime']
     key = site + '_formal'
     num = rt.get(key + '_number')
-    if not num:
+    if not num or rt.get('dispatch_policy') == 'receipt-v1':
         num = _dispatch_or_reconcile(browser,job_url,task_id,key,with_parameters=True,country=country,project=project)
         patch_runtime(task_id, **{key + '_number': num})
     result = rt.get(key + '_result')
@@ -1403,7 +1488,7 @@ def plugin_upload_hashes(browser, job_url, number, version, *, confirmed_success
         raise NeedsAttention(str(exc)) from exc
 
 
-def _plugin_upload_from_build(browser, job_url, number):
+def _plugin_upload_from_build(browser, job_url, number, task_id=None):
     """Read ONE numbered build's full log and return (version, hashes).
 
     The version and SHA256 both come from the same Nexus upload output JSON, so
@@ -1416,6 +1501,13 @@ def _plugin_upload_from_build(browser, job_url, number):
     metadata = parse_upload_metadata(console, emit=lambda message: action('NEXUS', message))
     if result and result != 'SUCCESS':
         raise NeedsAttention(f'Plugin Build #{number} 日志终态={result}，与成功构建冲突')
+    if task_id is not None:
+        from .nexus import parse_upload_downloads
+        try:
+            downloads = parse_upload_downloads(console)
+        except ValueError:
+            downloads = {}  # Ambiguous historical URLs disable reuse, not the build.
+        patch_runtime(task_id, plugin_artifact_downloads=downloads, plugin_artifact_result='SUCCESS')
     return metadata['version'], metadata['hashes']
 
 
@@ -1433,7 +1525,7 @@ def plugin_artifact_info(browser, job_url, source_number, task_id):
         if result != 'SUCCESS':
             raise RuntimeError(f'Plugin Callback #{child} 失败: {result}')
         try:
-            version, hashes = _plugin_upload_from_build(browser, job_url, child)
+            version, hashes = _plugin_upload_from_build(browser, job_url, child, task_id)
         except ValueError as exc:
             raise NeedsAttention(f'Plugin Callback #{child} 日志中没有可用的 Nexus 上传记录: {exc}') from exc
         return version, hashes, child
@@ -1442,7 +1534,7 @@ def plugin_artifact_info(browser, job_url, source_number, task_id):
     if known:
         return from_callback(known)
     try:
-        version, hashes = _plugin_upload_from_build(browser, job_url, source_number)
+        version, hashes = _plugin_upload_from_build(browser, job_url, source_number, task_id)
         return version, hashes, source_number
     except ValueError:
         pass

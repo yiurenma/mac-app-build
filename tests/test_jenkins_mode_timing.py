@@ -1,5 +1,9 @@
 """Same async-script fixture; actual headed test skips when no display is available."""
 import os
+import ssl
+import subprocess
+import tempfile
+from pathlib import Path
 import threading
 import time
 import unittest
@@ -9,9 +13,16 @@ from appbuilder.jenkins import JenkinsBrowser
 
 class ModeTimingTests(unittest.TestCase):
     @classmethod
-    def setUpClass(cls):cls.engine=sync_playwright().start()
+    def setUpClass(cls):
+        cls.tmp=tempfile.TemporaryDirectory()
+        root=Path(cls.tmp.name)
+        cls.cert,cls.key=root/'cert',root/'key'
+        subprocess.run(['openssl','req','-x509','-newkey','rsa:2048','-nodes','-keyout',str(cls.key),
+                        '-out',str(cls.cert),'-days','1','-subj','/CN=localhost'],
+                       check=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+        cls.engine=sync_playwright().start()
     @classmethod
-    def tearDownClass(cls):cls.engine.stop()
+    def tearDownClass(cls):cls.engine.stop();cls.tmp.cleanup()
     def setUp(self):
         self.posts=[]
         posts=self.posts
@@ -30,13 +41,15 @@ class ModeTimingTests(unittest.TestCase):
             def do_POST(self):
                 posts.append(self.path);self.send_response(201);self.send_header('Location','/queue/item/3/');self.end_headers()
         self.server=ThreadingHTTPServer(('127.0.0.1',0),Handler)
+        tls=ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER);tls.load_cert_chain(self.cert,self.key)
+        self.server.socket=tls.wrap_socket(self.server.socket,server_side=True)
         self.thread=threading.Thread(target=self.server.serve_forever,daemon=True);self.thread.start()
         self.addCleanup(self.server.server_close);self.addCleanup(self.server.shutdown)
-        self.job=f'http://127.0.0.1:{self.server.server_port}/job/demo/'
+        self.job=f'https://127.0.0.1:{self.server.server_port}/job/demo/'
     def worker(self,headless=True,slow_mo=0):
         browser=self.engine.chromium.launch(executable_path='/usr/bin/chromium',headless=headless,slow_mo=slow_mo,args=['--no-sandbox'])
         self.addCleanup(browser.close)
-        context=browser.new_context();self.addCleanup(context.close)
+        context=browser.new_context(ignore_https_errors=True);self.addCleanup(context.close)
         worker=JenkinsBrowser.__new__(JenkinsBrowser);worker.page=context.new_page();worker.site='plugin';worker.visible=not headless
         worker.visit=lambda url:worker.page.goto(url,wait_until='domcontentloaded')
         return worker

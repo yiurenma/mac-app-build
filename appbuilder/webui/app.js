@@ -21,7 +21,7 @@ function renderTasks(){const list=state.tasks;const counts={total:list.length,ru
     const info=create('td'),name=create('strong','',t.project||'APP Build');const sub=create('small','',`${t.country} · ${t.id}`);info.append(name,sub);
     const version=create('td','',t.plugin_version||'—');const stage=create('td','',t.stage||'—');
     const date=create('td','',formatDate(t.created));const stat=create('td');stat.append(create('span','pill '+t.status.toLowerCase(),t.status.replace('_',' ')));
-    tr.append(info,version,stage,date,stat,create('td','table-action','↗'));tbody.append(tr);}
+    const actions=create('td','table-action'),inspect=create('button','ghost-button','查看运行数据');inspect.addEventListener('click',e=>{e.stopPropagation();openRuntimeData(t.id);});actions.append(inspect);tr.append(info,version,stage,date,stat,actions);tbody.append(tr);}
 }
 function renderSelection(){const row=state.tasks.find(t=>t.id===state.selected);if(!row)return;
   $('selected-subtitle').textContent=`${row.project} · ${row.country} · ${row.id}`;
@@ -38,7 +38,7 @@ function renderSelection(){const row=state.tasks.find(t=>t.id===state.selected);
     }}catch(e){}
   }
   if(row.delivery?.mail_preview){const details=create('details'),title=create('summary','',row.delivery.mail_delivery?.status==='SUBMITTED'?'邮件预览 · 已提交 Outlook（非送达确认）':row.delivery.mail_delivery?.status==='UNKNOWN'?'邮件预览 · 提交结果不明，禁止自动重发':row.delivery.mail_delivery?.status==='BLOCKED'?'邮件预览 · 发送受阻：'+row.delivery.mail_delivery.reason:'邮件预览 · 尚未发送'),text=create('pre','','To: '+row.delivery.mail_preview.to.join(', ')+'\nFrom: '+(row.delivery.mail_delivery?.account||row.delivery.mail_preview.account||'待本机核验')+'\n'+row.delivery.mail_preview.subject+'\n\n'+row.delivery.mail_preview.body);details.append(title,text);box.append(details);}
-  const phases=['PLUGIN_CHECKOUT','PLUGIN_EDIT','PLUGIN_PUSH','PLUGIN_JENKINS','GMX_CHECKOUT','GMX_EDIT','GMX_LOCK','GMX_PUSH','GMX_JENKINS'];const idx=phases.indexOf(row.stage);
+  const phases=['PLUGIN_CHECKOUT','PLUGIN_EDIT','PLUGIN_PUSH','PLUGIN_JENKINS','GMX_CHECKOUT','GMX_EDIT','GMX_LOCK','GMX_PUSH','GMX_JENKINS'];const idx=row.stage==='PLUGIN_PREPARE'?0:phases.indexOf(row.stage);
   $('stage-strip').querySelectorAll('div').forEach((e,i)=>{e.className='';if(row.status==='SUCCESS'||(idx>=0&&i<idx))e.className='done';else if(i===idx)e.className='current';});
   $('resume-build').hidden=['SUCCESS','RUNNING','QUEUED'].includes(row.status);
 }
@@ -83,7 +83,8 @@ function syncSummary(){
   const project=(f.project_name.value||'PayByBank').trim();
   const computed=`0_A_${country}_${project}`;
   if(!customFolderEdited)f.gmx_custom_folder.value=computed;
-  $('derived-plugin').textContent=`release/${f.plugin_version.value||'1.3'}.[timestamp]`;
+  const version=f.plugin_version.value||'1.3';
+  $('derived-plugin').textContent=`release/v${version}${/^\d+\.\d+$/.test(version)?'.[timestamp]':''}`;
   const keys=[...new Set((f.gmx_branch.value.match(/(?<![A-Za-z0-9])[A-Z]{1,10}-[0-9]+(?![A-Za-z0-9])/g)||[]))];
   const issue=f.gmx_issue_key.value.trim()||(keys.length===1?keys[0]:'');
   $('derived-gmx').textContent=issue?`upload/${issue}-auto[timestamp]`:'upload/AUTO-[timestamp]';
@@ -255,3 +256,14 @@ $('test-testfairy').addEventListener('click',()=>runDeliveryTest('testfairy'));
 $('test-outlook-send').addEventListener('click',()=>runDeliveryTest('outlook'));
 
 for(const id of ['tf-test-form','mail-test-form'])$(id).addEventListener('submit',e=>e.preventDefault());
+
+// Each open owns a request generation; late responses cannot replace another task.
+let runtimeGeneration=0,runtimeSnapshot=null,runtimeOpener=null;
+function runtimeTab(json){$('runtime-json').hidden=!json;$('runtime-overview').hidden=json;}
+function closeRuntimeData(){runtimeGeneration++;runtimeSnapshot=null;$('runtime-dialog').close();runtimeOpener?.focus();}
+async function openRuntimeData(id){const generation=++runtimeGeneration;runtimeSnapshot=null;runtimeOpener=document.activeElement;$('runtime-copy').disabled=true;$('runtime-task').textContent=id;$('runtime-message').textContent='正在读取…';$('runtime-overview').replaceChildren();$('runtime-json').textContent='';runtimeTab(false);if(!$('runtime-dialog').open)$('runtime-dialog').showModal();try{const data=await api('/api/tasks/'+encodeURIComponent(id)+'/runtime-data');if(generation!==runtimeGeneration)return;runtimeSnapshot=JSON.stringify(data.state,null,2);$('runtime-json').textContent=runtimeSnapshot;$('runtime-task').textContent=`${data.task.id} · ${data.task.status} · ${data.task.stage} · ${formatDate(data.task.created)}`;const overview=$('runtime-overview');const completed=create('section','runtime-group');completed.append(create('h3','','执行进度 · completed'),create('pre','',JSON.stringify(data.state.completed,null,2)));overview.append(completed);const groups={'Plugin 构建关联与准备':{},'GMX 构建':{},'产物与交付':{},'历史复用':{},'阶段错误':{},'其他运行字段':{}};for(const [key,value] of Object.entries(data.state.runtime)){let label=key==='step_errors'?'阶段错误':/reuse/.test(key)?'历史复用':/artifact|lock_hash|testfairy|mail_|upload_validation/.test(key)?'产物与交付':/^plugin|^dispatch/.test(key)?'Plugin 构建关联与准备':/^gmx/.test(key)?'GMX 构建':'其他运行字段';groups[label][key]=value;}for(const [label,value] of Object.entries(groups)){if(!Object.keys(value).length)continue;const group=create('section','runtime-group');group.append(create('h3','',label));if(label==='Plugin 构建关联与准备'){const rt=data.state.runtime;group.append(create('p','',`Queue ${rt.plugin_formal_dispatch?.queue_id??'未记录'} → Trigger #${rt.plugin_formal_number??'未记录'} (${rt.plugin_formal_result??'未记录'}) → Callback #${rt.plugin_callback_number??'未记录'}`));}group.append(create('pre','',JSON.stringify(value,null,2)));overview.append(group);}$('runtime-copy').disabled=false;$('runtime-message').textContent='已读取；概览与复制使用同一份脱敏快照。';}catch(e){if(generation===runtimeGeneration)$('runtime-message').textContent=e.message;}}
+$('runtime-close').addEventListener('click',closeRuntimeData);
+$('runtime-dialog').addEventListener('cancel',e=>{e.preventDefault();closeRuntimeData();});
+$('runtime-overview-tab').addEventListener('click',()=>runtimeTab(false));
+$('runtime-json-tab').addEventListener('click',()=>runtimeTab(true));
+$('runtime-copy').addEventListener('click',async()=>{const text=runtimeSnapshot,generation=runtimeGeneration;if(text===null)return;try{await navigator.clipboard.writeText(text);if(generation===runtimeGeneration)$('runtime-message').textContent='已复制脱敏 JSON';}catch(e){if(generation===runtimeGeneration)$('runtime-message').textContent='复制失败，请从脱敏 JSON 中手动选择复制。';}});

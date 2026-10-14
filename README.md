@@ -99,7 +99,7 @@ GMX 参数页按现场截图新增 `SKIP_TEST`（默认 true）、`FORCE`（默�
 - 上述功能通过离线测试验证；公司 Mac/SSO/Jenkins 的端到端联调仍需在企业网络内进行。
 
 
-每个任务有单独的 Git 克隆、时间戳、Jenkins 编号、日志和恢复状态。**没有用 Jenkins REST API**；Jenkins 操作由 Playwright 打开浏览器页面模拟人操作。
+每个任务有单独的 Git 克隆、时间戳、Jenkins 编号、日志和恢复状态。构建提交与结果监控由 Playwright 操作页面；仅新增精确队列号的只读 JSON 查询，沿用已有登录会话，不新增凭据或调用写入 API。
 
 > **状态**：这是可安装、可离线测试的第一版工程。没有企业内网、GitHub Token、SSO、Jenkins Job 的环境，尚未做真实端到端联调。**不要把本工具视为已经在公司的 Jenkins 上成功运行过。** 首次真实执行建议使用非生产测试分支。浏览器如果无法准确识别内部 Jenkins 参数或产物，会报 `NEEDS_ATTENTION` 并截图；不会盲目点击。
 
@@ -135,7 +135,7 @@ GMX 参数页按现场截图新增 `SKIP_TEST`（默认 true）、`FORCE`（默�
 
 ## 0. 工作流
 
-1. 使用 Plugin 输入源分支创建 `release/<大版本>.<YYYYMMDDHHmm>`，两个 `.xcconfig` 的 `BUNDLE_VERSION_SHORT` 同步设为 `<大版本>.<时间戳>`，精确提交并 Push。
+1. Plugin 输入 `1.3` 时生成 `1.3.<YYYYMMDDHHmm>`，输入 `1.3.1` 时保持固定版本；新目标为 `release/v<版本>`。目标已存在时从真实远端目标合并本任务冻结的来源 SHA，再精确修改两个 `.xcconfig` 的 `BUNDLE_VERSION_SHORT`。实际版本不带 `v`；冲突保留现场并停止，不强推。同版本且没有内容变化时不创建空提交。来源 SHA 与最终构建 SHA 分别保存。
 2. 根据规则 `/` 和 `.` → `_` 定位 Plugin Jenkins 新 Job；如果初次只有 `Build`，先触发初始化构建，再等待 `Build with Parameters`。随后使用默认参数触发正式构建。
 3. 从本次成功 Build（或其关联 Callback）完整 `consoleText` 的 Nexus upload output JSON 中，按 DomainModel 和 Journey 的 `*.tar.gz` 文件名读取**完整 Artifact Version**，要求两个版本一致。不再打开 Jenkins 的 Artifacts 页面（其 `*view*`/`*fingerprint*` 链接会让大 `source.zip` 解压预览超时）。
 4. 使用 GMX 输入源分支创建 `upload/<工单编号>-auto<同一时间戳>`。在根目录 `mobile-ci.json` 精准修改两个 `paybybank-ios-plugin` 依赖的 `version` 为**完整 Artifact Version**，不做 `1.3.0` 等转换。
@@ -251,9 +251,9 @@ Web Console 也支持首次填写 GitHub PAT 并保存到 Mac Keychain，因此�
 也可加 `--wait` 前台执行，或加 `--plugin-url`、`--gmx-url` 覆盖默认仓库地址。
 
 - `--plugin-branch` 和 `--gmx-branch` 是**源分支**，永远不会直接修改。
-- `--plugin-version` 是**大版本**，例如 `1.3`。
+- `--plugin-version` 支持两段版本（如 `1.3`，自动追加时间戳）或三段固定版本（如 `1.3.1`）。
 - `--country` 默认 UK；`--project-name` 必填。项目名称允许字母、数字、`_`、`-`，不允许空格或路径分隔符（避免意外路径）。
-- 每个任务只生成一次时间戳。若同一分钟内发起第二个任务，管理器分配下一个可用分钟编码，保证分支唯一（编码可能略晚于实际钟表时间）。
+- 每个任务只生成一次时间戳。若同一分钟内发起第二个任务，管理器分配下一个可用分钟编码，保证任务及 GMX 自动分支唯一（编码可能略晚于实际钟表时间）。固定版本的 Plugin 目标可以重复使用；本机同仓库、同目标任务使用互斥锁，锁不代表对其他机器或人工构建的归属证明。
 - 默认最多 10 条完整 Plugin→GMX 流水线，手动、定时和 Resume 共用；可在 `config.yaml` 降低 `build.max_parallel`，最高 10。macOS 后台任务自动通过 `caffeinate -i` 阻止空闲睡眠（合上 Mac 盖、VPN 断开仍会影响任务）。
 
 ## 5. 文件与结果位置
@@ -454,7 +454,7 @@ New build 的共享表单可独立开启 TestFairy 链接查找及 Outlook 结�
 
 Outlook 自动通知覆盖成功、失败、超时和需人工处理，用户明确填写收件人并开启才调用本机账号。相同结果去重；发送不明不重发；邮件失败不改写构建结果。当前 Mac Outlook 的实际原生能力必须现场探测，不保证 New Outlook 支持，也不把提交当投递成功。详见 [配置、恢复、权限及验证边界](docs/27-TestFairy-Outlook-结果通知.md)。
 
-新建 Plugin 任务已恢复 `release/<大版本>.<时间戳>` 和 `release-build/job/release_<版本与时间戳>/`。此前保存的本项目默认 `feature-build/job/` 配置仅在创建新任务时映射回 release 父路径；不改写计划模板、历史任务或其他项目的自定义路径。已有 release/feature 任务 Resume 保留原分支、Jenkins URL 和进度；只读诊断继续支持这两个已知目录下的具体分支 Job/Build。
+新建 Plugin 任务使用 `release/v<版本>` 和 `release-build/job/release_v<版本中的点替换为下划线>/`；两段输入生成时间戳版本，三段输入保持固定版本。此前保存的本项目默认 `feature-build/job/` 配置仅在创建新任务时映射回 release 父路径；不改写计划模板、历史任务或其他项目的自定义路径。已有 release/feature 任务 Resume 保留原分支、Jenkins URL 和进度；只读诊断继续支持这两个已知目录下的具体分支 Job/Build。
 
 ### 定时任务成功后停止与拷贝
 
@@ -462,3 +462,29 @@ Outlook 自动通知覆盖成功、失败、超时和需人工处理，用户明
 - 停止原因和成功任务保存在本机数据库，重启不会补跑已停止的轮次。“重新启用”或将成功停止选项从关闭改为开启时，从当前时间开始新一轮，旧任务之后 Resume 成功不会停止新轮。派发已绑定任务但进程启动结果不明时，保留记录并提示核对／Resume，不自动重复启动。
 - 列表“拷贝”只打开预填表单。沿用构建参数和 cron，默认勾选成功停止，要求改名并核对未来运行预览后保存；副本默认停用，可明确选择保存后启用。保存生成新 ID，不复制历史运行、原下次时间、成功标记或运行状态。当前仅支持五段 cron，不支持一次性日期。
 - 拷贝不保存或回填临时密码、账号或 Token；继续按原配置使用既有 Keychain／TestFairy 租户会话及本机 Outlook 账号。认证过期时仍能查看／拷贝配置，但保存或启动必须通过现有认证校验。
+
+### 连续构建实现状态（未发布草稿）
+
+新任务通过 `plugin_flow_version=2` 使用合并准备流程；旧任务继续原阶段与快照。Plugin/APP 复用只依据脚本保存的完整历史结果：来源与构建 SHA、有效输入参数、成功结果、原始 Job/Build、完整 Plugin 版本及两个产物 URL/hash、APP 原始卡片结果及分享链接。输入匹配且记录完整时复用，旧 Jenkins 日志被清理不影响复用；记录不完整时正常构建，不回查旧日志，也不保证分享链接永久不变。首次构建仍沿用现有 Jenkins 成功确认、Nexus upload JSON 和 TestFairy 精确卡片匹配流程。
+
+新任务派发仅接受本次 POST 回执直接返回的 Build URL，或该 queue_id 明确对应的 executable Build。回执、尝试身份及关联记录持久化；未知或冲突状态的 Resume 不重新提交，不按新增编号、同 SHA 或时间邻近猜测归属。只有队列回执时，使用已有浏览器登录会话 GET 精确 `/queue/item/<id>/api/json`（保留 Jenkins context path），仅读取 `id/cancelled/task.url/executable.number/executable.url`。排队时有界等待（`queue_timeout_minutes` 默认12分钟）；只有同一队列、同一 Job、有效且一致的 Build URL/编号才能交回原监控。取消、404/410、401/403、跳转、非 JSON、网络错误或超时均保留回执并停止，Resume 不重新提交；认证恢复后可继续查询原队列。不会新增凭据、扩大权限或调用写入 API。队列已被清理且尚未保存映射时不会猜测历史编号。已通过本地真实 HTTPS 服务的显示/隐藏浏览器集成测试，但尚未在企业 Jenkins/SSO 环境实测。旧任务保留原恢复策略，不迁移已有记录。
+
+### 查看运行数据
+
+Recent builds 每条记录旁的“查看运行数据”打开只读抽屉，不改变当前日志选中的任务。数据概览按执行进度、Plugin、GMX、产物交付、历史复用和错误分组；原始 JSON 与复制使用同一份服务器脱敏快照。任务状态、阶段、创建时间来自任务数据库，其他运行字段来自该任务的 state.json。Trigger 成功不等于 Callback 或最终构建成功。
+
+此入口不修改状态、不触发构建，不回查 Jenkins。任务必须已存在；缺失、损坏、超大或不安全文件显示错误。服务端移除凭据、个人邮箱、邮件正文及 URL 敏感信息；隐藏字段会显示“已隐藏”。
+
+## 停止本项目后台服务
+
+在项目目录执行 `./app-build stop`。它先关闭新任务、恢复任务和定时派发的入口，再核实本项目进程，发送 TERM；默认给退出清理 5 秒，仍是同一进程实例时才发送 KILL。它不等待构建、邮件或其他业务完成。`--timeout 5` 控制退出清理时间。
+
+停止包括本项目 Web、Scheduler、Worker 及能够确认属于它们的专属自动化子进程。普通用户浏览器、其他项目和 PID 已被复用的进程不会被按旧 PID 停止。无法确认归属时会报错，而不是扩大停止范围。若安装了本工具 LaunchAgent，会先核对加载配置和项目目录，再 disable 并 bootout 已核实的服务，避免已加载的 KeepAlive 再次拉起；保留 plist。
+
+配置、任务历史和已保存 state 不会删除，也不会取消远端 Jenkins 构建。被打断的本地任务可在恢复服务后选择 Resume；未知提交回执仍按原有规则停下核对，不自动重复提交。
+
+恢复接收和自带 LaunchAgent 原启用状态：`./app-build start`，然后 `./app-build web --no-open`。start 只恢复本命令更改过的 LaunchAgent 状态，并再次核对服务归属和保存的 plist SHA256；需要时 bootstrap 原服务。`stop --cancel` 是 start 的兼容别名，不会复活已经停止的业务进程。
+
+旧版长期运行进程中的代码不会自动更新。首次使用本命令必须从含该功能的项目目录运行；命令会通过真实参数和工作目录识别旧服务。已脱离项目父进程、且无法证明归属的外部守护进程不按猜测终止。
+
+验证边界：Linux 本地可控后台父子进程实测通过；Mac proc_pidinfo、proc_pidpath、KERN_PROCARGS2 和 launchctl 读取路径按代码及模拟场景验证，尚未在用户 Mac 上实际执行停机。

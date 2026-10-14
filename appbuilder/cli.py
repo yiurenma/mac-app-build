@@ -50,6 +50,10 @@ def args_parser():
     worker = sub.add_parser('worker', help=argparse.SUPPRESS)
     worker.add_argument('task_id')
     sub.add_parser('status', help='查看任务')
+    stop = sub.add_parser('stop', help='停止本项目后台进程，保留任务状态')
+    stop.add_argument('--timeout', type=float, default=5, help='TERM后等待退出的秒数（默认5），不等待业务完成')
+    stop.add_argument('--cancel', action='store_true', help='取消暂停并恢复接收')
+    sub.add_parser('start', help='解除安全停机，允许正常启动服务')
     logs = sub.add_parser('logs', help='显示任务日志')
     logs.add_argument('task_id')
     logs.add_argument('--follow', '-f', action='store_true')
@@ -90,6 +94,22 @@ def create_params(a, c):
 
 
 def spawn(task_id, wait=False, transient_credentials=None):
+    from . import lifecycle
+    admitted = False
+    try:
+        if wait:
+            with lifecycle.admission(): admitted = True
+            return _spawn(task_id, wait, transient_credentials)
+        with lifecycle.admission():
+            admitted = True
+            return _spawn(task_id, wait, transient_credentials)
+    except Exception:
+        current = task(task_id)
+        if not admitted and current['status'] == 'QUEUED' and not current['pid']:
+            update_task(task_id, status='FAILED', note='Worker 未启动；可在恢复接收后 Resume')
+        raise
+
+def _spawn(task_id, wait=False, transient_credentials=None):
     if wait:
         from .runner import run
         run(task_id, transient_credentials=transient_credentials)
@@ -128,6 +148,8 @@ STAGES = (
 
 def stage_indicator(stage):
     """Workflow stage, NOT an estimated Jenkins build completion percentage."""
+    if stage == 'PLUGIN_PREPARE':
+        return f"1–3/{len(STAGES)}"
     return f"{STAGES.index(stage)+1}/{len(STAGES)}" if stage in STAGES else '-/10'
 
 
@@ -235,6 +257,14 @@ def main(argv=None):
     a = p.parse_args(argv)
     if a.command in ('run', 'resume') and a.live:
         a.watch = a.visible = a.verbose = True
+    if a.command in ('stop', 'start'):
+        from . import lifecycle
+        if a.command == 'start' or a.cancel:
+            lifecycle.resume()
+        else:
+            if a.timeout <= 0: p.error('--timeout 必须大于0')
+            lifecycle.stop(a.timeout)
+        return
     if a.command == 'doctor':
         doctor_check(load_config())
         return

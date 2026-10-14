@@ -20,7 +20,7 @@ class PluginReleaseRollbackTests(unittest.TestCase):
                                  ('feature/UKPBB-123-work', 'upload/UKPBB-123-auto202610120930')]:
             names = branch_names('2.4', '202610120930', source)
             self.assertEqual(names, {'plugin_version': '2.4.202610120930',
-                                     'plugin_branch': 'release/2.4.202610120930',
+                                     'plugin_branch': 'release/v2.4.202610120930',
                                      'gmx_branch': expected})
 
     def test_exact_release_job_urls_use_branch_child_not_folder(self):
@@ -43,8 +43,8 @@ class PluginReleaseRollbackTests(unittest.TestCase):
                 if override:
                     inputs['jenkins_settings'] = {'plugin_parent': override}
                 params = store.create_task(config, inputs)
-                self.assertEqual(params['plugin_branch'], 'release/1.3.' + params['stamp'])
-                self.assertEqual(params['plugin_job'], (PLUGIN_RELEASE_PARENT if override == PLUGIN_FEATURE_PARENT else override or config['jenkins']['plugin_parent']) + 'release_1_3_' + params['stamp'] + '/')
+                self.assertEqual(params['plugin_branch'], 'release/v1.3.' + params['stamp'])
+                self.assertEqual(params['plugin_job'], (PLUGIN_RELEASE_PARENT if override == PLUGIN_FEATURE_PARENT else override or config['jenkins']['plugin_parent']) + 'release_v1_3_' + params['stamp'] + '/')
                 self.assertEqual(params['gmx_branch'], 'upload/UKPBB-123-auto' + params['stamp'])
                 if override == PLUGIN_FEATURE_PARENT:
                     self.assertEqual(effective_task_config(config, params)['jenkins']['plugin_parent'], PLUGIN_RELEASE_PARENT)

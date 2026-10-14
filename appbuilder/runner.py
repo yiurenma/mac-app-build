@@ -2,6 +2,7 @@ from __future__ import annotations
 import json
 from copy import deepcopy
 import fcntl
+import hashlib
 from contextlib import contextmanager
 import os
 import re
@@ -13,7 +14,7 @@ from pathlib import Path
 from .versions import branch_names, job_urls, validate_gmx_target
 from .config import DATA, load_config, token_or_error
 from .store import task, read_state, patch_runtime, complete, update_task, task_folder, replace_gmx_target
-from .gitops import credentials, clone_branch, git, changed_files, commit_and_push, verify_pushed, recover_pushed_commit
+from .gitops import credentials, clone_branch, git, changed_files, commit_and_push, verify_pushed, recover_pushed_commit, publish_gmx
 from .verify import plugin_commit, gmx_commit
 from .edits import edit_plugin_versions, update_mobile_ci, update_lock_from_hashes, validate_lock, ensure_lock_other_entries_unchanged, XCCONFIGS
 from .jenkins import JenkinsBrowser, ensure_bootstrap, formal_build, plugin_artifact_info, plugin_upload_hashes, NeedsAttention
@@ -209,12 +210,84 @@ def repair_legacy_gmx_target(task_id, params, conf, root, env):
     return updated
 
 
-def _run_unlocked(task_id, transient_credentials=None):
+@contextmanager
+def plugin_target_lease(params):
+    """Serialize new-flow tasks sharing a local Plugin target through Jenkins.
+
+    This process-shared lock is not evidence of ownership against external users.
+    Git/Build identity checks remain necessary.
+    """
+    if params.get('plugin_flow_version') != 2:
+        yield
+        return
+    key = hashlib.sha256((params['plugin_url'].rstrip('/').removesuffix('.git') + '\n' + params['plugin_branch']).encode()).hexdigest()
+    directory = DATA / 'plugin-target-locks'
+    directory.mkdir(parents=True, exist_ok=True)
+    with (directory / (key + '.lock')).open('a') as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise NeedsAttention('同一 Plugin 目标正在由另一任务构建；请等待后 Resume') from exc
+        try:
+            yield
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
+
+
+def prepare_plugin_task(task_id, params, plugin, env, max_lines=100):
+    """New tasks use frozen-source merge preparation; saved legacy tasks stay legacy."""
+    plugin_branch, version = params['plugin_branch'], params['plugin_version']
+    if params.get('plugin_flow_version') == 2:
+        from .plugin_git import prepare
+        def prepare_current():
+            runtime = read_state(task_id)['runtime']
+            prepared = prepare(plugin, params['plugin_url'], params['plugin_source'],
+                               plugin_branch, version, env, runtime.get('plugin_preparation'),
+                               lambda value: patch_runtime(task_id, plugin_preparation=value))
+            patch_runtime(task_id, plugin_source_sha=prepared['source_sha'],
+                          plugin_base_sha=prepared['source_sha'], plugin_sha=prepared['build_sha'],
+                          plugin_target_before=prepared['target_before'])
+        step(task_id, 'PLUGIN_PREPARE', prepare_current)
+        return
+    def plugin_checkout():
+        base = checkout(params, 'plugin', plugin, params['plugin_source'], plugin_branch, env)
+        patch_runtime(task_id, plugin_base_sha=base)
+    step(task_id, 'PLUGIN_CHECKOUT', plugin_checkout)
+
+    def plugin_edit():
+        changes = edit_plugin_versions(plugin, version)
+        expected = set(XCCONFIGS)
+        extras = set(changed_files(plugin)) - expected
+        if extras:
+            raise NeedsAttention(f'Plugin 意外变更: {sorted(extras)}')
+        patch_runtime(task_id, plugin_edits=changes)
+    step(task_id, 'PLUGIN_EDIT', plugin_edit)
+
+    def plugin_push():
+        rt = read_state(task_id)['runtime']
+        if 'plugin_sha' in rt:
+            verify_pushed(plugin, plugin_branch, rt['plugin_sha'], env)
+            return
+        message = f'build: set plugin version {version}'
+        validator = lambda: plugin_commit(plugin, rt['plugin_base_sha'], version)
+        sha = recover_pushed_commit(plugin, plugin_branch, set(XCCONFIGS), message,
+                                    rt['plugin_base_sha'], env, validate_before_push=validator)
+        if not sha:
+            sha = commit_and_push(plugin, set(XCCONFIGS), message,
+                                  plugin_branch, env, max_lines=max_lines,
+                                  validate_before_push=validator)
+        patch_runtime(task_id, plugin_sha=sha)
+    step(task_id, 'PLUGIN_PUSH', plugin_push)
+
+
+def _run_unlocked(task_id, transient_credentials=None, *, reuse_verifier=None):
     row = task(task_id)
     if row['status'] == 'SUCCESS':
         log('任务已经成功完成，不再执行')
         return
     params = json.loads(row['params'])
+    if params.get('plugin_flow_version') == 2:
+        patch_runtime(task_id, dispatch_policy='receipt-v1')
     set_verbose(params.get('verbose', False))
     conf = effective_task_config(load_config(), params)
     token_or_error(conf)
@@ -230,38 +303,16 @@ def _run_unlocked(task_id, transient_credentials=None):
     log_jenkins_targets(params, conf)
     log(f'[MODE] watch=terminal-observer visible={bool(params.get("visible"))} verbose={bool(params.get("verbose"))}')
     try:
-        with credentials(conf.get('github', {}).get('token_env', 'GITHUB_TOKEN')) as env:
+        with credentials(conf.get('github', {}).get('token_env', 'GITHUB_TOKEN')) as env, plugin_target_lease(params):
             params = repair_legacy_gmx_target(task_id, params, conf, gmx, env)
             gmx_branch = params['gmx_branch']
-            def plugin_checkout():
-                base = checkout(params, 'plugin', plugin, params['plugin_source'], plugin_branch, env)
-                patch_runtime(task_id, plugin_base_sha=base)
-            step(task_id, 'PLUGIN_CHECKOUT', plugin_checkout)
-
-            def plugin_edit():
-                changes = edit_plugin_versions(plugin, version)
-                expected = set(XCCONFIGS)
-                extras = set(changed_files(plugin)) - expected
-                if extras:
-                    raise NeedsAttention(f'Plugin 意外变更: {sorted(extras)}')
-                patch_runtime(task_id, plugin_edits=changes)
-            step(task_id, 'PLUGIN_EDIT', plugin_edit)
-
-            def plugin_push():
-                rt = read_state(task_id)['runtime']
-                if 'plugin_sha' in rt:
-                    verify_pushed(plugin, plugin_branch, rt['plugin_sha'], env)
-                    return
-                message = f'build: set plugin version {version}'
-                validator = lambda: plugin_commit(plugin, rt['plugin_base_sha'], version)
-                sha = recover_pushed_commit(plugin, plugin_branch, set(XCCONFIGS), message,
-                                            rt['plugin_base_sha'], env, validate_before_push=validator)
-                if not sha:
-                    sha = commit_and_push(plugin, set(XCCONFIGS), message,
-                                          plugin_branch, env, max_lines=max_lines,
-                                          validate_before_push=validator)
-                patch_runtime(task_id, plugin_sha=sha)
-            step(task_id, 'PLUGIN_PUSH', plugin_push)
+            from . import reuse_flow
+            from .reuse_verification import LiveVerifier
+            verifier = reuse_verifier or LiveVerifier(conf, DATA, home, params, env)
+            plugin_reused = (params.get('plugin_flow_version') == 2 and
+                             reuse_flow.try_plugin(task_id, params, env, verifier))
+            if not plugin_reused:
+                prepare_plugin_task(task_id, params, plugin, env, max_lines)
 
             def plugin_build():
                 rt = read_state(task_id)['runtime']
@@ -273,7 +324,10 @@ def _run_unlocked(task_id, transient_credentials=None):
                     patch_runtime(task_id, artifact_version=v, plugin_artifact_number=artifact_build,
                                   plugin_artifact_hashes=hashes)
                     log(f'[ARTIFACT] 完整依赖版本: {v}, Build #{artifact_build}')
-            step(task_id, 'PLUGIN_JENKINS', plugin_build)
+            if not plugin_reused:
+                step(task_id, 'PLUGIN_JENKINS', plugin_build)
+            if params.get('plugin_flow_version') == 2:
+                reuse_flow.remember(task_id, params, 'plugin')
 
             artifact = read_state(task_id)['runtime'].get('artifact_version')
             if not artifact:
@@ -284,83 +338,78 @@ def _run_unlocked(task_id, transient_credentials=None):
                 patch_runtime(task_id, gmx_base_sha=base)
             step(task_id, 'GMX_CHECKOUT', gmx_checkout)
 
-            def gmx_edit():
-                old_versions = update_mobile_ci(gmx / 'mobile-ci.json', artifact)
-                if set(changed_files(gmx)) - {'mobile-ci.json'}:
-                    raise NeedsAttention('修改 GMX JSON 后出现非预期变更')
-                patch_runtime(task_id, gmx_previous_versions=old_versions,
-                              gmx_updated_versions={name: artifact for name in old_versions})
-            step(task_id, 'GMX_EDIT', gmx_edit)
+            app_reused = (params.get('plugin_flow_version') == 2 and
+                          reuse_flow.try_app(task_id, params, verifier))
+            if not app_reused:
+                def gmx_edit():
+                    old_versions = update_mobile_ci(gmx / 'mobile-ci.json', artifact)
+                    if set(changed_files(gmx)) - {'mobile-ci.json'}:
+                        raise NeedsAttention('修改 GMX JSON 后出现非预期变更')
+                    patch_runtime(task_id, gmx_previous_versions=old_versions,
+                                  gmx_updated_versions={name: artifact for name in old_versions})
+                step(task_id, 'GMX_EDIT', gmx_edit)
 
-            def gmx_resolve():
-                lock = gmx / 'mobile-ci.lock'
-                before = lock.read_text(encoding='utf-8')
-                rt = read_state(task_id)['runtime']
-                hashes = rt.get('plugin_artifact_hashes')
-                if not hashes:
-                    # Resume pre-migration tasks using their exact recorded build.
-                    number = rt.get('plugin_artifact_number')
-                    if not number:
-                        raise NeedsAttention('缺少当前 Plugin Artifact Build 编号，禁止使用旧 SHA256')
-                    with JenkinsBrowser(conf, DATA, home, 'plugin', visible=params.get('visible', False), verbose=params.get('verbose', False)) as browser:
-                        hashes = plugin_upload_hashes(browser, params['plugin_job'], number, artifact, confirmed_success=True)
-                    patch_runtime(task_id, plugin_artifact_hashes=hashes)
-                if rt.get('gmx_sha'):
-                    if validate_lock(lock, artifact) != hashes:
-                        raise NeedsAttention('此旧任务已提交 GMX，但 lock SHA256 与当前 Nexus 输出不同，请创建新任务')
-                digests = update_lock_from_hashes(lock, artifact, hashes)
-                ensure_lock_other_entries_unchanged(before, lock.read_text(encoding='utf-8'))
-                extras = set(changed_files(gmx)) - {'mobile-ci.json', 'mobile-ci.lock'}
-                if extras:
-                    raise NeedsAttention(f'更新 lock 后出现非预期变更（已阻止提交）：{sorted(extras)}')
-                patch_runtime(task_id, lock_hashes=digests)
-                log(f'[LOCK] 版本与 SHA256 验证成功: {artifact}')
-            step(task_id, 'GMX_LOCK', gmx_resolve)
+                def gmx_resolve():
+                    lock = gmx / 'mobile-ci.lock'
+                    before = lock.read_text(encoding='utf-8')
+                    rt = read_state(task_id)['runtime']
+                    hashes = rt.get('plugin_artifact_hashes')
+                    if not hashes:
+                        # Resume pre-migration tasks using their exact recorded build.
+                        number = rt.get('plugin_artifact_number')
+                        if not number:
+                            raise NeedsAttention('缺少当前 Plugin Artifact Build 编号，禁止使用旧 SHA256')
+                        with JenkinsBrowser(conf, DATA, home, 'plugin', visible=params.get('visible', False), verbose=params.get('verbose', False)) as browser:
+                            hashes = plugin_upload_hashes(browser, params['plugin_job'], number, artifact, confirmed_success=True)
+                        patch_runtime(task_id, plugin_artifact_hashes=hashes)
+                    if rt.get('gmx_sha'):
+                        if validate_lock(lock, artifact) != hashes:
+                            raise NeedsAttention('此旧任务已提交 GMX，但 lock SHA256 与当前 Nexus 输出不同，请创建新任务')
+                    digests = update_lock_from_hashes(lock, artifact, hashes)
+                    ensure_lock_other_entries_unchanged(before, lock.read_text(encoding='utf-8'))
+                    extras = set(changed_files(gmx)) - {'mobile-ci.json', 'mobile-ci.lock'}
+                    if extras:
+                        raise NeedsAttention(f'更新 lock 后出现非预期变更（已阻止提交）：{sorted(extras)}')
+                    patch_runtime(task_id, lock_hashes=digests)
+                    log(f'[LOCK] 版本与 SHA256 验证成功: {artifact}')
+                step(task_id, 'GMX_LOCK', gmx_resolve)
 
-            def gmx_push():
-                rt = read_state(task_id)['runtime']
-                if 'gmx_sha' in rt:
+                def gmx_push():
+                    rt = read_state(task_id)['runtime']
+                    if 'gmx_sha' in rt:
+                        verify_pushed(gmx, gmx_branch, rt['gmx_sha'], env)
+                        return
+                    sha = publish_gmx(gmx, gmx_branch, rt['gmx_base_sha'], artifact,
+                                      rt['plugin_artifact_hashes'], env, max_lines=max_lines)
+                    patch_runtime(task_id, gmx_sha=sha)
+                step(task_id, 'GMX_PUSH', gmx_push)
+
+                def gmx_build():
+                    rt = read_state(task_id)['runtime']
                     verify_pushed(gmx, gmx_branch, rt['gmx_sha'], env)
-                    return
-                message = f'build: update PayByBank plugins to {artifact}'
-                expected = {'mobile-ci.json', 'mobile-ci.lock'}
-                validator = lambda: gmx_commit(gmx, rt['gmx_base_sha'], artifact, rt['plugin_artifact_hashes'])
-                sha = recover_pushed_commit(gmx, gmx_branch, expected, message,
-                                            rt['gmx_base_sha'], env, validate_before_push=validator)
-                if not sha:
-                    sha = commit_and_push(gmx, expected, message,
-                                          gmx_branch, env, max_lines=max_lines,
-                                          validate_before_push=validator)
-                patch_runtime(task_id, gmx_sha=sha)
-            step(task_id, 'GMX_PUSH', gmx_push)
-
-            def gmx_build():
-                rt = read_state(task_id)['runtime']
-                verify_pushed(gmx, gmx_branch, rt['gmx_sha'], env)
-                with JenkinsBrowser(conf, DATA, home, 'gmx', visible=params.get('visible', False), verbose=params.get('verbose', False)) as browser:
-                    browser.gmx_settings = params.get('gmx_parameters', {})
-                    ensure_bootstrap(browser, params['gmx_job'], task_id, 'gmx')
-                    num, console = formal_build(browser, params['gmx_job'], task_id, 'gmx',
-                                                country=params['country'], project=params['project'])
-                    regex = conf.get('build', {}).get('upload_success_pattern', '')
-                    syncing = params.get('gmx_parameters', {}).get('SYNC_UPLOAD', True)
-                    uploaded = ('NOT_INDEPENDENTLY_VERIFIED' if syncing
-                                else 'DOWNSTREAM_UPLOAD_NOT_VERIFIED')
-                    if not syncing:
-                        log('[GMX] SYNC_UPLOAD=false：此 Jenkins SUCCESS 不等于下游 Upload 完成，需独立核对')
-                    if regex:
-                        # Check actual final build console, not previously cached success.
-                        if not console:
-                            browser.visit(params['gmx_job'] + str(num) + '/consoleText')
-                            console = browser.page.locator('body').evaluate('(e) => e.innerText.slice(-30000)')
-                        if not re.search(regex, console):
-                            raise NeedsAttention('GMX Build 已成功，但未检测到配置中的 Upload 成功日志')
-                        uploaded = 'VERIFIED_BY_CONFIGURED_LOG_PATTERN'
-                    patch_runtime(task_id, gmx_build_number=num, upload_validation=uploaded)
-                    log(f'[GMX] Jenkins SUCCESS #{num} | 上传校验: {uploaded}')
-            step(task_id, 'GMX_JENKINS', gmx_build)
-
-        if params.get('testfairy', {}).get('enabled'):
+                    with JenkinsBrowser(conf, DATA, home, 'gmx', visible=params.get('visible', False), verbose=params.get('verbose', False)) as browser:
+                        browser.gmx_settings = params.get('gmx_parameters', {})
+                        ensure_bootstrap(browser, params['gmx_job'], task_id, 'gmx')
+                        num, console = formal_build(browser, params['gmx_job'], task_id, 'gmx',
+                                                    country=params['country'], project=params['project'])
+                        regex = conf.get('build', {}).get('upload_success_pattern', '')
+                        syncing = params.get('gmx_parameters', {}).get('SYNC_UPLOAD', True)
+                        uploaded = ('NOT_INDEPENDENTLY_VERIFIED' if syncing
+                                    else 'DOWNSTREAM_UPLOAD_NOT_VERIFIED')
+                        if not syncing:
+                            log('[GMX] SYNC_UPLOAD=false：此 Jenkins SUCCESS 不等于下游 Upload 完成，需独立核对')
+                        if regex:
+                            # Check actual final build console, not previously cached success.
+                            if not console:
+                                browser.visit(params['gmx_job'] + str(num) + '/consoleText')
+                                console = browser.page.locator('body').evaluate('(e) => e.innerText.slice(-30000)')
+                            if not re.search(regex, console):
+                                raise NeedsAttention('GMX Build 已成功，但未检测到配置中的 Upload 成功日志')
+                            uploaded = 'VERIFIED_BY_CONFIGURED_LOG_PATTERN'
+                        patch_runtime(task_id, gmx_build_number=num, upload_validation=uploaded)
+                        log(f'[GMX] Jenkins SUCCESS #{num} | 上传校验: {uploaded}')
+                step(task_id, 'GMX_JENKINS', gmx_build)
+        if params.get('testfairy', {}).get('enabled') and not app_reused:
             from .testfairy import TestFairyBrowser, expected_build
             def lookup_testfairy():
                 rt = read_state(task_id)['runtime']
@@ -372,18 +421,21 @@ def _run_unlocked(task_id, transient_credentials=None):
                 patch_runtime(task_id, testfairy_app=app)
             step(task_id, 'TESTFAIRY_LOOKUP', lookup_testfairy)
 
+        if params.get('plugin_flow_version') == 2:
+            reuse_flow.remember(task_id, params, 'app')
+        actual_params = reuse_flow.effective_params(params, read_state(task_id)['runtime'])
         # Persist result before announcing SUCCESS; interrupted result writing
         # can be retried instead of leaving a SUCCESS task with no report.
-        result = {'task_id': task_id, 'status': 'SUCCESS', 'plugin_branch': plugin_branch,
-                  'plugin_job': params['plugin_job'], 'gmx_branch': gmx_branch,
-                  'gmx_job': params['gmx_job'], 'country': params['country'],
+        result = {'task_id': task_id, 'status': 'SUCCESS', 'plugin_branch': actual_params['plugin_branch'],
+                  'plugin_job': actual_params['plugin_job'], 'gmx_branch': actual_params['gmx_branch'],
+                  'gmx_job': actual_params['gmx_job'], 'country': params['country'],
                   'project': params['project'], 'folder': params.get('gmx_parameters', {}).get('CUSTOM_FOLDER') or f"0_A_{params['country']}_{params['project']}",
                   'runtime': read_state(task_id)['runtime']}
         tmp = home / 'result.json.tmp'
         tmp.write_text(json.dumps(result, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
         os.replace(tmp, home / 'result.json')
-        update_task(task_id, status='SUCCESS', stage='FINISHED', note='Jenkins SUCCESS')
-        log('=== SUCCESS：Plugin、GMX Jenkins 构建成功。上传是否独立确认请检查 result.json ===')
+        update_task(task_id, status='SUCCESS', stage='FINISHED', note='已验证复用 APP' if app_reused else 'Jenkins SUCCESS')
+        log('=== SUCCESS：已完成；实际构建或复用来源及上传验证见 result.json ===')
     except NeedsAttention as e:
         update_task(task_id, status='NEEDS_ATTENTION', note=str(e)[:500])
         log(f'[NEEDS_ATTENTION] {e}')

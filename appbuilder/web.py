@@ -21,7 +21,7 @@ from urllib.parse import parse_qs, urlsplit
 from types import SimpleNamespace
 
 from .config import DATA, ROOT, load_config, token_or_error, parallel_limit
-from . import __version__
+from . import __version__, lifecycle
 from .store import task, task_list, create_task, active_count, update_task, update_task_params, task_folder, reserve_resume
 from .telemetry import safe_text
 from .versions import validate_args
@@ -47,6 +47,8 @@ def _jenkins_links(row, params):
         runtime = read_state(row['id']).get('runtime', {})
     except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError):
         runtime = {}
+    from .reuse_flow import effective_params
+    params = effective_params(params, runtime)
     for key, label, name in [('plugin_job', 'Plugin Job', 'plugin'),
                              ('gmx_job', 'GMX Job', 'gmx')]:
         raw = str(params.get(key, ''))
@@ -69,6 +71,12 @@ def public_task(row):
     """Never send raw params/credentials to UI."""
     params = json.loads(row['params'])
     from .cli import alive, stage_indicator
+    from .reuse_flow import effective_params
+    from .store import read_state
+    try:
+        params = effective_params(params, read_state(row['id']).get('runtime', {}))
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
     status = row['status']
     if status in ('RUNNING', 'QUEUED') and row.get('pid') and not alive(row['pid']):
         status = 'INTERRUPTED'
@@ -383,6 +391,7 @@ _DIAG_LOCK = threading.Lock()
 _DIAG_JOBS: dict[str, dict] = {}
 
 
+@lifecycle.admitted
 def start_diagnostic(url: str, *, number=None, expected='SUCCESS', site: str, expected_artifacts=None):
     from .diagnose import parse_target, run_diagnosis, validate_artifact_expectations
     expected_artifacts = validate_artifact_expectations(expected_artifacts)
@@ -445,6 +454,7 @@ _LIVE_LOCK = threading.Lock()
 _LIVE_JOBS: dict[str, dict] = {}
 
 
+@lifecycle.admitted
 def start_live_test(body):
     from .live_tests import validate_options, gmx_build_test, validate_job_url
     kind = body.get('kind')
@@ -563,6 +573,12 @@ def make_handler(csrf_token):
                         'doctor': get_doctor()})
                 if p == '/api/tasks':
                     return self._send({'tasks': [public_task(r) for r in task_list()]})
+                m = re.fullmatch(r'/api/tasks/([^/]+)/runtime-data', p)
+                if m:
+                    if u.query:
+                        raise ValueError('运行数据不接受路径或查询参数')
+                    from .runtime_data import snapshot
+                    return self._send(snapshot(m[1], DATA, task))
                 m = re.fullmatch(r'/api/tasks/([^/]+)/log', p)
                 if m:
                     offset = parse_qs(u.query).get('offset', [None])[0]
@@ -614,6 +630,15 @@ def make_handler(csrf_token):
             return self._send(file.read_bytes(), typ=mime)
 
         def do_POST(self):
+            from . import lifecycle
+            try:
+                with lifecycle.admission(DATA):
+                    pass
+                return self._post_admitted()
+            except RuntimeError as exc:
+                return self._failed(409, str(exc))
+
+        def _post_admitted(self):
             if not self._allowed_host() or not self._allowed_origin():
                 return self._failed(403, '跨站请求被拒绝')
             if not hmac.compare_digest(self.headers.get('X-CSRF-Token', ''), csrf_token):
@@ -686,7 +711,8 @@ def serve(port=8765, *, open_browser=True, server_factory=ThreadingHTTPServer):
     if not isinstance(port, int) or not (1024 <= port <= 65535):
         raise ValueError('Web 端口必须在 1024–65535 之间')
     token = secrets.token_urlsafe(32)
-    with server_factory((HOST, port), make_handler(token)) as httpd:
+    from . import lifecycle
+    with lifecycle.service('web'), server_factory((HOST, port), make_handler(token)) as httpd:
         from .scheduler import SchedulerSupervisor
         supervisor = SchedulerSupervisor()
         supervisor.start()
@@ -696,10 +722,19 @@ def serve(port=8765, *, open_browser=True, server_factory=ThreadingHTTPServer):
         if open_browser:
             # Avoid opening a browser before server exists.
             threading.Timer(0.4, lambda: webbrowser.open(url)).start()
+        watcher_done = threading.Event()
+        def watch_stop():
+            while not watcher_done.wait(0.3):
+                if lifecycle.should_exit():
+                    httpd.shutdown()
+                    return
+        watcher = threading.Thread(target=watch_stop, daemon=True, name='web-stop-watch')
+        watcher.start()
         try:
             httpd.serve_forever(poll_interval=0.3)
         except KeyboardInterrupt:
             print('\n[WEB] 页面服务已关闭；Worker 继续后台执行。', flush=True)
 
         finally:
+            watcher_done.set()
             supervisor.stop()

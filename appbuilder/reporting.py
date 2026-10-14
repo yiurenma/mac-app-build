@@ -3,7 +3,7 @@ import re
 from .telemetry import safe_text
 from .edits import XCCONFIGS, ARTIFACTS
 
-STEPS=('PLUGIN_CHECKOUT','PLUGIN_EDIT','PLUGIN_PUSH','PLUGIN_JENKINS',
+STEPS=('PLUGIN_PREPARE','PLUGIN_CHECKOUT','PLUGIN_EDIT','PLUGIN_PUSH','PLUGIN_JENKINS',
        'GMX_CHECKOUT','GMX_EDIT','GMX_LOCK','GMX_PUSH','GMX_JENKINS','TESTFAIRY_LOOKUP')
 
 
@@ -18,8 +18,11 @@ def _pairs(values):return {key:_value(value) for key,value in values.items()}
 
 
 def step_summaries(params,state,row):
-    rt=state.get('runtime',{});gmx=params.get('gmx_parameters',{})
+    rt=state.get('runtime',{})
+    from .reuse_flow import effective_params
+    params=effective_params(params,rt);gmx=params.get('gmx_parameters',{})
     inputs={
+        'PLUGIN_PREPARE':{'仓库':params.get('plugin_url'),'来源分支':params.get('plugin_source'),'目标分支':params.get('plugin_branch'),'目标版本':params.get('plugin_version')},
         'PLUGIN_CHECKOUT':{'仓库':params.get('plugin_url'),'来源分支':params.get('plugin_source'),'目标分支':params.get('plugin_branch')},
         'PLUGIN_EDIT':{'目标版本':params.get('plugin_version')},
         'PLUGIN_PUSH':{'目标分支':params.get('plugin_branch'),'基线 SHA':rt.get('plugin_base_sha')},
@@ -35,6 +38,7 @@ def step_summaries(params,state,row):
                             '目录覆盖':params.get('testfairy',{}).get('folder_path'),'实际 CUSTOM_FOLDER':gmx.get('CUSTOM_FOLDER')},
     }
     outputs={
+        'PLUGIN_PREPARE':{'来源 SHA':rt.get('plugin_source_sha'),'构建 SHA':rt.get('plugin_sha'),'原目标 SHA':rt.get('plugin_target_before')},
         'PLUGIN_CHECKOUT':{'基线 SHA':rt.get('plugin_base_sha')},
         'PLUGIN_EDIT':{'逐文件版本修改记录':'未记录（不从目标版本反推文件内容）'},
         'PLUGIN_PUSH':{'提交 SHA':rt.get('plugin_sha')},
@@ -75,7 +79,15 @@ def step_summaries(params,state,row):
                 outputs['TESTFAIRY_LOOKUP']={'App 版本':app.get('app_version'),'App 构建号':app.get('app_build'),'分享链接':app.get('share_url')}
         except (ValueError,RuntimeError,KeyError,TypeError):pass
     result=[]
+    for kind,label in (('plugin_reuse','PLUGIN_REUSE'),('app_reuse','GMX_REUSE')):
+        origin=rt.get(kind)
+        if isinstance(origin,dict):
+            result.append({'step':label,'status':'已复用','inputs':{},'outputs':_pairs({'来源任务':origin.get('source_task_id'),'原 Job':origin.get('job_url'),'原 Build':origin.get('build_url'),'原 SHA':origin.get('build_sha')}),'error':'未记录','error_label':'错误摘要'})
     for step in STEPS:
+        if rt.get('plugin_reuse') and step.startswith('PLUGIN_'):continue
+        if rt.get('app_reuse') and step in ('GMX_EDIT','GMX_LOCK','GMX_PUSH','GMX_JENKINS','TESTFAIRY_LOOKUP'):continue
+        if params.get('plugin_flow_version') == 2 and step in ('PLUGIN_CHECKOUT','PLUGIN_EDIT','PLUGIN_PUSH'):continue
+        if params.get('plugin_flow_version') != 2 and step == 'PLUGIN_PREPARE':continue
         done=step in state.get('completed',[])
         current=row['stage']==step and row['status']!='SUCCESS'
         status='已完成' if done else row['status'] if current else '未执行'

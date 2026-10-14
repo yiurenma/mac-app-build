@@ -222,6 +222,8 @@ def outcome_preview(row, params, state, log_text=''):
     from .telemetry import safe_text
     from .testfairy import mail_preview,expected_build
     runtime=state.get('runtime',{})
+    from .reuse_flow import effective_params
+    params=effective_params(params,runtime)
     status=row['status'];stage=row['stage']
     app=runtime.get('testfairy_app')
     detail=''

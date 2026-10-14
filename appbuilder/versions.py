@@ -4,6 +4,7 @@ import re
 from urllib.parse import quote
 
 MAJOR_RE = re.compile(r"^[0-9]+\.[0-9]+$")
+VERSION_INPUT_RE = re.compile(r"^[0-9]+\.[0-9]+(?:\.[0-9]+)?$")
 BRANCH_RE = re.compile(r"^[A-Za-z0-9_./-]+$")
 ARTIFACTS = ("PayByBankDomainModelPluginKit", "PayByBankJourneyPluginKit")
 
@@ -22,8 +23,8 @@ def plugin_parent_for_branch(parent, branch):
 
 
 def validate_args(major, plugin_source, gmx_source, country, project):
-    if not MAJOR_RE.fullmatch(major):
-        raise ValueError("Plugin Version 必须为 1.3 这样的主次版本号")
+    if not VERSION_INPUT_RE.fullmatch(major):
+        raise ValueError("Plugin Version 必须为两段数字（如 1.3）或完整三段数字（如 1.3.1），不带 v")
     for b in [plugin_source, gmx_source]:
         if not b or not BRANCH_RE.fullmatch(b) or b.startswith(('-', '.')) or '..' in b or '//' in b or b.endswith(('/', '.')):
             raise ValueError(f"无效源分支: {b!r}")
@@ -56,12 +57,12 @@ def validate_gmx_target(branch):
 
 
 def branch_names(major, stamp, gmx_source='', issue_key=''):
-    if not MAJOR_RE.fullmatch(major) or not re.fullmatch(r"\d{12}", stamp):
+    if not VERSION_INPUT_RE.fullmatch(major) or not re.fullmatch(r"\d{12}", stamp):
         raise ValueError("无效大版本或时间戳")
     key = gmx_issue_key(gmx_source, issue_key)
     target = f"upload/{key}-auto{stamp}" if key else f"upload/AUTO-{stamp}"
-    v = f"{major}.{stamp}"
-    return {"plugin_version": v, "plugin_branch": f"release/{v}",
+    v = f"{major}.{stamp}" if MAJOR_RE.fullmatch(major) else major
+    return {"plugin_version": v, "plugin_branch": f"release/v{v}",
             "gmx_branch": validate_gmx_target(target)}
 
 

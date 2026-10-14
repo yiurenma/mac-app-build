@@ -145,6 +145,8 @@ class SchedulerSupervisor:
                 break
 
     def ensure_running(self):
+        from . import lifecycle
+        if lifecycle.is_draining(): return
         self.children[:] = [p for p in self.children if p.poll() is None]
         DATA.mkdir(parents=True, exist_ok=True)
         with (DATA / 'scheduler-start.lock').open('a+b') as guard:
@@ -184,7 +186,13 @@ class AlreadyRunning(RuntimeError):
     pass
 
 
-def run_forever(interval=INTERVAL_SECONDS, *, max_loops=None, sleep=time.sleep, start=None):
+def run_forever(*args, **kwargs):
+    from .lifecycle import service
+    with service('scheduler'):
+        return _run_forever(*args, **kwargs)
+
+
+def _run_forever(interval=INTERVAL_SECONDS, *, max_loops=None, sleep=time.sleep, start=None):
     """Poll for due schedules until stopped. Exactly one instance may run."""
     DATA.mkdir(parents=True, exist_ok=True)
     with lock_path().open('a+b') as handle:
@@ -209,10 +217,15 @@ def run_forever(interval=INTERVAL_SECONDS, *, max_loops=None, sleep=time.sleep, 
             print(f'[SCHEDULER] 启动 v{__version__} pid={os.getpid()}；每 {interval}s 检查一次到期任务', flush=True)
             schedules.recover_startup()
             loops = 0
-            while not stopping:
+            from . import lifecycle
+            while not stopping and not lifecycle.should_exit():
+                if lifecycle.is_draining():
+                    sleep(interval)
+                    continue
                 try:
                     write_heartbeat(metadata)
-                    result = schedules.tick(start=start)
+                    with lifecycle.admission():
+                        result = schedules.tick(start=start)
                     if result['queued'] or result['started']:
                         print(time.strftime('%Y-%m-%d %H:%M:%S'),
                               f"[SCHEDULER] 新入队 {result['queued']}，已启动 {result['started']}", flush=True)

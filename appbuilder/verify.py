@@ -2,7 +2,7 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from .gitops import git_blob
-from .edits import XCCONFIGS, edit_plugin_versions, update_mobile_ci, validate_lock, ensure_lock_other_entries_unchanged
+from .edits import XCCONFIGS, edit_plugin_versions, update_mobile_ci, validate_lock, ensure_lock_other_entries_unchanged, update_lock_from_hashes
 
 
 def plugin_commit(root: Path, base_sha: str, version: str):
@@ -38,3 +38,8 @@ def gmx_commit(root: Path, base_sha: str, artifact_version: str, expected_hashes
         actual_hashes = validate_lock(checklock, artifact_version)
         if expected_hashes is not None and actual_hashes != expected_hashes:
             raise ValueError('mobile-ci.lock Commit SHA256 与当前 Jenkins Nexus 输出不一致，禁止 Push')
+        if expected_hashes is not None:
+            checklock.write_bytes(before_lock)
+            update_lock_from_hashes(checklock, artifact_version, expected_hashes)
+            if after_lock != checklock.read_bytes():
+                raise ValueError('mobile-ci.lock Commit 含有版本和哈希以外的字节变化，禁止 Push')

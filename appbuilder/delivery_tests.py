@@ -10,6 +10,7 @@ from urllib.parse import urlsplit,urlunsplit
 from .config import DATA,load_config
 from .jenkins import NeedsAttention
 from .telemetry import safe_text
+from . import lifecycle
 
 _LOCK=threading.Lock()
 _ACTIVE=set()
@@ -63,6 +64,7 @@ def poll(test_id):
     return {'id':test_id,'kind':row['kind'],'status':status,'result':result}
 
 
+@lifecycle.admitted
 def start(body):
     from .testfairy import approved_target,DEFAULT_LOGIN,expected_build,share_url
     from .outlook import recipients,valid_address
