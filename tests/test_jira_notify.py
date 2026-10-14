@@ -138,6 +138,14 @@ class GitAndFlowTests(unittest.TestCase):
         self.assertEqual(jira.calls[2][2], 'In Test')
         self.assertEqual(ledger['develop']['last_sha'], self.shas[2])
 
+    def test_missing_app_link_skips_instead_of_posting_the_jenkins_job_url(self):
+        jira = FakeJira()
+        report, ledger = self.run_notify({'dry_run': False}, ledger={'develop': {'last_sha': self.shas[0]}},
+                                         client=jira, share=None)
+        self.assertEqual(report['status'], 'SKIPPED')
+        self.assertEqual(jira.calls, [])
+        self.assertEqual(ledger['develop']['last_sha'], self.shas[0])
+
     def test_dry_run_changes_nothing_and_keeps_baseline(self):
         jira = FakeJira()
         report, ledger = self.run_notify({'dry_run': True}, ledger={'develop': {'last_sha': self.shas[0]}}, client=jira)

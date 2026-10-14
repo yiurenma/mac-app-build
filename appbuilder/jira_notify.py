@@ -310,7 +310,9 @@ def notify_jira(task_id, client=None, llm=None, config=None, preview=None):
     state = read_state(task_id)
     runtime = state.get('runtime', {})
     source_sha = runtime.get('plugin_source_sha')
-    link = (runtime.get('testfairy_app') or {}).get('share_url') or params.get('gmx_job')
+    link = (runtime.get('testfairy_app') or {}).get('share_url')
+    if not (isinstance(link, str) and link.startswith('https://')):
+        link = None  # never fall back to the Jenkins job URL: testers need the real App link
     build = runtime.get('gmx_build_number', runtime.get('gmx_formal_number', task_id))
     if not source_sha or not link:
         report = {'status': 'SKIPPED', 'reason': '缺少来源提交或 App 链接'}
