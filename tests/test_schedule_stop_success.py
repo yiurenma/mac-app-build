@@ -279,5 +279,6 @@ class StopSuccessTests(unittest.TestCase):
         with patch('appbuilder.testfairy.saved_auth_available', return_value=False):
             public = schedule_api.public_schedule(raw)
             self.assertNotIn('testfairy_password', public['template'])
-            with self.assertRaisesRegex(ValueError, '认证'):
-                schedules.validate_template({k:v for k,v in template.items() if k not in schedules.SECRET_KEYS})
+            validated=schedules.validate_template({k:v for k,v in template.items() if k not in schedules.SECRET_KEYS})
+            self.assertTrue(validated['testfairy_enabled'])
+            self.assertNotIn('testfairy_password',validated)

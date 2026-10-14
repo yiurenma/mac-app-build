@@ -46,6 +46,19 @@ class MetadataTests(unittest.TestCase):
         text=json.dumps(preview)
         self.assertIn('3.76.0',text);self.assertIn('1.3.2026.7',text);self.assertNotIn('SECRET',text)
         self.assertEqual(preview['status'],'PREVIEW_ONLY');self.assertEqual(preview['to'],[])
+    def test_jenkins_link_preview_handles_unrecorded_version_without_losing_link(self):
+        from appbuilder.outlook import outcome_preview
+        app={**expected_build(PARAMS,RUNTIME),'share_url':BASE+'/join/current?id=573108',
+             'app_version':None,'app_build':None,'matched_at':'today','lookup_method':'jenkins-console-html'}
+        app.pop('path')
+        runtime={**RUNTIME,'testfairy_app':app}
+        row={'id':'task','status':'SUCCESS','stage':'FINISHED','created':'today','note':''}
+        preview=outcome_preview(row,PARAMS,{'runtime':runtime,'completed':[]})
+        self.assertIn(BASE+'/join/current?id=573108',preview['body'])
+        self.assertIn('未记录（Jenkins 日志仅提供 APP 链接）',preview['body'])
+        self.assertNotIn('链接: 未提供',preview['body'])
+        self.assertNotIn('None',preview['body'])
+
     def test_feature_default_off_and_credentials_explicit_opt_in(self):
         self.assertEqual(settings({})['enabled'],False)
         self.assertFalse(settings({})['save_session'])
@@ -285,29 +298,28 @@ class PostBuildResumeTests(unittest.TestCase):
                 stack.enter_context(patch.object(runner,name,side_effect=value))
             jenkins=stack.enter_context(patch.object(runner,'JenkinsBrowser'))
             checkout=stack.enter_context(patch.object(runner,'checkout'))
-            stack.enter_context(patch('appbuilder.testfairy.TestFairyBrowser',return_value=browser))
+            lookup=stack.enter_context(patch('appbuilder.app_links.lookup_task_app',side_effect=[NeedsAttention('upload not ready'),app]))
             with self.assertRaisesRegex(NeedsAttention,'upload not ready'):runner._run_unlocked('task')
             self.assertEqual(row['status'],'NEEDS_ATTENTION')
             runner._run_unlocked('task')
             self.assertEqual(row['status'],'SUCCESS')
             self.assertEqual(state['runtime']['gmx_build_number'],7)
             jenkins.assert_not_called();checkout.assert_not_called()
-            self.assertEqual(browser.find.call_count,2)
+            self.assertEqual(lookup.call_count,2)
             self.assertIn('TESTFAIRY_LOOKUP',state['completed'])
 
 class ScheduleAuthenticationTests(unittest.TestCase):
-    def test_schedule_rejects_transient_only_authentication(self):
+    def test_schedule_jenkins_lookup_does_not_require_testfairy_authentication(self):
         from appbuilder.schedules import validate_template
-        body={'testfairy_enabled':True}
-        with patch('appbuilder.testfairy.saved_auth_available',return_value=True):
-            with self.assertRaisesRegex(ValueError,'临时密码'):validate_template(body)
-    def test_schedule_requires_existing_persistent_auth_even_if_checkbox_selected(self):
+        with patch('appbuilder.testfairy.saved_auth_available',return_value=False) as auth:
+            result=validate_template({'testfairy_enabled':True})
+        self.assertTrue(result['testfairy_enabled'])
+        self.assertFalse(result['testfairy_save_credentials'])
+        auth.assert_not_called()
+    def test_schedule_preserves_legacy_configuration_without_using_it_for_lookup(self):
         from appbuilder.schedules import validate_template
-        with patch('appbuilder.testfairy.saved_auth_available',return_value=False):
-            with self.assertRaisesRegex(ValueError,'临时密码'):
-                validate_template({'testfairy_enabled':True,'testfairy_save_credentials':True})
-    def test_schedule_accepts_nonsecret_configuration_with_available_auth(self):
-        from appbuilder.schedules import validate_template
-        with patch('appbuilder.testfairy.saved_auth_available',return_value=True):
+        with patch('appbuilder.testfairy.saved_auth_available',return_value=False) as auth:
             result=validate_template({'testfairy_enabled':True,'testfairy_save_credentials':True})
-        self.assertTrue(result['testfairy_enabled']);self.assertNotIn('testfairy_password',result)
+        self.assertTrue(result['testfairy_enabled']);self.assertTrue(result['testfairy_save_credentials'])
+        self.assertNotIn('testfairy_password',result)
+        auth.assert_not_called()

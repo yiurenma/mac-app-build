@@ -14,7 +14,17 @@ def _value(value):
     return '未记录'
 
 
-def _pairs(values):return {key:_value(value) for key,value in values.items()}
+def _pairs(values):
+    result={key:_value(value) for key,value in values.items()}
+    if values.get('分享链接'):
+        from .jenkins_links import validate_join_url
+        try:
+            link=validate_join_url(values['分享链接'])
+            masked=link.replace('https://','APP_LINK_SCHEME:',1)
+            if safe_text(masked)==masked:result['分享链接']=link
+        except (RuntimeError,ValueError,TypeError):
+            result['分享链接']='未记录'
+    return result
 
 
 def step_summaries(params,state,row):

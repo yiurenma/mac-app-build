@@ -410,14 +410,10 @@ def _run_unlocked(task_id, transient_credentials=None, *, reuse_verifier=None):
                         log(f'[GMX] Jenkins SUCCESS #{num} | 上传校验: {uploaded}')
                 step(task_id, 'GMX_JENKINS', gmx_build)
         if params.get('testfairy', {}).get('enabled') and not app_reused:
-            from .testfairy import TestFairyBrowser, expected_build
+            from .app_links import lookup_task_app
             def lookup_testfairy():
                 rt = read_state(task_id)['runtime']
-                expected = expected_build(params, rt)
-                supplied = (transient_credentials or {}).get('testfairy')
-                with TestFairyBrowser(conf, DATA, {**params['testfairy'],'correlation_id':task_id},
-                                     login_credentials=supplied, visible=params.get('visible', True)) as browser:
-                    app = browser.find(expected)
+                app = lookup_task_app(conf, DATA, home, params, rt, emit=log)
                 patch_runtime(task_id, testfairy_app=app)
             step(task_id, 'TESTFAIRY_LOOKUP', lookup_testfairy)
 

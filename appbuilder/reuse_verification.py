@@ -1,7 +1,7 @@
 """Validate script-owned history only; never query old Jenkins logs or services."""
 import re
 from urllib.parse import urlsplit
-from .reuse import _provenance, valid_artifacts
+from .reuse import _provenance, valid_artifacts, jenkins_app_evidence
 from .versions import ARTIFACTS
 
 
@@ -38,6 +38,10 @@ class LiveVerifier:
     def app(self, record):
         app = record.get('app', {})
         complete = self._common(record) and isinstance(app, dict)
+        if isinstance(app, dict) and app.get('lookup_method') == 'jenkins-console-html':
+            complete = complete and valid_artifacts({'version':record.get('plugin_version'),
+                                                      'hashes':record.get('plugin_hashes')})
+            return {'history_complete': bool(complete and jenkins_app_evidence(record))}
         expected = dict(build_url=record.get('build_url'), number=record.get('build_number'),
                         sha=record.get('build_sha'), folder=record.get('folder'),
                         app_version=record.get('app_version'), app_build=record.get('app_build'),
