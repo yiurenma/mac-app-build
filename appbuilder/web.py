@@ -128,7 +128,7 @@ def form_defaults(config):
     b = config.get('build', {})
     return {
         'outlook_auto_send': False, 'outlook_recipients': '', 'outlook_account': '',
-        'testfairy_enabled': False, 'testfairy_save_credentials': False,
+        'testfairy_enabled': True, 'testfairy_save_credentials': False,
         'testfairy_login_url': 'https://hsbc-mobilex.testfairy.com/login', 'testfairy_folder_path': '',
         'plugin_branch': 'develop', 'gmx_branch': 'develop',
         'plugin_version': '1.3', 'country': 'UK', 'project_name': 'PayByBank',
