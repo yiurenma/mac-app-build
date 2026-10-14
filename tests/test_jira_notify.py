@@ -35,8 +35,8 @@ class FakeJira:
                            'issuetype': {'name': self.issue_type}}}
 
     def plan_transition(self, key, name, issue_type='', rules=()):
-        payload, missing, bad = J.plan_fields(self.required, issue_type, rules)
-        return {'id': '9', 'fields': payload, 'missing': missing, 'bad': bad, 'name': name}
+        payload, missing, bad, auto = J.plan_fields(self.required, issue_type, rules)
+        return {'id': '9', 'fields': payload, 'missing': missing, 'bad': bad, 'auto': auto, 'name': name}
 
     def do_transition(self, key, plan):
         self.calls.append(('transition', key, plan['name'], plan['fields']))
@@ -156,20 +156,28 @@ class GitAndFlowTests(unittest.TestCase):
         self.assertEqual(jira.calls, [])
         self.assertEqual(ledger['develop']['last_sha'], self.shas[0])
 
-    def test_bug_without_root_cause_value_is_commented_and_assigned_but_not_moved(self):
+    def test_bug_without_rule_picks_first_allowed_root_cause(self):
         jira = FakeJira(issue_type='Bug', required=ROOT_CAUSE)
+        report, ledger = self.run_notify({'dry_run': False}, ledger={'develop': {'last_sha': self.shas[0]}}, client=jira)
+        self.assertEqual(jira.calls[2], ('transition', 'PBB-2', 'In Test', {'customfield_100': {'value': 'Code'}}))
+        self.assertEqual(report['needs_manual'], [])
+        self.assertIn('Root Cause=Code', report['tickets'][0]['steps'][-1])
+        self.assertEqual(ledger['develop']['last_sha'], self.shas[2])
+
+    def test_required_text_field_without_rule_is_commented_and_assigned_but_not_moved(self):
+        text = {'customfield_7': {'required': True, 'name': 'Fix Note', 'schema': {'type': 'string'}}}
+        jira = FakeJira(issue_type='Bug', required=text)
         report, ledger = self.run_notify({'dry_run': False}, ledger={'develop': {'last_sha': self.shas[0]}}, client=jira)
         self.assertEqual([c[0] for c in jira.calls], ['comment', 'assign'])
         self.assertIn('请手动处理', jira.calls[0][2])
-        self.assertIn('Root Cause', report['needs_manual'][0]['reason'])
+        self.assertIn('Fix Note', report['needs_manual'][0]['reason'])
         self.assertEqual(report['status'], 'DONE')
-        self.assertEqual(ledger['develop']['last_sha'], self.shas[2])
 
     def test_bug_with_configured_root_cause_is_moved_with_that_value(self):
         jira = FakeJira(issue_type='Bug', required=ROOT_CAUSE)
-        report, _ = self.run_notify({'dry_run': False, 'transition_fields': 'Bug | Root Cause | code'},
+        report, _ = self.run_notify({'dry_run': False, 'transition_fields': 'Bug | Root Cause | requirement'},
                                     ledger={'develop': {'last_sha': self.shas[0]}}, client=jira)
-        self.assertEqual(jira.calls[2], ('transition', 'PBB-2', 'In Test', {'customfield_100': {'value': 'Code'}}))
+        self.assertEqual(jira.calls[2], ('transition', 'PBB-2', 'In Test', {'customfield_100': {'value': 'Requirement'}}))
         self.assertEqual(report['needs_manual'], [])
 
     def test_dry_run_changes_nothing_and_keeps_baseline(self):
@@ -330,8 +338,9 @@ class FieldRuleTests(unittest.TestCase):
         rules = J.parse_field_rules('# comment\nBug | Root Cause | Code\n* | Root Cause | Requirement\n')
         self.assertEqual(J.plan_fields(ROOT_CAUSE, 'Bug', rules)[0], {'customfield_100': {'value': 'Code'}})
         self.assertEqual(J.plan_fields(ROOT_CAUSE, 'Story', rules)[0], {'customfield_100': {'value': 'Requirement'}})
-        self.assertEqual(J.plan_fields(ROOT_CAUSE, 'Bug', [])[1], ['Root Cause'])
-        _, _, bad = J.plan_fields(ROOT_CAUSE, 'Bug', J.parse_field_rules('Bug | Root Cause | Weather'))
+        self.assertEqual(J.plan_fields(ROOT_CAUSE, 'Bug', [])[:2], ({'customfield_100': {'value': 'Code'}}, []))
+        self.assertEqual(J.plan_fields(ROOT_CAUSE, 'Bug', [])[3], ['Root Cause=Code'])
+        _, _, bad, _ = J.plan_fields(ROOT_CAUSE, 'Bug', J.parse_field_rules('Bug | Root Cause | Weather'))
         self.assertIn('Code', bad[0])
         text = {'customfield_7': {'required': True, 'name': 'Fix Note', 'schema': {'type': 'string'}}}
         self.assertEqual(J.plan_fields(text, 'Bug', J.parse_field_rules('Fix Note | done'))[0], {'customfield_7': 'done'})

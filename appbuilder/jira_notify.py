@@ -217,8 +217,9 @@ def _field_value(meta, value):
 
 
 def plan_fields(required, issue_type, rules):
-    """required: Jira's transition 'fields' map. Returns (payload, missing_names, bad_messages)."""
-    payload, missing, bad = {}, [], []
+    """required: Jira's transition 'fields' map. Returns (payload, missing_names, bad_messages, auto_picks).
+    A required choice field without a rule gets Jira's first allowed value (reported in auto_picks)."""
+    payload, missing, bad, auto = {}, [], [], []
     kind = (issue_type or '').strip().lower()
     for fid, meta in (required or {}).items():
         if not meta.get('required') or meta.get('hasDefaultValue'):
@@ -227,13 +228,20 @@ def plan_fields(required, issue_type, rules):
         hits = [r for r in rules if r[1] in (name.lower(), fid.lower()) and r[0] in (kind, '*')]
         hits.sort(key=lambda r: r[0] == '*')            # a rule for this issue type wins over '*'
         if not hits:
-            missing.append(name)
+            allowed = meta.get('allowedValues') or []
+            if allowed:                                  # no rule: take the first option Jira offers
+                first = allowed[0]
+                key = next(k for k in ('value', 'name', 'id') if first.get(k) is not None)
+                payload[fid] = [{key: first[key]}] if (meta.get('schema') or {}).get('type') == 'array' else {key: first[key]}
+                auto.append(f'{name}={first[key]}')
+            else:
+                missing.append(name)
             continue
         try:
             payload[fid] = _field_value(meta, hits[0][2])
         except ValueError as exc:
             bad.append(f'{name}: {exc}')
-    return payload, missing, bad
+    return payload, missing, bad, auto
 
 
 class JiraNotFound(RuntimeError):
@@ -310,8 +318,8 @@ class JiraClient:
         wanted = [t for t in options if t.get('name', '').strip().lower() == name.strip().lower()]
         if not wanted:
             raise RuntimeError('当前状态下没有名为 ' + name + ' 的流转: ' + ', '.join(t.get('name', '?') for t in options))
-        payload, missing, bad = plan_fields(wanted[0].get('fields'), issue_type, rules)
-        return {'id': wanted[0]['id'], 'fields': payload, 'missing': missing, 'bad': bad}
+        payload, missing, bad, auto = plan_fields(wanted[0].get('fields'), issue_type, rules)
+        return {'id': wanted[0]['id'], 'fields': payload, 'missing': missing, 'bad': bad, 'auto': auto}
 
     def do_transition(self, key, plan):
         body = {'transition': {'id': plan['id']}}
@@ -356,8 +364,10 @@ def process_ticket(client, key, info, link, build_label, conf, llm, dry_run):
             step += f'；需手动：{problem}'
         elif problem:
             step += f'；无法预检：{problem}'
+        elif plan and plan.get('auto'):
+            step += '；自动选第一个可选值：' + '、'.join(plan['auto'])
         elif plan and plan['fields']:
-            step += '；将填写：' + '、'.join(plan['fields'])
+            step += '；将按配置填写必填字段'
         result['steps'] = [f'[dry-run] comment: {text[:80]}', f'[dry-run] assign -> {reporter.get("displayName") or reporter.get("name")}', f'[dry-run] {step}']
         return result
     if not any(marker in (c.get('body') or '') for c in client.comments(key)):
@@ -368,7 +378,7 @@ def process_ticket(client, key, info, link, build_label, conf, llm, dry_run):
         result['steps'].append('assign')
     if need_move and not result.get('manual'):
         client.do_transition(key, plan)
-        result['steps'].append('transition')
+        result['steps'].append('transition' + (' (自动选: ' + '、'.join(plan['auto']) + ')' if plan.get('auto') else ''))
     return result
 
 

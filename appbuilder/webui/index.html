@@ -223,7 +223,7 @@
 <label class="span-2">Jira 编号识别规则（正则）<input name="key_pattern" maxlength="512"><small class="label-help">默认识别 TRANSACT-210390 这种格式；在 Jira 里查不到的编号会被忽略。</small></label>
 <label>首次回溯提交数<input name="first_run_commits" type="number" min="0" max="200"><small class="label-help">0 表示首次只记录起点，不改任何 ticket。</small></label>
 <label>每轮最多处理 ticket 数<input name="max_tickets_per_run" type="number" min="1" max="200"><small class="label-help">单次构建后最多处理的 Jira 数量，防止误识别时一次改动过多。</small></label>
-<label class="span-2">流转时必填字段（例如 Bug 要选 Root Cause）<textarea name="transition_fields" rows="3" maxlength="2000" placeholder="Bug | Root Cause | 待确认"></textarea><small class="label-help">每行一条：问题类型 | 字段名 | 值。问题类型写 * 表示全部。可选值先用上面的“查询 ticket”查看。字段必填但这里没配时，脚本只评论和转派，不改状态，并在评论里提醒手动处理。</small></label>
+<label class="span-2">流转时必填字段（例如 Bug 要选 Root Cause）<textarea name="transition_fields" rows="3" maxlength="2000" placeholder="Bug | Root Cause | 待确认"></textarea><small class="label-help">每行一条：问题类型 | 字段名 | 值。问题类型写 * 表示全部。可选值先用上面的“查询 ticket”查看。没配时，下拉类字段（如 Root Cause）自动选 Jira 里的第一个可选值；文本类必填字段没配时，只评论和转派，不改状态，并在评论里提醒手动处理。</small></label>
 <label>Jira 类型<select name="flavor"><option value="server">公司自建（Server / Data Center）</option><option value="cloud">Atlassian 云版</option></select><small class="label-help">公司自建版按用户名转给 Reporter；云版按账号 ID。</small></label>
 </div></div></details>
 <div class="jira-actions"><button type="button" class="btn btn-primary" id="jira-save">保存设置</button><button type="button" class="ghost-button" id="jira-test-connection">测试连接（只读）</button></div></form>

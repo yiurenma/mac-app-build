@@ -72,7 +72,7 @@ class SettingsTests(unittest.TestCase):
         r = A.lookup_ticket('TRANSACT-210390', FakeClient(), J.settings({}))
         self.assertTrue(r['found'] and r['can_transition'])
         self.assertEqual(r['reporter'], 'Alice')
-        self.assertEqual(r['required_fields'], [{'name': 'Root Cause', 'allowed': ['Code'], 'configured': False}])
+        self.assertEqual(r['required_fields'], [{'name': 'Root Cause', 'allowed': ['Code'], 'configured': False, 'auto': 'Code'}])
         r = A.lookup_ticket('TRANSACT-1', FakeClient(), {**J.settings({}), 'transition_fields': 'Bug | Root Cause | Code'})
         self.assertEqual(r['problems'], [])
         self.assertTrue(r['required_fields'][0]['configured'])

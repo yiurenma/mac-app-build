@@ -71,7 +71,7 @@ async function lookup(){
       '\n当前可流转的状态：'+(r.transitions.length?r.transitions.join('、'):'无')+
       '\n问题类型：'+(r.issue_type||'未知')+
       '\n能否流转到“'+r.transition_name+'”：'+(r.can_transition?'可以':'当前状态下不可以（请核对流转名称，或该 ticket 状态不对）')+
-      ((r.required_fields||[]).length?'\n流转时必填字段：\n'+r.required_fields.map(x=>'  '+x.name+(x.configured?'（已配置值）':'（还没配置值）')+(x.allowed.length?'  可选：'+x.allowed.join('、'):'')).join('\n'):'')+
+      ((r.required_fields||[]).length?'\n流转时必填字段：\n'+r.required_fields.map(x=>'  '+x.name+(x.configured?'（已配置值）':x.auto?'（未配置，将自动选第一个：'+x.auto+'）':'（还没配置值，需手动）')+(x.allowed.length?'  可选：'+x.allowed.join('、'):'')).join('\n'):'')+
       ((r.problems||[]).length?'\n需要处理：'+r.problems.join('；'):''));
   }catch(e){out('查询失败：'+e.message);}
   finally{button.disabled=false;}

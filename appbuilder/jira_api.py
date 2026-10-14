@@ -130,11 +130,14 @@ def lookup_ticket(key, client=None, conf=None):
     required, missing = [], []
     if match:
         rules = J.parse_field_rules(conf.get('transition_fields'))
-        payload, missing, bad = J.plan_fields(match[0].get('fields'), issue_type, rules)
+        payload, missing, bad, auto = J.plan_fields(match[0].get('fields'), issue_type, rules)
         for fid, meta in (match[0].get('fields') or {}).items():
             if meta.get('required') and not meta.get('hasDefaultValue'):
                 allowed = [str(o.get('value') or o.get('name') or o.get('id')) for o in (meta.get('allowedValues') or [])]
-                required.append({'name': meta.get('name') or fid, 'allowed': allowed[:30], 'configured': fid in payload})
+                name = meta.get('name') or fid
+                picked = next((a.split('=', 1)[1] for a in auto if a.split('=', 1)[0] == name), None)
+                required.append({'name': name, 'allowed': allowed[:30], 'configured': fid in payload and picked is None,
+                                 'auto': picked})
         missing = missing + bad
     return {'found': True, 'key': key, 'summary': fields.get('summary', ''),
             'status': (fields.get('status') or {}).get('name', ''),
