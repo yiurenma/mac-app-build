@@ -101,10 +101,8 @@ def validate_template(body, config=None):
     template.update(body)
     # Freeze the same defaults and validate through the immediate-build path.
     params = validate_build_parameters(template, config)
-    if params['testfairy']['enabled']:
-        from .testfairy import saved_auth_available
-        if not params['testfairy']['save_session'] or not saved_auth_available(params['testfairy']['login_url'], DATA):
-            raise ValueError('定时 TestFairy 需明确选择保存本机认证，并先保存 Keychain 或可复用会话；临时密码不会留到执行时')
+    # APP links now come from the same Jenkins session as the build. Legacy
+    # TestFairy settings remain compatible, but no separate login is required.
     template['country'] = template['country'].strip().upper()
     return template
 

@@ -62,6 +62,9 @@ def args_parser():
     diag.add_argument('--build-number', type=int, help='指定要测试的 Build Number，例如 2')
     diag.add_argument('--expected', choices=['SUCCESS','FAILURE','ABORTED','UNSTABLE','NOT_BUILT'], default='SUCCESS')
     diag.add_argument('--visible', action='store_true', default=True, help='兼容参数：诊断模式始终显示 Chrome 并允许手动 SSO 登录')
+    link = sub.add_parser('app-link', help='从历史任务对应的 Jenkins 完整日志提取并保存 APP 链接，不重新构建')
+    link.add_argument('task_id', help='已有历史任务编号')
+    link.add_argument('--headless', action='store_true', help='使用已保存的 Jenkins 认证，不显示浏览器')
     login = sub.add_parser('login', help='手动登录 Jenkins，保存本地认证状态')
     login.add_argument('--site', choices=['plugin', 'gmx'], required=True)
     sub.add_parser('doctor', help='检查本机 Python/Git/Playwright/Token')
@@ -306,6 +309,12 @@ def main(argv=None):
         output = run_diagnosis(a.url, number=a.build_number, expected=a.expected,
                                visible=a.visible, emit=lambda s: print(s, flush=True))
         print('[DIAG] 完整报告：.appbuilder/diagnostics/last-result.json', flush=True)
+        return
+    if a.command == 'app-link':
+        from .app_links import lookup_history
+        result = lookup_history(a.task_id, config=load_config(), data=DATA,
+                                visible=not a.headless, emit=lambda s: print(s, file=sys.stderr, flush=True))
+        print(json.dumps(result, ensure_ascii=False, indent=2))
         return
     if a.command == 'login':
         interactive_login(load_config(), DATA, a.site)

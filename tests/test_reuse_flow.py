@@ -65,6 +65,70 @@ class ReuseFlowTests(unittest.TestCase):
         self.assertEqual(rt['app_reuse']['source_task_id'], self.old['id'])
         self.assertEqual(rt['plugin_reuse']['downloads'], downloads)
 
+    def jenkins_history(self):
+        from urllib.parse import urlsplit
+        origin=urlsplit(self.old['gmx_job'])
+        downstream=origin.scheme+'://'+origin.netloc+'/job/upload-to-testfairy/job/master/'
+        app={**self.app,'app_version':None,'app_build':None,'lookup_method':'jenkins-console-html',
+             'source_job_url':self.old['gmx_job'],'source_build_number':4,
+             'source_build_url':self.old['gmx_job']+'4/','downstream_job_url':downstream,
+             'downstream_build_number':51,'downstream_build_url':downstream+'51/',
+             'downstream_result':'SUCCESS'}
+        app.pop('path')
+        downloads={k:dict(url='https://nexus.invalid/'+k+'.tar.gz',version='1.3.1-SNAPSHOT.7',
+                         sha256=self.hashes[k]) for k in ARTIFACTS}
+        store.patch_runtime(self.old['id'],plugin_artifact_result='SUCCESS',plugin_artifact_downloads=downloads,
+                            gmx_formal_result='SUCCESS',testfairy_app=app)
+        flow.remember(self.old['id'],self.old,'plugin');flow.remember(self.old['id'],self.old,'app')
+        return app
+
+    def test_full_runner_reuses_complete_jenkins_link_history_without_rebuilding(self):
+        from appbuilder.reuse_verification import LiveVerifier
+        app=self.jenkins_history()
+        with patch.object(runner,'credentials',return_value=nullcontext({})), \
+             patch.object(runner,'token_or_error'),patch.object(runner,'checkout',return_value='c'*40), \
+             patch('appbuilder.plugin_git.remote_tip',return_value='a'*40), \
+             patch.object(runner,'prepare_plugin_task') as prepare, \
+             patch.object(runner,'JenkinsBrowser') as browser, \
+             patch.object(runner,'publish_gmx') as publish, \
+             patch('appbuilder.app_links.lookup_task_app') as lookup:
+            runner._run_unlocked(self.new['id'],reuse_verifier=LiveVerifier({},None,None,{},{}))
+        prepare.assert_not_called();browser.assert_not_called();publish.assert_not_called();lookup.assert_not_called()
+        result=json.loads((store.task_folder(self.new['id'])/'result.json').read_text())
+        self.assertEqual(result['status'],'SUCCESS')
+        self.assertEqual(result['gmx_job'],self.old['gmx_job'])
+        self.assertEqual(result['runtime']['testfairy_app'],app)
+        self.assertEqual(result['runtime']['app_reuse']['source_task_id'],self.old['id'])
+
+    def test_jenkins_link_history_rejects_missing_or_conflicting_chain_and_fingerprints(self):
+        from appbuilder.reuse import app_candidate
+        from appbuilder.reuse_verification import LiveVerifier
+        self.jenkins_history()
+        record=store.read_state(self.old['id'])['runtime']['reuse_records']['app']
+        verifier=LiveVerifier({},None,None,{},{})
+        self.assertIsNotNone(app_candidate(record,record,verifier.app))
+        for key in ('source_job_url','source_build_number','source_build_url','downstream_job_url',
+                    'downstream_build_number','downstream_build_url','downstream_result','share_url'):
+            changed=deepcopy(record);changed['app'].pop(key)
+            with self.subTest(missing=key):
+                self.assertIsNone(app_candidate(record,changed,verifier.app))
+        for key,value in [('source_build_number',99),('source_job_url',self.new['gmx_job']),
+                          ('downstream_result','FAILURE'),('downstream_build_url','https://evil.invalid/job/x/51/'),
+                          ('share_url','https://evil.invalid/join/complete'),('sha','e'*40)]:
+            changed=deepcopy(record);changed['app'][key]=value
+            with self.subTest(conflict=key):
+                self.assertIsNone(app_candidate(record,changed,verifier.app))
+        changed=deepcopy(record)
+        job=changed['app']['downstream_job_url'].replace('/job/upload-to-testfairy/',
+                                                       '/job/other%2Fjob%2Fupload-to-testfairy/')
+        changed['app'].update(downstream_job_url=job,downstream_build_url=job+'51/')
+        self.assertIsNone(app_candidate(record,changed,verifier.app))
+        self.assertFalse(verifier.app(changed)['history_complete'])
+        for key,value in [('source_sha','e'*40),('plugin_hashes',{}),('parameters',{}),('result','FAILURE')]:
+            changed=deepcopy(record);changed[key]=value
+            with self.subTest(fingerprint=key):
+                self.assertIsNone(app_candidate(record,changed,verifier.app))
+
     def test_incomplete_history_is_miss_without_fetching_deleted_logs(self):
         from appbuilder.reuse_verification import LiveVerifier
         self.verifier = LiveVerifier({}, None, None, {}, {})
