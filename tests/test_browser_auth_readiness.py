@@ -46,7 +46,8 @@ class AuthReadinessFixtures:
         self.context = self.browser.new_context()
         self.addCleanup(self.context.close)
         self.page = self.context.new_page()
-        self.page.set_default_timeout(1200)
+        # Allow headed CI rendering to settle; negative cases set their own short bound.
+        self.page.set_default_timeout(5000)
         self.requests = []
 
     def load(self, html):
@@ -83,12 +84,11 @@ class AuthReadinessFixtures:
 
     def test_enabled_submit_is_attempt_only_until_caller_verifies_navigation(self):
         self.load(FORM.replace('window.submitted=true', 'window.earlySubmit=true'))
-        self.page.evaluate("""setTimeout(()=>{
-          document.querySelector('form').onsubmit=e=>{e.preventDefault();window.submitted=true};
-          window.authInitialized=true;
-        },1500)""")
+        # Leave the authentication handler uninitialized for this attempt rather
+        # than racing a wall-clock timer against headed CI actionability checks.
         self.assertTrue(submit_recognized_login(self.page, 'fixture-user', 'fixture-password'))
         # True is explicitly an attempted click, never authenticated success.
+        self.assertTrue(self.page.evaluate('window.earlySubmit === true'))
         self.assertFalse(self.page.evaluate('window.submitted === true'))
         self.assertEqual(self.page.url, HOST + '/login')
 
