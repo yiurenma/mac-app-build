@@ -25,6 +25,14 @@ jobs:
           sudo ln -sf "$browser_path" /usr/bin/chromium
       - name: Three offline regression rounds (headless and headed via Xvfb)
         run: xvfb-run -a ./selftest.sh
+      - name: Report failing tests as annotations
+        if: failure()
+        run: |
+          for f in docs/verification-logs/round*.txt; do
+            [ -f "$f" ] || continue
+            grep -a -E '^(ERROR|FAIL): ' "$f" | sort -u | head -20 | while read -r line; do echo "::error title=$(basename "$f")::$line"; done
+            grep -a -E '^[A-Za-z_.]*(Error|Exception)(: |$)|^AssertionError' "$f" | sort | uniq -c | head -10 | while read -r line; do echo "::error title=$(basename "$f") cause::$line"; done
+          done
       - name: JavaScript and whitespace checks
         run: |
           node --check appbuilder/webui/app.js
