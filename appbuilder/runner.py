@@ -150,6 +150,11 @@ def run(task_id, transient_credentials=None):
                 notify_outcome(task_id)
             except Exception:
                 log('[MAIL] 通知处理失败；原构建结果保留，请查看本机任务状态')
+            try:
+                from .jira_notify import notify_jira
+                notify_jira(task_id)
+            except Exception as exc:
+                log(safe_text(f'[JIRA] 处理失败；原构建结果保留: {type(exc).__name__}: {exc}'))
 
 
 def effective_task_config(config, params):

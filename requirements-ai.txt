@@ -1,0 +1,2 @@
+# 可选：离线本地模型运行时（需 Xcode Command Line Tools 编译，或由公司 Nexus 提供预编译 wheel）
+llama-cpp-python>=0.3,<1
