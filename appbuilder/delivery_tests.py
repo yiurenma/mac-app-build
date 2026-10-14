@@ -6,7 +6,6 @@ import sqlite3
 import threading
 import time
 from contextlib import closing
-from urllib.parse import urlsplit,urlunsplit
 from .config import DATA,load_config
 from .jenkins import NeedsAttention
 from .telemetry import safe_text
@@ -66,7 +65,7 @@ def poll(test_id):
 
 @lifecycle.admitted
 def start(body):
-    from .testfairy import approved_target,DEFAULT_LOGIN,expected_build,share_url
+    from .jenkins_links import source_build,validate_join_url
     from .outlook import recipients,valid_address
     kind=body.get('kind');test_id=body.get('request_id','')
     if kind not in ('testfairy','outlook') or not re.fullmatch(r'[a-f0-9-]{16,64}',test_id):raise ValueError('测试类型或请求编号无效')
@@ -75,23 +74,22 @@ def start(body):
     if kind!='outlook' and allow_repeat:raise ValueError('允许重复测试仅适用于测试邮件')
     config=load_config()
     if kind=='testfairy':
-        login=body.get('url') or DEFAULT_LOGIN;approved_target(login,config)
-        user=body.get('username','');password=body.get('password','')
-        if not isinstance(user,str) or not isinstance(password,str) or not user.strip() or not password or max(len(user),len(password))>256:
-            raise ValueError('TestFairy 测试须填写账号密码，各不超过 256 字符')
         task_id=body.get('task_id','')
-        if not re.fullmatch(r'\d{12}-[0-9a-f]{6}',task_id):
-            raise ValueError('请选择已保存 GMX 构建信息的历史任务；需 GMX Job URL、Build 编号、SHA 和上传目录')
+        if not isinstance(task_id,str) or not re.fullmatch(r'\d{12}-[0-9a-f]{6}',task_id):
+            raise ValueError('请选择已保存 GMX Job URL 和 Build 编号的历史任务')
         from .store import task,read_state
-        row=task(task_id);params=json.loads(row['params'])
+        row=task(task_id);params=json.loads(row['params']);runtime=read_state(task_id).get('runtime',{})
         try:
-            expected=expected_build(params,read_state(task_id).get('runtime',{}))
+            source=source_build(params,runtime)
         except (NeedsAttention,KeyError) as exc:
             raise ValueError('所选任务的匹配信息不足：'+safe_text(str(exc))) from None
         wanted=body.get('expected_share_url','')
-        if not isinstance(wanted,str) or not wanted.strip():raise ValueError('请输入预期 App /join/ 分享链接（不是登录入口）')
-        wanted=share_url(wanted.strip(),approved_target(login,config))
-        inputs={'url':login,'task_id':task_id,'expected':expected,'wanted':wanted};secret=(user.strip(),password)
+        if not isinstance(wanted,str):raise ValueError('预期 APP 链接必须是文本')
+        try:
+            wanted=validate_join_url(wanted.strip()) if wanted.strip() else ''
+        except NeedsAttention as exc:
+            raise ValueError(str(exc)) from None
+        inputs={'task_id':task_id,'source':source,'wanted':wanted};secret=None
     else:
         if body.get('confirm_send') is not True:raise ValueError('请明确点击发送测试邮件')
         to=recipients(body.get('recipients',''));account=body.get('account','').strip()
@@ -138,21 +136,25 @@ def start(body):
     def execute():
         try:
             if kind=='testfairy':
-                from .testfairy import TestFairyBrowser
-                options={'login_url':inputs['url'],'save_session':False,'correlation_id':test_id}
-                test_config={**config,'testfairy':{**config.get('testfairy',{}),'wait_seconds':min(60,float(config.get('testfairy',{}).get('wait_seconds',60)))}}
-                with TestFairyBrowser(test_config,DATA,options,login_credentials=secret,visible=True) as browser:
-                    app=browser.find(inputs['expected'])
-                    actual=share_url(app['share_url'],approved_target(inputs['url'],config))
-                    matched=actual==inputs['wanted']
-                    u=urlsplit(browser.page.url)
-                    final=urlunsplit((u.scheme,u.netloc,u.path,'',''))
-                    finish(test_id,'MATCH' if matched else 'MISMATCH',{
-                        'message':'已按保存的 GMX 构建提取已有分享链接，结果'+('匹配' if matched else '不匹配')+'；未启动打包或更改分享权限',
-                        'requested_url':inputs['url'],'final_url':final,'expected_share_url':inputs['wanted'],
-                        'actual_share_url':actual,'task_id':inputs['task_id'],'build_url':app['build_url'],'app_version':app['app_version'],
-                        'link_semantics':'已核对卡片构建身份；链接是否固定历史版本尚未独立验证',
-                        'diagnostics':testfairy_diagnostics(app.get('diagnostics'),secret)})
+                from .app_links import lookup_task_app
+                app=lookup_task_app(config,DATA,DATA/'delivery-tests'/test_id,params,runtime,visible=True)
+                actual=app['share_url']
+                matched=actual==inputs['wanted'] if inputs['wanted'] else None
+                status=('MATCH' if matched else 'MISMATCH') if matched is not None else 'EXTRACTED'
+                finish(test_id,status,{
+                    'message':'已从指定 GMX 构建的 Jenkins 完整日志提取 APP 链接'+
+                              ('，预期链接'+('匹配' if matched else '不匹配') if matched is not None else '')+
+                              '；未启动打包',
+                    'expected_share_url':inputs['wanted'],'actual_share_url':actual,
+                    'task_id':inputs['task_id'],'build_url':app['build_url'],
+                    'source_job_url':app['source_job_url'],'source_build_number':app['source_build_number'],
+                    'source_build_url':app['source_build_url'],
+                    'downstream_job_url':app.get('downstream_job_url'),
+                    'downstream_build_number':app.get('downstream_build_number'),
+                    'downstream_build_url':app.get('downstream_build_url'),
+                    'app':app,
+                    'link_semantics':'已确认来源 GMX 与 upload-to-testfairy 构建；链接是否固定历史版本尚未独立验证',
+                    'diagnostics':testfairy_diagnostics(app.get('diagnostics'),secret)})
             else:
                 from .outlook import OutlookAdapter,call_diagnostic
                 adapter=OutlookAdapter();account=adapter.resolve(inputs['account'])

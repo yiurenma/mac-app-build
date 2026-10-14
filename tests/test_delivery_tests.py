@@ -144,32 +144,39 @@ class DeliveryTestAPIs(unittest.TestCase):
     def test_test_email_requires_explicit_action_and_valid_target(self):
         for body in ({**self.mail,'confirm_send':False},{**self.mail,'recipients':'nickname'}):
             with self.assertRaises(ValueError):dt.start(body)
-    def test_unapproved_testfairy_target_rejected_before_credentials_are_used(self):
-        with patch('appbuilder.testfairy.TestFairyBrowser') as browser:
-            with self.assertRaises(ValueError):dt.start({'kind':'testfairy','request_id':'c'*32,'url':'https://other.testfairy.com/login','username':'user','password':'SECRET'})
-        browser.assert_not_called()
+    def test_invalid_expected_link_is_rejected_before_browser(self):
+        from test_testfairy import PARAMS,RUNTIME
+        with patch('appbuilder.app_links.lookup_task_app') as lookup,patch('appbuilder.store.task',return_value={'params':json.dumps(PARAMS)}),patch('appbuilder.store.read_state',return_value={'runtime':RUNTIME}):
+            with self.assertRaises(ValueError):
+                dt.start({'kind':'testfairy','request_id':'c'*32,'task_id':self.task_id,'expected_share_url':'https://evil.invalid/join/not-app'})
+        lookup.assert_not_called()
     def run_link_test(self,wanted,error=None,diagnostics=None):
         from test_testfairy import PARAMS,RUNTIME,expected_build
-        browser=Mock();browser.page.url='https://hsbc-mobilex.testfairy.com/my?session=SECRET'
-        browser.find.return_value={**expected_build(PARAMS,RUNTIME),'share_url':'https://hsbc-mobilex.testfairy.com/join/current','app_version':'3.76.0'}
-        browser.find.return_value['diagnostics']=diagnostics or {}
-        if error:browser.find.side_effect=error
-        browser.__enter__=Mock(return_value=browser);browser.__exit__=Mock(return_value=False)
-        body={'kind':'testfairy','request_id':'c'*32,'url':'https://hsbc-mobilex.testfairy.com/login','username':'user','password':'SECRET',
-              'task_id':'202610111000-abcdef','expected_share_url':wanted}
-        with patch('appbuilder.testfairy.TestFairyBrowser',return_value=browser) as factory,patch('appbuilder.web.create_build') as build,patch('appbuilder.store.task',return_value={'params':json.dumps(PARAMS)}),patch('appbuilder.store.read_state',return_value={'runtime':RUNTIME}):
+        expected=expected_build(PARAMS,RUNTIME)
+        app={**expected,'share_url':'https://hsbc-mobilex.testfairy.com/join/current',
+             'source_job_url':PARAMS['gmx_job'],'source_build_number':RUNTIME['gmx_build_number'],
+             'source_build_url':expected['build_url'],'downstream_build_url':'https://jenkins.invalid/job/upload-to-testfairy/job/master/42/',
+             'app_version':None,'app_build':None,'diagnostics':diagnostics or {}}
+        body={'kind':'testfairy','request_id':'c'*32,'task_id':self.task_id,'expected_share_url':wanted}
+        with patch('appbuilder.app_links.lookup_task_app',return_value=app,side_effect=error) as lookup,patch('appbuilder.web.create_build') as build,patch('appbuilder.store.task',return_value={'params':json.dumps(PARAMS)}),patch('appbuilder.store.read_state',return_value={'runtime':RUNTIME}):
             dt.start(body)
-        self.assertFalse(factory.call_args.args[2]['save_session'])
-        browser.find.assert_called_once_with(expected_build(PARAMS,RUNTIME))
+        lookup.assert_called_once()
+        self.assertEqual(lookup.call_args.args[3:5],(PARAMS,RUNTIME))
+        self.assertTrue(lookup.call_args.kwargs['visible'])
         build.assert_not_called();self.assertNotIn('SECRET',(Path(self.tmp.name)/'delivery-tests.sqlite').read_bytes().decode('latin1'))
         return dt.poll('c'*32)
     def test_expected_link_is_compared_to_formal_extraction_not_echoed(self):
-        result=self.run_link_test('https://HSBC-MOBILEX.TESTFAIRY.COM:443/join/current')
+        result=self.run_link_test('https://hsbc-mobilex.testfairy.com/join/current')
         self.assertEqual(result['status'],'MATCH')
-        self.assertEqual(result['result']['final_url'],'https://hsbc-mobilex.testfairy.com/my')
+        self.assertIn('/42/',result['result']['downstream_build_url'])
+    def test_optional_expected_link_extracts_without_testfairy_authentication(self):
+        result=self.run_link_test('')
+        self.assertEqual(result['status'],'EXTRACTED')
+        self.assertEqual(result['result']['actual_share_url'],'https://hsbc-mobilex.testfairy.com/join/current')
+        self.assertIsNone(result['result']['app']['app_version'])
     def test_browser_failure_keeps_first_error_and_safe_log_references(self):
         from appbuilder.jenkins import NeedsAttention
-        error=NeedsAttention('离线测试失败 SECRET user')
+        error=NeedsAttention('离线测试失败 password=SECRET')
         error.testfairy_diagnostics={'attempt_id':'attempt-1','log_path':'/tmp/trace.jsonl',
             'evidence_path':'/tmp/evidence.json','first_error':{'phase':'login','type':'TimeoutError','message':'password=SECRET'},
             'logging_error':{'type':'OSError','message':'disk unavailable'},'raw_dom':'PRIVATE'}

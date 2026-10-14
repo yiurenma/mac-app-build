@@ -21,6 +21,21 @@ class StepReportingTests(unittest.TestCase):
         items={x['step']:x for x in step_summaries({'plugin_version':'1.3.999'},{'completed':['PLUGIN_EDIT'],'runtime':{}},{'status':'SUCCESS','stage':'FINISHED'})}
         self.assertIn('未记录',items['PLUGIN_EDIT']['outputs']['逐文件版本修改记录'])
         self.assertNotIn('1.3.999',str(items['PLUGIN_EDIT']['outputs']))
+    def test_only_verified_share_field_preserves_safe_query(self):
+        from test_testfairy import PARAMS,RUNTIME,expected_build
+        app={**expected_build(PARAMS,RUNTIME),'share_url':'https://testfairy.com/join/CompleteLink?id=573108',
+             'app_version':None,'app_build':None,'matched_at':'today'}
+        state={'completed':['TESTFAIRY_LOOKUP'],'runtime':{**RUNTIME,'testfairy_app':app}}
+        text=render_steps(PARAMS,state,{'status':'SUCCESS','stage':'FINISHED'})
+        self.assertIn(app['share_url'],text)
+        app['share_url']='https://testfairy.com/join/CompleteLink?token=PRIVATE'
+        text=render_steps(PARAMS,state,{'status':'SUCCESS','stage':'FINISHED'})
+        self.assertNotIn('PRIVATE',text)
+        with patch.dict('os.environ',{'APP_TEST_TOKEN':'573108'}):
+            app['share_url']='https://testfairy.com/join/CompleteLink?id=573108'
+            text=render_steps(PARAMS,state,{'status':'SUCCESS','stage':'FINISHED'})
+        self.assertNotIn('573108',text)
+
     def test_whitelist_and_errors_remove_secrets_headers_and_query(self):
         params={'password':'PASSWORD_VALUE','github_token':'TOKEN_VALUE','plugin_url':'https://example.com/repo?token=QUERY_SECRET'}
         row={'status':'FAILED','stage':'PLUGIN_CHECKOUT','note':'Authorization: Bearer AUTH_SECRET\nCookie: sid=COOKIE1; other=COOKIE2\npassword=PW_SECRET'}

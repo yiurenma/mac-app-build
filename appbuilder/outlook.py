@@ -226,12 +226,19 @@ def outcome_preview(row, params, state, log_text=''):
     params=effective_params(params,runtime)
     status=row['status'];stage=row['stage']
     app=runtime.get('testfairy_app')
-    detail=''
+    detail='';verified_share_url=None
     if status=='SUCCESS' and app:
         try:
             expected=expected_build(params,runtime)
             if all(app.get(k)==expected[k] for k in ('build_url','number','sha','folder')):
                 detail=mail_preview(params,runtime,row['created'])['body']
+                from .jenkins_links import validate_join_url
+                candidate=validate_join_url(app['share_url'])
+                # Keep only the verified public join URL intact; all other
+                # message text still goes through the unchanged log scrubber.
+                masked=candidate.replace('https://','APP_LINK_SCHEME:',1)
+                if safe_text(masked)==masked:
+                    verified_share_url=candidate
         except (NeedsAttention,KeyError,TypeError):
             pass  # Corrupt or incomplete old metadata cannot authorize a link.
     if not detail:
@@ -253,8 +260,14 @@ def outcome_preview(row, params, state, log_text=''):
           +detail+'\n\n脱敏日志摘要:\n'+summary)
     from .reporting import render_steps
     body += '\n\n'+render_steps(params,state,row)
+    if verified_share_url:
+        import uuid
+        placeholder='APP_LINK_'+uuid.uuid4().hex
+        body=safe_text(body.replace(verified_share_url,placeholder)).replace(placeholder,verified_share_url)
+    else:
+        body=safe_text(body)
     return {'subject':f"[{status}] {params.get('country','')} {params.get('project','')} · {row['id']}",
-            'body':safe_text(body),'to':params.get('outlook',{}).get('to',[]),
+            'body':body,'to':params.get('outlook',{}).get('to',[]),
             'account':params.get('outlook',{}).get('account',''),'status':'PREVIEW_ONLY','mode':'preview',
             'task_id':row['id']}
 

@@ -674,8 +674,10 @@ def mail_preview(params,runtime,created):
     from .reuse_flow import effective_params
     params = effective_params(params, runtime)
     app=runtime['testfairy_app']
-    subject=f"[{params['country']}] {params['project']} {app['app_version']} ({app['app_build']})"
-    rows=[('App 分享链接',app['share_url']),('App 版本',app['app_version']+' ('+app['app_build']+')'),
+    version = (str(app['app_version'])+' ('+str(app['app_build'])+')'
+               if app.get('app_version') and app.get('app_build') else '未记录（Jenkins 日志仅提供 APP 链接）')
+    subject=f"[{params['country']}] {params['project']} {version}"
+    rows=[('App 分享链接',app['share_url']),('App 版本',version),
           ('国家/地区',params['country']),('项目',params['project']),
           ('Plugin 来源分支',params['plugin_source']),('Plugin 构建分支',params['plugin_branch']),
           ('GMX 来源分支',params['gmx_source']),('GMX 构建分支',params['gmx_branch']),
@@ -684,6 +686,6 @@ def mail_preview(params,runtime,created):
           ('Plugin 产物构建编号',runtime.get('plugin_artifact_number','')),
           ('GMX Build',app['build_url']),('GMX Build 编号',app['number']),
           ('GMX 提交 SHA',app['sha']),('Plugin 提交 SHA',runtime.get('plugin_sha','')),
-          ('上传目录',app['path']),('任务创建时间',created),('链接匹配时间',app['matched_at'])]
+          ('上传目录',app.get('path') or app.get('folder') or '未记录'),('任务创建时间',created),('链接匹配时间',app['matched_at'])]
     return {'status':'PREVIEW_ONLY','subject':subject,'body':'\n'.join(f'{key}: {value}' for key,value in rows),
             'to':params.get('outlook',{}).get('to',[]),'account':params.get('outlook',{}).get('account',''),'mode':'preview','task_id':params.get('id','')}
