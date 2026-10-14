@@ -53,11 +53,35 @@ class SharedBuildUIFixture:
         scope=self.page if name.startswith(('tf_test_','mail_test_')) else self.form
         return scope.locator(f'[name="{name}"]')
 
+    def show(self, panel):
+        # Tool panels are collapsed by default; open one the same way a person does.
+        self.page.locator(f'.nav[data-target={panel}]').click()
+        expect(self.page.locator('#' + panel)).to_be_visible()
+
+    def show_all(self):
+        # Only for tests that drive several tool panels in one flow.
+        self.page.evaluate("document.querySelectorAll('.fold').forEach(e=>e.classList.remove('collapsed'))")
+
     def open_details(self):
         self.form.locator('details').evaluate_all('(nodes)=>nodes.forEach(n=>n.open=true)')
 
 
 class SharedBuildUITests(SharedBuildUIFixture, unittest.TestCase):
+    def test_tool_panels_are_collapsed_and_open_one_at_a_time(self):
+        p = self.page
+        p.reload()
+        ids = ['schedules', 'diagnostics', 'live-tests', 'testfairy-tests', 'mail-tests', 'jira-tests']
+        for i in ids:
+            expect(p.locator('#' + i)).to_be_hidden()
+        p.locator('[data-target=jira-tests]').click()
+        expect(p.locator('#jira-tests')).to_be_visible()
+        p.locator('[data-target=mail-tests]').click()
+        expect(p.locator('#mail-tests')).to_be_visible()
+        expect(p.locator('#jira-tests')).to_be_hidden()
+        p.locator('[data-target=mail-tests]').click()
+        expect(p.locator('#mail-tests')).to_be_hidden()
+        expect(p.locator('input[name=testfairy_enabled]')).to_be_checked()
+
     def test_defaults_help_branch_paging_refresh_and_manual_fallback(self):
         p = self.page
         self.assertEqual(self.form.locator('[data-build]:visible').count(), 11)
@@ -134,7 +158,7 @@ class SharedBuildUITests(SharedBuildUIFixture, unittest.TestCase):
         row=schedules.list_schedules()[0]
         self.assertEqual(json.loads(row['params']), expected)
         self.assertFalse(row['enabled'])
-        p.locator('#schedules-body button', has_text='编辑').click()
+        self.show_all();p.locator('#schedules-body button', has_text='编辑').click()
         actual=p.evaluate('buildBody()')
         for key in ['github_token','jenkins_user','jenkins_password','testfairy_user','testfairy_password']:actual.pop(key)
         self.assertEqual(actual, expected)
@@ -143,7 +167,7 @@ class SharedBuildUITests(SharedBuildUIFixture, unittest.TestCase):
         expect(p.locator('#schedules-body')).to_contain_text('renamed')
         self.assertEqual(len(schedules.list_schedules()),1)
         self.assertEqual(json.loads(schedules.get_schedule(row['id'])['params']), expected)
-        p.locator('#schedules-body button', has_text='编辑').click()
+        self.show_all();p.locator('#schedules-body button', has_text='编辑').click()
         p.locator('#save-as-schedule').uncheck()
         p.locator('#submit-build').click()
         expect(p.locator('#form-message')).to_contain_text('任务已创建')
@@ -168,7 +192,7 @@ class SharedBuildUITests(SharedBuildUIFixture, unittest.TestCase):
                 planned=(datetime(2026,9,1)+timedelta(days=i)).isoformat()
                 db.execute("INSERT INTO schedule_runs(schedule_id,planned,status,task_id,note,created) VALUES(?,?,?,?,?,?)",
                            (row['id'],planned,'STARTED',task['id'],'只补最近一次',planned))
-        p=self.page;p.reload()
+        p=self.page;p.reload();self.show('schedules')
         expect(p.locator('#schedules-body')).to_contain_text('actions')
         p.locator('#schedules-body button',has_text='停用').click()
         expect(p.locator('#schedules-body')).to_contain_text('已停用')
@@ -194,7 +218,7 @@ class SharedBuildUITests(SharedBuildUIFixture, unittest.TestCase):
         self.assertFalse(self.errors,self.errors)
 
     def test_responsive_layout_and_cancel_restores_shared_defaults(self):
-        p=self.page;p.locator('#new-schedule').click()
+        p=self.page;self.show('schedules');p.locator('#new-schedule').click()
         self.field('schedule_name').fill('cancelled')
         self.field('country').select_option('HK')
         p.locator('#schedule-cancel').click()
@@ -235,7 +259,7 @@ class SharedBuildUITests(SharedBuildUIFixture, unittest.TestCase):
             self.assertEqual(start.call_args.args[0]['expected_share_url'],'https://hsbc-mobilex.testfairy.com/join/current')
             self.assertNotIn('password',start.call_args.args[0])
             self.assertNotIn('username',start.call_args.args[0])
-            self.field('mail_test_task').select_option('202610111000-abcdef')
+            self.show_all();self.field('mail_test_task').select_option('202610111000-abcdef')
             self.field('mail_test_to').fill('recipient@example.com')
             result.update(status='BLOCKED',result={'message':'离线模拟：未调用发送','stage':'set_recipients','send_attempted':False,'error_number':-1708,'returncode':1})
             p.locator('#test-outlook-send').click()
@@ -270,7 +294,7 @@ class SharedBuildUITests(SharedBuildUIFixture, unittest.TestCase):
           {id:'old-failed',project:'PayByBank',country:'UK',status:'FAILED'},
           {id:'new-success',project:'Wallet',country:'HK',status:'SUCCESS'}];
           renderTestTasks();""")
-        self.field('mail_test_search').fill('failed')
+        self.show_all();self.field('mail_test_search').fill('failed')
         expect(self.field('mail_test_task').locator('option')).to_have_count(2)
         self.field('mail_test_task').select_option('old-failed')
         self.field('tf_test_search').fill('wallet')

@@ -222,12 +222,12 @@
 </div><details class="advanced-panel"><summary>更多设置 · 通常无需修改</summary><div class="advanced-body"><div class="form-grid">
 <label class="span-2">Jira 编号识别规则（正则）<input name="key_pattern" maxlength="512"><small class="label-help">默认识别 TRANSACT-210390 这种格式；在 Jira 里查不到的编号会被忽略。</small></label>
 <label>首次回溯提交数<input name="first_run_commits" type="number" min="0" max="200"><small class="label-help">0 表示首次只记录起点，不改任何 ticket。</small></label>
-<label>每轮最多处理 ticket 数<input name="max_tickets_per_run" type="number" min="1" max="200"></label>
-<label>Jira 类型<select name="flavor"><option value="server">公司自建（Server / Data Center）</option><option value="cloud">Atlassian 云版</option></select></label>
+<label>每轮最多处理 ticket 数<input name="max_tickets_per_run" type="number" min="1" max="200"><small class="label-help">单次构建后最多处理的 Jira 数量，防止误识别时一次改动过多。</small></label>
+<label>Jira 类型<select name="flavor"><option value="server">公司自建（Server / Data Center）</option><option value="cloud">Atlassian 云版</option></select><small class="label-help">公司自建版按用户名转给 Reporter；云版按账号 ID。</small></label>
 </div></div></details>
 <div class="jira-actions"><button type="button" class="btn btn-primary" id="jira-save">保存设置</button><button type="button" class="ghost-button" id="jira-test-connection">测试连接（只读）</button></div></form>
 <form id="jira-ticket-form" class="diagnose-form" autocomplete="off"><div class="form-grid"><label class="span-2">查询单个 ticket（只读）<input name="key" maxlength="40" placeholder="TRANSACT-210390"><small class="label-help">显示标题、当前状态、Reporter，以及能否流转到上面填的状态。不会修改任何内容。</small></label></div><button type="button" class="ghost-button" id="jira-lookup">查询</button></form>
-<form id="jira-preview-form" class="diagnose-form" autocomplete="off"><div class="form-grid"><label class="span-2">用已成功的历史构建演练<select name="task"><option value="">请选择已成功的构建</option></select><small class="label-help">按当前设置演练一遍：列出它会处理哪些 ticket、从哪里找到的 Jira 号。只读，不会修改 Jira，也不影响正式记录。需要本机还保留该构建的 Plugin 代码。</small></label><label>回看最近提交数<input name="recent" type="number" min="1" max="100" value="10"></label></div><button type="button" class="ghost-button" id="jira-preview">开始演练</button></form>
+<form id="jira-preview-form" class="diagnose-form" autocomplete="off"><div class="form-grid"><label class="span-2">用已成功的历史构建演练<select name="task"><option value="">请选择已成功的构建</option></select><small class="label-help">按当前设置演练一遍：列出它会处理哪些 ticket、从哪里找到的 Jira 号。只读，不会修改 Jira，也不影响正式记录。需要本机还保留该构建的 Plugin 代码。</small></label><label>回看最近提交数<input name="recent" type="number" min="1" max="100" value="10"><small class="label-help">只看该构建最近这几个提交，范围 1–100。</small></label></div><button type="button" class="ghost-button" id="jira-preview">开始演练</button></form>
 <pre id="jira-result" class="terminal diagnose-terminal" role="status">尚未执行</pre></section>
         <section class="footer-info"><span>MAC APP BUILDER · LOCAL CONSOLE</span><span>Built with Python · Existing CLI engine · No cloud backend</span></section>
       </div>
