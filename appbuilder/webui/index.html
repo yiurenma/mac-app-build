@@ -216,8 +216,8 @@
 <label class="field-toggle span-2">演练模式（只记录会做什么，不真正修改 ticket）<input type="checkbox" name="dry_run"><small class="label-help">建议先开着演练，确认下方演练结果无误后再关闭。</small></label>
 <label class="span-2">Jira 地址<input name="base_url" maxlength="512" placeholder="https://wpb-jira.systems.uk.hsbc"><small class="label-help">只填网站根地址，必须以 https 开头。</small></label>
 <label class="span-2">Jira Token<input name="token" type="password" maxlength="4096" autocomplete="new-password" placeholder="留空表示保持已保存的 Token"><small class="label-help">保存到本机 Mac 钥匙串，不写入文件、任务或日志，页面也不会再显示它。</small><span id="jira-token-status" role="status"></span></label>
-<label>流转到的状态名称<input name="transition_name" maxlength="128"><small class="label-help">必须与 Jira 工作流里的流转名称一致，例如 In Test。</small></label>
-<label class="field-toggle">转给 Reporter<input type="checkbox" name="assign_to_reporter"><small class="label-help">把 ticket 的经办人改为它的 Reporter。</small></label>
+<label class="span-2">流转到的状态名称<input name="transition_name" maxlength="128"><small class="label-help">必须与 Jira 工作流里的流转名称一致，例如 In Test。</small></label>
+<label class="field-toggle span-2">转给 Reporter<input type="checkbox" name="assign_to_reporter"><small class="label-help">把 ticket 的经办人改为它的 Reporter。</small></label>
 <label class="field-toggle span-2">优先从 PR 里找 Jira 号<input type="checkbox" name="use_pr_lookup"><small class="label-help">先看 PR 的标题、分支名、描述，找不到再看提交信息；GitHub 查询失败会自动退回提交信息。</small></label>
 </div><details class="advanced-panel"><summary>更多设置 · 通常无需修改</summary><div class="advanced-body"><div class="form-grid">
 <label class="span-2">Jira 编号识别规则（正则）<input name="key_pattern" maxlength="512"><small class="label-help">默认识别 TRANSACT-210390 这种格式；在 Jira 里查不到的编号会被忽略。</small></label>
