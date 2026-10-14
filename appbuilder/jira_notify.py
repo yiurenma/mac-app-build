@@ -159,8 +159,8 @@ def tickets_from_commits(commits, pattern, llm=None, prs=None):
 
     The PR is the source of truth (the team rule is about the PR). Tiers, first hit wins:
     PR title + PR branch, then PR description, then commit subject, then commit body.
-    Several different keys inside one tier: the offline model may pick one (validated against
-    the candidates); without it the commit is skipped and reported instead of guessing."""
+    Several different keys inside the winning tier: all of them are updated (a key Jira does
+    not know is ignored later). `llm` is kept for compatibility and no longer used here."""
     regex = re.compile(pattern)
     found, ambiguous = {}, []
     for c in commits:
@@ -177,14 +177,8 @@ def tickets_from_commits(commits, pattern, llm=None, prs=None):
                 break
         if not keys:
             continue
-        context = ((pr['title'] + '\n' + pr['body']) if pr else '') + '\n' + c['subject'] + '\n' + c['body']
-        if len(keys) > 1:
-            chosen = pick_primary_ticket(llm, keys, context)
-            if not chosen:
-                ambiguous.append((pr['title'] if pr else c['subject'])[:120])
-                continue
-            keys = [chosen]
-        found.setdefault(keys[0], {**c, 'subject': (pr['title'] if pr and pr['title'] else c['subject']),
+        for key in keys:  # every key in the winning tier is updated
+            found.setdefault(key, {**c, 'subject': (pr['title'] if pr and pr['title'] else c['subject']),
                                    'source': source})
     return found, ambiguous
 

@@ -21,7 +21,7 @@
 `jira.dry_run` 默认为 true（config.yaml 已默认启用 Jira，但只演练）。保持 dry_run，查看任务 `state.json` 的 `runtime.jira_report`（会做什么、哪些提交归属不明），确认后再把 `dry_run` 改为 false。
 
 - 首次运行只记录基线提交，不改任何 ticket（`first_run_commits: 0`）。需要回溯可设为 N。
-- 一个提交出现多个不同 Jira 号：有本地模型时让模型从候选中选一个（模型输出的编号必须在候选里，否则丢弃）；没有模型则跳过并列入 `ambiguous_commits`，不猜。
+- 一个 PR/提交里写了多个 Jira 号：每个都会更新（评论、转给 Reporter、改状态），查不到的忽略。只取最先命中的那一层（PR 标题/分支 → PR 描述 → 提交标题 → 提交正文），低层级里顺带提到的编号不算。
 - 在 Jira 里查不到的编号（HTTP 404，如 `UTF-8` 之类的误识别，或当前 token 看不到的 ticket）直接忽略，只列入 `jira_report.ignored_keys`，不算失败；其他错误（如 500、无权限写入）仍算失败。
 - 基线只在非 dry-run 且全部成功后前移；部分失败时下次重跑，已完成的步骤因幂等而跳过。
 

@@ -57,18 +57,15 @@ class ExtractionTests(unittest.TestCase):
         self.assertEqual(sorted(found), ['ABC-7', 'PBB-12'])
         self.assertEqual(amb, [])
 
-    def test_several_keys_without_model_is_skipped_not_guessed(self):
+    def test_every_key_in_the_winning_tier_is_updated(self):
         found, amb = J.tickets_from_commits(self.commits('PBB-1 PBB-2 combined'), PATTERN)
-        self.assertEqual(found, {})
-        self.assertEqual(len(amb), 1)
+        self.assertEqual(sorted(found), ['PBB-1', 'PBB-2'])
+        self.assertEqual(amb, [])
 
-    def test_model_choice_is_accepted_only_if_it_is_a_candidate(self):
-        c = self.commits('PBB-1 PBB-2 combined')
-        found, _ = J.tickets_from_commits(c, PATTERN, FakeLLM({'key': 'PBB-2'}))
-        self.assertEqual(list(found), ['PBB-2'])
-        found, amb = J.tickets_from_commits(c, PATTERN, FakeLLM({'key': 'PBB-999'}))
-        self.assertEqual(found, {})
-        self.assertEqual(len(amb), 1)
+    def test_keys_in_a_lower_tier_are_not_mixed_in(self):
+        c = [{'sha': '1', 'subject': 'PBB-1 and PBB-2 fix', 'body': 'also mentions PBB-99'}]
+        found, _ = J.tickets_from_commits(c, PATTERN)
+        self.assertEqual(sorted(found), ['PBB-1', 'PBB-2'])
 
     def test_summary_falls_back_when_model_missing_or_returns_junk(self):
         self.assertEqual(L.tester_summary(None, 'PBB-1 fix'), 'PBB-1 fix')
@@ -268,11 +265,11 @@ class PRFirstTests(unittest.TestCase):
         self.assertEqual(list(found), ['TRANSACT-5'])
         self.assertEqual(found['TRANSACT-5']['source'], '提交标题')
 
-    def test_two_keys_in_pr_description_are_not_guessed(self):
+    def test_two_keys_in_pr_description_are_both_updated(self):
         c = [{'sha': 'a', 'subject': 'fix', 'body': ''}]
         found, amb = J.tickets_from_commits(c, PATTERN, None, FakePRs({'a': pr('fix', 'TRANSACT-1 and TRANSACT-2')}))
-        self.assertEqual(found, {})
-        self.assertEqual(len(amb), 1)
+        self.assertEqual(sorted(found), ['TRANSACT-1', 'TRANSACT-2'])
+        self.assertEqual(amb, [])
 
     def test_api_base_for_enterprise_and_public_github(self):
         self.assertEqual(J.github_api_base('https://alm-github.systems.uk.hsbc/mobile/paybybank-ios-plugin'),
