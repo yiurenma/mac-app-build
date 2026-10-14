@@ -17,10 +17,12 @@ class FakeClient:
     def issue(self, key):
         if not self.found:
             raise J.JiraNotFound('HTTP 404')
-        return {'fields': {'summary': 'Fix title', 'status': {'name': 'Dev Done'}, 'reporter': {'displayName': 'Alice'}}}
+        return {'fields': {'summary': 'Fix title', 'status': {'name': 'Dev Done'}, 'reporter': {'displayName': 'Alice'},
+                           'issuetype': {'name': 'Bug'}}}
 
-    def transitions(self, key):
-        return [{'name': n, 'id': str(i)} for i, n in enumerate(self.names)]
+    def transitions(self, key, expand=False):
+        rc = {'customfield_100': {'required': True, 'name': 'Root Cause', 'allowedValues': [{'value': 'Code'}]}}
+        return [{'name': n, 'id': str(i), 'fields': rc} for i, n in enumerate(self.names)]
 
 
 class SettingsTests(unittest.TestCase):
@@ -48,7 +50,8 @@ class SettingsTests(unittest.TestCase):
     def test_invalid_values_are_rejected_before_anything_is_saved(self):
         for bad in ({'base_url': 'http://insecure'}, {'base_url': 'https://x?a=1'}, {'key_pattern': '(['},
                     {'flavor': 'other'}, {'transition_name': '  '}, {'first_run_commits': 999},
-                    {'first_run_commits': True}, {'enabled': 'yes'}, {'max_tickets_per_run': 0}):
+                    {'first_run_commits': True}, {'enabled': 'yes'}, {'max_tickets_per_run': 0},
+                    {'transition_fields': 'Bug | Root Cause | Code | extra'}):
             with self.subTest(bad=bad), self.assertRaises(ValueError):
                 A.save_settings(bad)
         self.assertFalse(self.file.exists())
@@ -69,6 +72,10 @@ class SettingsTests(unittest.TestCase):
         r = A.lookup_ticket('TRANSACT-210390', FakeClient(), J.settings({}))
         self.assertTrue(r['found'] and r['can_transition'])
         self.assertEqual(r['reporter'], 'Alice')
+        self.assertEqual(r['required_fields'], [{'name': 'Root Cause', 'allowed': ['Code'], 'configured': False}])
+        r = A.lookup_ticket('TRANSACT-1', FakeClient(), {**J.settings({}), 'transition_fields': 'Bug | Root Cause | Code'})
+        self.assertEqual(r['problems'], [])
+        self.assertTrue(r['required_fields'][0]['configured'])
         r = A.lookup_ticket('TRANSACT-1', FakeClient(names=('Done',)), J.settings({}))
         self.assertFalse(r['can_transition'])
         r = A.lookup_ticket('TRANSACT-1', FakeClient(found=False), J.settings({}))

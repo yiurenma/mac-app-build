@@ -25,7 +25,7 @@ LEDGER = DATA / 'jira_ledger.json'
 SETTINGS_FILE = DATA / 'jira_settings.json'
 EDITABLE = {'enabled': bool, 'dry_run': bool, 'base_url': str, 'transition_name': str, 'assign_to_reporter': bool,
             'use_pr_lookup': bool, 'key_pattern': str, 'first_run_commits': int, 'max_tickets_per_run': int,
-            'flavor': str}
+            'flavor': str, 'transition_fields': str}
 
 
 def _type_ok(key, value):
@@ -53,6 +53,7 @@ def settings(config):
     j.setdefault('assign_to_reporter', True)
     j.setdefault('first_run_commits', 0)        # 0 = first run only records a baseline
     j.setdefault('max_tickets_per_run', 40)
+    j.setdefault('transition_fields', '')       # 流转时必填字段的值，每行：问题类型 | 字段名 | 值
     j.setdefault('use_pr_lookup', True)         # PR 为主要来源；查询失败自动退回提交信息
     j.setdefault('timeout_seconds', 30)
     return j
@@ -183,6 +184,58 @@ def tickets_from_commits(commits, pattern, llm=None, prs=None):
     return found, ambiguous
 
 
+def parse_field_rules(text):
+    """Lines of '问题类型 | 字段名 | 值' (type may be * or omitted) -> [(type, field, value)]."""
+    rules = []
+    for number, raw in enumerate((text or '').splitlines(), 1):
+        line = raw.strip()
+        if not line or line.startswith('#'):
+            continue
+        parts = [p.strip() for p in line.split('|')]
+        if len(parts) == 2:
+            parts = ['*'] + parts
+        if len(parts) != 3 or not all(parts):
+            raise ValueError(f'第 {number} 行格式不对，应为：问题类型 | 字段名 | 值（问题类型可写 * 表示全部）')
+        rules.append((parts[0].lower(), parts[1].lower(), parts[2]))
+    return rules
+
+
+def _field_value(meta, value):
+    allowed = meta.get('allowedValues') or []
+    if allowed:
+        for option in allowed:
+            names = [str(option.get(k, '')).strip().lower() for k in ('value', 'name', 'id')]
+            if value.strip().lower() in names:
+                for k in ('value', 'name', 'id'):
+                    if option.get(k) is not None:
+                        picked = {k: option[k]}
+                        break
+                return [picked] if (meta.get('schema') or {}).get('type') == 'array' else picked
+        shown = '、'.join(str(o.get('value') or o.get('name') or o.get('id')) for o in allowed)[:200]
+        raise ValueError(f'“{value}” 不在可选值里：{shown}')
+    return [value] if (meta.get('schema') or {}).get('type') == 'array' else value
+
+
+def plan_fields(required, issue_type, rules):
+    """required: Jira's transition 'fields' map. Returns (payload, missing_names, bad_messages)."""
+    payload, missing, bad = {}, [], []
+    kind = (issue_type or '').strip().lower()
+    for fid, meta in (required or {}).items():
+        if not meta.get('required') or meta.get('hasDefaultValue'):
+            continue
+        name = meta.get('name') or fid
+        hits = [r for r in rules if r[1] in (name.lower(), fid.lower()) and r[0] in (kind, '*')]
+        hits.sort(key=lambda r: r[0] == '*')            # a rule for this issue type wins over '*'
+        if not hits:
+            missing.append(name)
+            continue
+        try:
+            payload[fid] = _field_value(meta, hits[0][2])
+        except ValueError as exc:
+            bad.append(f'{name}: {exc}')
+    return payload, missing, bad
+
+
 class JiraNotFound(RuntimeError):
     """HTTP 404 from Jira (no such issue, or not visible to this token)."""
 
@@ -233,11 +286,12 @@ class JiraClient:
     def myself(self):
         return self._call('GET', '/rest/api/2/myself')
 
-    def transitions(self, key):
-        return self._call('GET', f'/rest/api/2/issue/{quote(key)}/transitions').get('transitions', [])
+    def transitions(self, key, expand=False):
+        query = '?expand=transitions.fields' if expand else ''
+        return self._call('GET', f'/rest/api/2/issue/{quote(key)}/transitions{query}').get('transitions', [])
 
     def issue(self, key):
-        return self._call('GET', f'/rest/api/2/issue/{quote(key)}?fields=reporter,status,summary')
+        return self._call('GET', f'/rest/api/2/issue/{quote(key)}?fields=reporter,status,summary,issuetype')
 
     def comments(self, key):
         return self._call('GET', f'/rest/api/2/issue/{quote(key)}/comment').get('comments', [])
@@ -250,12 +304,20 @@ class JiraClient:
             return self._call('PUT', f'/rest/api/2/issue/{quote(key)}/assignee', {'accountId': reporter.get('accountId')})
         return self._call('PUT', f'/rest/api/2/issue/{quote(key)}/assignee', {'name': reporter.get('name')})
 
-    def transition(self, key, name):
-        options = self._call('GET', f'/rest/api/2/issue/{quote(key)}/transitions').get('transitions', [])
+    def plan_transition(self, key, name, issue_type='', rules=()):
+        """Read-only: find the transition and work out the required fields it needs."""
+        options = self.transitions(key, expand=True)
         wanted = [t for t in options if t.get('name', '').strip().lower() == name.strip().lower()]
         if not wanted:
             raise RuntimeError('当前状态下没有名为 ' + name + ' 的流转: ' + ', '.join(t.get('name', '?') for t in options))
-        return self._call('POST', f'/rest/api/2/issue/{quote(key)}/transitions', {'transition': {'id': wanted[0]['id']}})
+        payload, missing, bad = plan_fields(wanted[0].get('fields'), issue_type, rules)
+        return {'id': wanted[0]['id'], 'fields': payload, 'missing': missing, 'bad': bad}
+
+    def do_transition(self, key, plan):
+        body = {'transition': {'id': plan['id']}}
+        if plan['fields']:
+            body['fields'] = plan['fields']
+        return self._call('POST', f'/rest/api/2/issue/{quote(key)}/transitions', body)
 
 
 def process_ticket(client, key, info, link, build_label, conf, llm, dry_run):
@@ -268,11 +330,35 @@ def process_ticket(client, key, info, link, build_label, conf, llm, dry_run):
     fields = issue.get('fields', {})
     reporter = fields.get('reporter') or {}
     status = (fields.get('status') or {}).get('name', '')
+    issue_type = (fields.get('issuetype') or {}).get('name', '')
     summary = tester_summary(llm, info['subject'], info.get('body', ''))
+    need_move = status.strip().lower() != conf['transition_name'].strip().lower()
+    plan, problem = None, ''
+    if need_move:
+        try:
+            plan = client.plan_transition(key, conf['transition_name'], issue_type, parse_field_rules(conf.get('transition_fields')))
+        except UnknownTicket:
+            raise
+        except Exception as exc:
+            if not dry_run:
+                raise
+            problem = safe_text(str(exc))[:160]
+        if plan and (plan['missing'] or plan['bad']):
+            problem = '；'.join(([('必填字段未配置值：' + '、'.join(plan['missing']))] if plan['missing'] else []) + plan['bad'])
+            result['manual'] = problem
     text = f'{marker} 新测试包已构建：{link}\n改动：{summary}'
+    if result.get('manual'):
+        text += f'\n（状态未自动改为 {conf["transition_name"]}，请手动处理：{problem}）'
     if dry_run:
-        result['steps'] = [f'[dry-run] comment: {text[:80]}', f'[dry-run] assign -> {reporter.get("displayName") or reporter.get("name")}',
-                           f'[dry-run] transition -> {conf["transition_name"]} (当前 {status})']
+        step = (f'transition -> {conf["transition_name"]} (当前 {status}, 类型 {issue_type or "?"})' if need_move
+                else f'已在 {conf["transition_name"]}，不需要流转')
+        if result.get('manual'):
+            step += f'；需手动：{problem}'
+        elif problem:
+            step += f'；无法预检：{problem}'
+        elif plan and plan['fields']:
+            step += '；将填写：' + '、'.join(plan['fields'])
+        result['steps'] = [f'[dry-run] comment: {text[:80]}', f'[dry-run] assign -> {reporter.get("displayName") or reporter.get("name")}', f'[dry-run] {step}']
         return result
     if not any(marker in (c.get('body') or '') for c in client.comments(key)):
         client.add_comment(key, text)
@@ -280,8 +366,8 @@ def process_ticket(client, key, info, link, build_label, conf, llm, dry_run):
     if conf['assign_to_reporter'] and (reporter.get('name') or reporter.get('accountId')):
         client.assign(key, reporter)
         result['steps'].append('assign')
-    if status.strip().lower() != conf['transition_name'].strip().lower():
-        client.transition(key, conf['transition_name'])
+    if need_move and not result.get('manual'):
+        client.do_transition(key, plan)
         result['steps'].append('transition')
     return result
 
@@ -363,6 +449,7 @@ def notify_jira(task_id, client=None, llm=None, config=None, preview=None):
     report = {'status': 'PREVIEW' if preview is not None else ('DRY_RUN' if dry else ('DONE' if not errors else 'PARTIAL')),
               'commits_scanned': len(commits), 'tickets': results,
               'errors': errors, 'ignored_keys': ignored, 'ambiguous_commits': ambiguous, 'from': old, 'to': source_sha,
+              'needs_manual': [{'key': r['key'], 'reason': r['manual']} for r in results if r.get('manual')],
               'ticket_sources': {k: found[k].get('source') for k in keys},
               'pr_lookup': ('未启用' if not prs else (prs.error or f'正常，查询 {prs.calls} 次'))}
     if preview is not None:

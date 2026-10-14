@@ -18,14 +18,28 @@ class FakeLLM:
         return self.answer
 
 
+ROOT_CAUSE = {'customfield_100': {'required': True, 'name': 'Root Cause', 'schema': {'type': 'option'},
+                                  'allowedValues': [{'id': '1', 'value': 'Code'}, {'id': '2', 'value': 'Requirement'}]}}
+
+
 class FakeJira:
-    def __init__(self, status='Dev Done', existing_comments=()):
+    def __init__(self, status='Dev Done', existing_comments=(), issue_type='Story', required=None):
         self.calls = []
         self.status = status
         self.existing = list(existing_comments)
+        self.issue_type = issue_type
+        self.required = required or {}
 
     def issue(self, key):
-        return {'fields': {'reporter': {'name': 'alice', 'displayName': 'Alice'}, 'status': {'name': self.status}}}
+        return {'fields': {'reporter': {'name': 'alice', 'displayName': 'Alice'}, 'status': {'name': self.status},
+                           'issuetype': {'name': self.issue_type}}}
+
+    def plan_transition(self, key, name, issue_type='', rules=()):
+        payload, missing, bad = J.plan_fields(self.required, issue_type, rules)
+        return {'id': '9', 'fields': payload, 'missing': missing, 'bad': bad, 'name': name}
+
+    def do_transition(self, key, plan):
+        self.calls.append(('transition', key, plan['name'], plan['fields']))
 
     def comments(self, key):
         return [{'body': c} for c in self.existing]
@@ -36,8 +50,6 @@ class FakeJira:
     def assign(self, key, reporter):
         self.calls.append(('assign', key, reporter['name']))
 
-    def transition(self, key, name):
-        self.calls.append(('transition', key, name))
 
 
 def git(repo, *args):
@@ -133,6 +145,7 @@ class GitAndFlowTests(unittest.TestCase):
         self.assertEqual(jira.calls[0][1], 'PBB-2')
         self.assertIn('https://tf/app', jira.calls[0][2])
         self.assertEqual(jira.calls[2][2], 'In Test')
+        self.assertEqual(jira.calls[2][3], {})
         self.assertEqual(ledger['develop']['last_sha'], self.shas[2])
 
     def test_missing_app_link_skips_instead_of_posting_the_jenkins_job_url(self):
@@ -142,6 +155,22 @@ class GitAndFlowTests(unittest.TestCase):
         self.assertEqual(report['status'], 'SKIPPED')
         self.assertEqual(jira.calls, [])
         self.assertEqual(ledger['develop']['last_sha'], self.shas[0])
+
+    def test_bug_without_root_cause_value_is_commented_and_assigned_but_not_moved(self):
+        jira = FakeJira(issue_type='Bug', required=ROOT_CAUSE)
+        report, ledger = self.run_notify({'dry_run': False}, ledger={'develop': {'last_sha': self.shas[0]}}, client=jira)
+        self.assertEqual([c[0] for c in jira.calls], ['comment', 'assign'])
+        self.assertIn('请手动处理', jira.calls[0][2])
+        self.assertIn('Root Cause', report['needs_manual'][0]['reason'])
+        self.assertEqual(report['status'], 'DONE')
+        self.assertEqual(ledger['develop']['last_sha'], self.shas[2])
+
+    def test_bug_with_configured_root_cause_is_moved_with_that_value(self):
+        jira = FakeJira(issue_type='Bug', required=ROOT_CAUSE)
+        report, _ = self.run_notify({'dry_run': False, 'transition_fields': 'Bug | Root Cause | code'},
+                                    ledger={'develop': {'last_sha': self.shas[0]}}, client=jira)
+        self.assertEqual(jira.calls[2], ('transition', 'PBB-2', 'In Test', {'customfield_100': {'value': 'Code'}}))
+        self.assertEqual(report['needs_manual'], [])
 
     def test_dry_run_changes_nothing_and_keeps_baseline(self):
         jira = FakeJira()
@@ -294,6 +323,20 @@ class PRFirstTests(unittest.TestCase):
         lookup._get = lambda path: [{'number': 1, 'title': 'open one', 'head': {'ref': 'a'}},
                                     {'number': 2, 'title': 'merged one', 'merged_at': 'x', 'head': {'ref': 'b'}}]
         self.assertEqual(lookup.for_commit('s')['title'], 'merged one')
+
+
+class FieldRuleTests(unittest.TestCase):
+    def test_rules_parse_match_type_and_validate_allowed_values(self):
+        rules = J.parse_field_rules('# comment\nBug | Root Cause | Code\n* | Root Cause | Requirement\n')
+        self.assertEqual(J.plan_fields(ROOT_CAUSE, 'Bug', rules)[0], {'customfield_100': {'value': 'Code'}})
+        self.assertEqual(J.plan_fields(ROOT_CAUSE, 'Story', rules)[0], {'customfield_100': {'value': 'Requirement'}})
+        self.assertEqual(J.plan_fields(ROOT_CAUSE, 'Bug', [])[1], ['Root Cause'])
+        _, _, bad = J.plan_fields(ROOT_CAUSE, 'Bug', J.parse_field_rules('Bug | Root Cause | Weather'))
+        self.assertIn('Code', bad[0])
+        text = {'customfield_7': {'required': True, 'name': 'Fix Note', 'schema': {'type': 'string'}}}
+        self.assertEqual(J.plan_fields(text, 'Bug', J.parse_field_rules('Fix Note | done'))[0], {'customfield_7': 'done'})
+        with self.assertRaises(ValueError):
+            J.parse_field_rules('only one part')
 
 
 if __name__ == '__main__':

@@ -25,6 +25,12 @@
 - 在 Jira 里查不到的编号（HTTP 404，如 `UTF-8` 之类的误识别，或当前 token 看不到的 ticket）直接忽略，只列入 `jira_report.ignored_keys`，不算失败；其他错误（如 500、无权限写入）仍算失败。
 - 基线只在非 dry-run 且全部成功后前移；部分失败时下次重跑，已完成的步骤因幂等而跳过。
 
+## 流转时的必填字段（如 Bug 的 Root Cause）
+有些工作流在流转到 `In Test` 时要求填写字段，例如 Bug 必须选 Root Cause。在 Jira 页面“更多设置 → 流转时必填字段”里每行写一条：`问题类型 | 字段名 | 值`，问题类型写 `*` 表示全部，例如 `Bug | Root Cause | Code`。
+- 脚本先只读查询该流转需要哪些必填字段及可选值，再按配置填写；值必须是 Jira 可选值之一（不区分大小写）。
+- 必填但没配置、或值不在可选值里：照常评论和转给 Reporter，但不改状态，在评论里提醒手动处理，并列入 `jira_report.needs_manual`。这不算失败。
+- “查询 ticket”会显示问题类型、流转时的必填字段、可选值以及是否已配置。
+
 ## 认证
 Token 优先在页面里填写（存入 Mac 钥匙串，不写入配置、日志或任务数据）；也可用环境变量 `JIRA_TOKEN`（Bearer PAT），或 `JIRA_USER` + `JIRA_API_TOKEN`，环境变量优先。`jira.base_url` 必须 https。企业根证书可用 `jira.ca_bundle` 指定。`flavor: server` 按用户名指派，`cloud` 按 accountId。
 

@@ -12,7 +12,7 @@ function fill(data){
   f.transition_name.value=s.transition_name||'';f.assign_to_reporter.checked=!!s.assign_to_reporter;
   f.use_pr_lookup.checked=!!s.use_pr_lookup;f.key_pattern.value=s.key_pattern||'';
   f.first_run_commits.value=s.first_run_commits??0;f.max_tickets_per_run.value=s.max_tickets_per_run??40;
-  f.flavor.value=s.flavor||'server';f.token.value='';
+  f.flavor.value=s.flavor||'server';f.transition_fields.value=s.transition_fields||'';f.token.value='';
   el('jira-token-status').textContent=TOKEN_TEXT[data.token_source]??'';
 }
 
@@ -40,7 +40,7 @@ async function save(){
     transition_name:f.transition_name.value.trim(),assign_to_reporter:f.assign_to_reporter.checked,
     use_pr_lookup:f.use_pr_lookup.checked,key_pattern:f.key_pattern.value.trim(),
     first_run_commits:parseInt(f.first_run_commits.value,10),max_tickets_per_run:parseInt(f.max_tickets_per_run.value,10),
-    flavor:f.flavor.value};
+    flavor:f.flavor.value,transition_fields:f.transition_fields.value};
   if(Number.isNaN(body.first_run_commits))delete body.first_run_commits;
   if(Number.isNaN(body.max_tickets_per_run))delete body.max_tickets_per_run;
   if(f.token.value)body.token=f.token.value;
@@ -69,7 +69,10 @@ async function lookup(){
     if(!r.found){out(r.key+'\n'+r.message);return;}
     out(r.key+' · '+r.summary+'\n当前状态：'+r.status+'\nReporter：'+r.reporter+
       '\n当前可流转的状态：'+(r.transitions.length?r.transitions.join('、'):'无')+
-      '\n能否流转到“'+r.transition_name+'”：'+(r.can_transition?'可以':'当前状态下不可以（请核对流转名称，或该 ticket 状态不对）'));
+      '\n问题类型：'+(r.issue_type||'未知')+
+      '\n能否流转到“'+r.transition_name+'”：'+(r.can_transition?'可以':'当前状态下不可以（请核对流转名称，或该 ticket 状态不对）')+
+      ((r.required_fields||[]).length?'\n流转时必填字段：\n'+r.required_fields.map(x=>'  '+x.name+(x.configured?'（已配置值）':'（还没配置值）')+(x.allowed.length?'  可选：'+x.allowed.join('、'):'')).join('\n'):'')+
+      ((r.problems||[]).length?'\n需要处理：'+r.problems.join('；'):''));
   }catch(e){out('查询失败：'+e.message);}
   finally{button.disabled=false;}
 }
@@ -84,6 +87,7 @@ function describe(r){
   }
   if((r.ignored_keys||[]).length)lines.push('','在 Jira 里查不到、已忽略：'+r.ignored_keys.join('、'));
   if((r.ambiguous_commits||[]).length)lines.push('','一个提交里有多个 Jira 号、无法确定归属，已跳过：\n  '+r.ambiguous_commits.join('\n  '));
+  if((r.needs_manual||[]).length)lines.push('','需要手动改状态（评论和转派已完成）：\n  '+r.needs_manual.map(e=>e.key+'：'+e.reason).join('\n  '));
   if((r.errors||[]).length)lines.push('','处理出错：\n  '+r.errors.map(e=>e.key+'：'+e.error).join('\n  '));
   return lines.join('\n');
 }

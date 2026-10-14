@@ -38,8 +38,9 @@ def _clean(body):
             continue
         value = body[key]
         if kind is str:
-            if not isinstance(value, str) or len(value) > 512:
-                raise ValueError(f'{key} 必须是文本（不超过 512 字符）')
+            limit = 2000 if key == 'transition_fields' else 512
+            if not isinstance(value, str) or len(value) > limit:
+                raise ValueError(f'{key} 必须是文本（不超过 {limit} 字符）')
             value = value.strip()
         elif not J._type_ok(key, value):
             raise ValueError(f'{key} 类型不正确')
@@ -56,6 +57,8 @@ def _clean(body):
             re.compile(out['key_pattern'])
         except re.error:
             raise ValueError('Jira 编号识别规则不是有效的正则表达式') from None
+    if 'transition_fields' in out:
+        J.parse_field_rules(out['transition_fields'])      # raises ValueError naming the bad line
     if 'transition_name' in out and not out['transition_name']:
         raise ValueError('流转名称不能为空')
     if 'first_run_commits' in out and not 0 <= out['first_run_commits'] <= 200:
@@ -119,14 +122,28 @@ def lookup_ticket(key, client=None, conf=None):
                 'message': 'Jira 里查不到这个编号（也可能是当前 Token 无权限查看）；正式运行时会直接忽略'}
     fields = issue.get('fields', {})
     reporter = fields.get('reporter') or {}
-    names = [t.get('name', '') for t in client.transitions(key)]
     wanted = conf['transition_name']
+    issue_type = (fields.get('issuetype') or {}).get('name', '')
+    options = client.transitions(key, expand=True)
+    names = [t.get('name', '') for t in options]
+    match = [t for t in options if t.get('name', '').strip().lower() == wanted.strip().lower()]
+    required, missing = [], []
+    if match:
+        rules = J.parse_field_rules(conf.get('transition_fields'))
+        payload, missing, bad = J.plan_fields(match[0].get('fields'), issue_type, rules)
+        for fid, meta in (match[0].get('fields') or {}).items():
+            if meta.get('required') and not meta.get('hasDefaultValue'):
+                allowed = [str(o.get('value') or o.get('name') or o.get('id')) for o in (meta.get('allowedValues') or [])]
+                required.append({'name': meta.get('name') or fid, 'allowed': allowed[:30], 'configured': fid in payload})
+        missing = missing + bad
     return {'found': True, 'key': key, 'summary': fields.get('summary', ''),
             'status': (fields.get('status') or {}).get('name', ''),
+            'issue_type': issue_type,
             'reporter': reporter.get('displayName') or reporter.get('name') or '无',
             'transitions': names,
-            'can_transition': any(n.strip().lower() == wanted.strip().lower() for n in names),
-            'transition_name': wanted}
+            'can_transition': bool(match),
+            'transition_name': wanted,
+            'required_fields': required, 'problems': missing}
 
 
 def preview(task_id, recent):
