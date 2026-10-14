@@ -75,7 +75,14 @@ async function submitBuild(evt){evt.preventDefault();
 async function resumeTask(){const id=state.selected;if(!id)return;if(!confirm(`恢复任务 ${id}？\n将复用既有分支和 Jenkins Build，不重新创建任务。`))return;
  try{await api(`/api/tasks/${encodeURIComponent(id)}/resume`,{method:'POST',body:JSON.stringify({visible:true,verbose:true})});toast('已请求恢复任务');state.offset=0;await loadTasks();await loadLog(true);}catch(e){toast(e.message,true);}}
 async function refreshDoctor(){try{const r=await api('/api/doctor');const badge=$('doctor-badge');badge.className=r.ready?'dot-label':'dot-label bad';badge.textContent=r.ready?'● Environment ready':'● Setup required';badge.title=(r.messages||[]).join('\n');if(!r.ready)toast('环境检查：'+(r.messages||[]).slice(-1)[0],true);}catch(e){toast(e.message,true);}}
-function nav(target){document.getElementById(target).scrollIntoView({behavior:'smooth',block:'start'});document.querySelectorAll('.nav').forEach(e=>e.classList.toggle('active',e.dataset.target===target));}
+const FOLD=['schedules','diagnostics','live-tests','testfairy-tests','mail-tests','jira-tests'];
+FOLD.forEach(id=>{const e=document.getElementById(id);if(e)e.classList.add('fold','collapsed');});
+function nav(target,keepOpen){const el=document.getElementById(target);
+ if(FOLD.includes(target)){const opening=keepOpen||el.classList.contains('collapsed');
+  FOLD.forEach(id=>{const e=document.getElementById(id);if(e)e.classList.add('collapsed');});
+  if(!opening){document.querySelectorAll('.nav').forEach(e=>e.classList.remove('active'));return;}
+  el.classList.remove('collapsed');}
+ el.scrollIntoView({behavior:'smooth',block:'start'});document.querySelectorAll('.nav').forEach(e=>e.classList.toggle('active',e.dataset.target===target));}
 let customFolderEdited=false;
 function syncSummary(){
   const f=$('build-form').elements;

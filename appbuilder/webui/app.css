@@ -116,3 +116,5 @@
 #jira-form .advanced-panel>summary::-webkit-details-marker{display:none}
 #jira-form .advanced-body{padding:4px 16px 16px}
 #jira-result{height:420px}
+
+.fold.collapsed{display:none}

@@ -315,7 +315,7 @@ def notify_jira(task_id, client=None, llm=None, config=None, preview=None):
         link = None  # never fall back to the Jenkins job URL: testers need the real App link
     build = runtime.get('gmx_build_number', runtime.get('gmx_formal_number', task_id))
     if not source_sha or not link:
-        report = {'status': 'SKIPPED', 'reason': '缺少来源提交或 App 链接'}
+        report = {'status': 'SKIPPED', 'reason': '缺少来源提交，或本次构建没有 App 链接（New build 里需启用 TestFairy 才会取链）'}
         if preview is not None:
             return report
         patch_runtime(task_id, jira_report=report)

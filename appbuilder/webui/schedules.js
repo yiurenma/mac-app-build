@@ -79,7 +79,7 @@ async function submit(){
   try{
     await api(editing?`/api/schedules/${encodeURIComponent(editing)}/update`:'/api/schedules',{method:'POST',body:JSON.stringify(body)});
     toast(editing?'定时任务已更新':'定时任务已创建');
-    if(generation===store.editorGeneration){resetForm();message.textContent='计划已保存';nav('schedules');}
+    if(generation===store.editorGeneration){resetForm();message.textContent='计划已保存';nav('schedules',true);}
     await load();
   }catch(e){if(generation===store.editorGeneration){message.textContent=e.message;message.classList.add('error');}toast(e.message,true);}
   finally{store.saving=false;btn.disabled=false;}
