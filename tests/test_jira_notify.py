@@ -164,5 +164,73 @@ class GitAndFlowTests(unittest.TestCase):
         self.assertTrue(J.JiraClient('https://jira.example.com', env={'JIRA_TOKEN': 'x'}).auth.startswith('Bearer '))
 
 
+class FakePRs:
+    def __init__(self, mapping, error=None):
+        self.mapping, self.error, self.calls = mapping, error, 0
+
+    def for_commit(self, sha):
+        self.calls += 1
+        return self.mapping.get(sha)
+
+
+def pr(title='', body='', head=''):
+    return {'number': 1, 'title': title, 'body': body, 'head': head}
+
+
+class PRFirstTests(unittest.TestCase):
+    def test_pr_title_and_branch_win_over_commit_text(self):
+        c = [{'sha': 'a', 'subject': 'TRANSACT-1 wrong in commit', 'body': ''}]
+        found, _ = J.tickets_from_commits(c, PATTERN, None, FakePRs({'a': pr('TRANSACT-2 right', '', 'feature/x')}))
+        self.assertEqual(list(found), ['TRANSACT-2'])
+        self.assertEqual(found['TRANSACT-2']['source'], 'PR标题/分支')
+
+    def test_key_only_in_pr_description_is_found_when_commit_has_none(self):
+        c = [{'sha': 'a', 'subject': 'fix layout', 'body': ''}]
+        found, _ = J.tickets_from_commits(c, PATTERN, None, FakePRs({'a': pr('fix layout', 'Jira: TRANSACT-210390\nbefore/after attached')}))
+        self.assertEqual(list(found), ['TRANSACT-210390'])
+        self.assertEqual(found['TRANSACT-210390']['source'], 'PR描述')
+
+    def test_branch_name_counts_as_pr_title_tier(self):
+        c = [{'sha': 'a', 'subject': 'fix', 'body': ''}]
+        found, _ = J.tickets_from_commits(c, PATTERN, None, FakePRs({'a': pr('fix', '', 'feature/TRANSACT-77-title')}))
+        self.assertEqual(list(found), ['TRANSACT-77'])
+
+    def test_no_pr_falls_back_to_commit_text(self):
+        c = [{'sha': 'a', 'subject': 'TRANSACT-5 direct push', 'body': ''}]
+        found, _ = J.tickets_from_commits(c, PATTERN, None, FakePRs({}))
+        self.assertEqual(list(found), ['TRANSACT-5'])
+        self.assertEqual(found['TRANSACT-5']['source'], '提交标题')
+
+    def test_two_keys_in_pr_description_are_not_guessed(self):
+        c = [{'sha': 'a', 'subject': 'fix', 'body': ''}]
+        found, amb = J.tickets_from_commits(c, PATTERN, None, FakePRs({'a': pr('fix', 'TRANSACT-1 and TRANSACT-2')}))
+        self.assertEqual(found, {})
+        self.assertEqual(len(amb), 1)
+
+    def test_api_base_for_enterprise_and_public_github(self):
+        self.assertEqual(J.github_api_base('https://alm-github.systems.uk.hsbc/mobile/paybybank-ios-plugin'),
+                         ('https://alm-github.systems.uk.hsbc/api/v3', 'mobile/paybybank-ios-plugin'))
+        self.assertEqual(J.github_api_base('https://github.com/o/r.git'), ('https://api.github.com', 'o/r'))
+        with self.assertRaises(ValueError):
+            J.github_api_base('http://x/o/r')
+
+    def test_lookup_failure_disables_further_calls_and_is_reported(self):
+        import urllib.error
+        lookup = J.PRLookup('https://h.example/o/r', 'tok')
+        def boom(path):
+            raise urllib.error.HTTPError('u', 403, 'forbidden', {}, None)
+        lookup._get = boom
+        self.assertIsNone(lookup.for_commit('a'))
+        self.assertIn('403', lookup.error)
+        self.assertIsNone(lookup.for_commit('b'))
+        self.assertEqual(lookup.calls, 1)
+
+    def test_lookup_prefers_the_merged_pull_request(self):
+        lookup = J.PRLookup('https://h.example/o/r', 'tok')
+        lookup._get = lambda path: [{'number': 1, 'title': 'open one', 'head': {'ref': 'a'}},
+                                    {'number': 2, 'title': 'merged one', 'merged_at': 'x', 'head': {'ref': 'b'}}]
+        self.assertEqual(lookup.for_commit('s')['title'], 'merged one')
+
+
 if __name__ == '__main__':
     unittest.main()

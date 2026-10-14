@@ -34,6 +34,7 @@ def settings(config):
     j.setdefault('assign_to_reporter', True)
     j.setdefault('first_run_commits', 0)        # 0 = first run only records a baseline
     j.setdefault('max_tickets_per_run', 40)
+    j.setdefault('use_pr_lookup', True)         # PR 为主要来源；查询失败自动退回提交信息
     j.setdefault('timeout_seconds', 30)
     return j
 
@@ -84,27 +85,88 @@ def recent_commits(repo, new, count):
     return rows
 
 
-def tickets_from_commits(commits, pattern, llm=None):
-    """Return ({key: {'subject','body','sha'}}, [ambiguous commit subjects]).
+def github_api_base(plugin_url):
+    """https://host/org/repo -> (https://host/api/v3, 'org/repo'); github.com uses api.github.com."""
+    parts = urlsplit(plugin_url or '')
+    path = parts.path.strip('/').removesuffix('.git')
+    if parts.scheme != 'https' or path.count('/') != 1:
+        raise ValueError('无法从 plugin_url 推出 GitHub 仓库')
+    host = 'https://api.github.com' if parts.netloc == 'github.com' else f'https://{parts.netloc}/api/v3'
+    return host, path
 
-    Keys in the subject win over keys in the body. Several different keys: the offline
-    model may pick one (validated against the candidates); without it the commit is skipped
-    and reported instead of guessing."""
+
+class PRLookup:
+    """Find the pull request(s) a commit came in with. Any API failure disables the lookup
+    for the rest of the run (callers then fall back to commit text) and is reported."""
+
+    def __init__(self, plugin_url, token, timeout=30, ca_bundle=None, max_calls=200):
+        self.base, self.repo = github_api_base(plugin_url)
+        self.token, self.timeout, self.ca_bundle = token, timeout, ca_bundle
+        self.max_calls, self.calls, self.cache, self.error = max_calls, 0, {}, None
+
+    def _get(self, path):
+        req = urllib.request.Request(self.base + path, headers={
+            'Authorization': 'Bearer ' + self.token, 'Accept': 'application/vnd.github+json'})
+        ctx = None
+        if self.ca_bundle:
+            import ssl
+            ctx = ssl.create_default_context(cafile=self.ca_bundle)
+        with urllib.request.urlopen(req, timeout=self.timeout, context=ctx) as r:
+            return json.loads(r.read() or b'[]')
+
+    def for_commit(self, sha):
+        if self.error or self.calls >= self.max_calls:
+            return None
+        self.calls += 1
+        try:
+            prs = self._get(f'/repos/{self.repo}/commits/{sha}/pulls')
+        except urllib.error.HTTPError as exc:
+            self.error = f'GitHub PR 查询失败 HTTP {exc.code}，改用提交信息'
+            return None
+        except Exception as exc:
+            self.error = f'GitHub PR 查询失败 {type(exc).__name__}，改用提交信息'
+            return None
+        if not prs:
+            return None
+        pr = next((p for p in prs if p.get('merged_at')), prs[0])
+        info = {'number': pr.get('number'), 'title': pr.get('title') or '', 'body': pr.get('body') or '',
+                'head': (pr.get('head') or {}).get('ref', '')}
+        self.cache[sha] = info
+        return info
+
+
+def tickets_from_commits(commits, pattern, llm=None, prs=None):
+    """Return ({key: {'subject','body','sha','source'}}, [ambiguous commit subjects]).
+
+    The PR is the source of truth (the team rule is about the PR). Tiers, first hit wins:
+    PR title + PR branch, then PR description, then commit subject, then commit body.
+    Several different keys inside one tier: the offline model may pick one (validated against
+    the candidates); without it the commit is skipped and reported instead of guessing."""
     regex = re.compile(pattern)
     found, ambiguous = {}, []
     for c in commits:
-        keys = list(dict.fromkeys(regex.findall(c['subject'])))
-        if not keys:
-            keys = list(dict.fromkeys(regex.findall(c['body'])))
+        pr = prs.for_commit(c['sha']) if prs else None
+        tiers = []
+        if pr:
+            tiers += [('PR标题/分支', pr['title'] + '\n' + pr['head']), ('PR描述', pr['body'])]
+        tiers += [('提交标题', c['subject']), ('提交正文', c['body'])]
+        keys, source = [], ''
+        for name, text in tiers:
+            keys = list(dict.fromkeys(regex.findall(text)))
+            if keys:
+                source = name
+                break
         if not keys:
             continue
+        context = ((pr['title'] + '\n' + pr['body']) if pr else '') + '\n' + c['subject'] + '\n' + c['body']
         if len(keys) > 1:
-            chosen = pick_primary_ticket(llm, keys, c['subject'] + '\n' + c['body'])
+            chosen = pick_primary_ticket(llm, keys, context)
             if not chosen:
-                ambiguous.append(c['subject'][:120])
+                ambiguous.append((pr['title'] if pr else c['subject'])[:120])
                 continue
             keys = [chosen]
-        found.setdefault(keys[0], c)
+        found.setdefault(keys[0], {**c, 'subject': (pr['title'] if pr and pr['title'] else c['subject']),
+                                   'source': source})
     return found, ambiguous
 
 
@@ -223,7 +285,15 @@ def notify_jira(task_id, client=None, llm=None, config=None):
             return
     else:
         commits = commits_between(repo, old, source_sha)
-    found, ambiguous = tickets_from_commits(commits, conf['key_pattern'], llm)
+    prs = None
+    if conf['use_pr_lookup'] and commits:
+        try:
+            from .config import token_or_error
+            prs = PRLookup(params.get('plugin_url') or config['github']['plugin_url'], token_or_error(config),
+                           timeout=conf['timeout_seconds'], ca_bundle=conf.get('ca_bundle'))
+        except Exception as exc:
+            action('JIRA', safe_text(f'PR 查询不可用，改用提交信息: {exc}'))
+    found, ambiguous = tickets_from_commits(commits, conf['key_pattern'], llm, prs)
     keys = list(found)[:conf['max_tickets_per_run']]
     dry = bool(conf['dry_run'])
     results, errors = [], []
@@ -237,7 +307,9 @@ def notify_jira(task_id, client=None, llm=None, config=None):
             errors.append({'key': key, 'error': safe_text(str(exc))[:200]})
             action('JIRA', safe_text(f'{key} 处理失败: {exc}'))
     report = {'status': 'DRY_RUN' if dry else ('DONE' if not errors else 'PARTIAL'), 'tickets': results,
-              'errors': errors, 'ambiguous_commits': ambiguous, 'from': old, 'to': source_sha}
+              'errors': errors, 'ambiguous_commits': ambiguous, 'from': old, 'to': source_sha,
+              'ticket_sources': {k: found[k].get('source') for k in keys},
+              'pr_lookup': ('未启用' if not prs else (prs.error or f'正常，查询 {prs.calls} 次'))}
     patch_runtime(task_id, jira_report=report)
     if not dry and not errors:
         ledger[branch] = {'last_sha': source_sha}

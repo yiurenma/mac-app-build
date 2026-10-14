@@ -65,6 +65,7 @@ jira:
   assign_to_reporter: true
   first_run_commits: 0      # 0=首次只记录基线；>0=首次回溯最近 N 个提交
   max_tickets_per_run: 40
+  use_pr_lookup: true       # 以 PR（标题/分支/描述）为主要来源找 Jira 号；查询失败自动退回提交信息
 
 # 离线本地模型（llama.cpp GGUF）。不联网、不调用任何外部 API。
 # 只做两件事：一个提交写了多个 Jira 号时选主要的一个；把提交改写成给测试看的短说明。

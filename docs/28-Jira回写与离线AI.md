@@ -1,7 +1,7 @@
 # 构建成功后回写 Jira，并可选使用离线本地模型
 
 ## 做什么
-任务 `SUCCESS` 后：找出自上次处理以来合入来源分支（如 develop）的提交，从提交标题/正文提取 Jira 号，对每个 ticket：
+任务 `SUCCESS` 后：找出自上次处理以来合入来源分支（如 develop）的提交，找 Jira 号时以 PR 为主要来源（先 PR 标题和分支名，再 PR 描述，找不到再退回提交标题/正文），对每个 ticket：
 1. 写 comment（含 App 链接，带 `[app-build:<构建号>]` 标记，重复运行不会重复评论）；
 2. assign 给 Reporter；
 3. 状态流转到 `In Test`（已在该状态则跳过）。
@@ -24,6 +24,7 @@
 模型只做两件事：多 Jira 号时选主 ticket；把提交改写成给测试看的短说明（不合格则退回原提交标题）。模型文件缺失或依赖未装时自动降级为纯规则。
 
 ## 已知边界
-- 只能看到 git 提交信息，看不到 PR 描述、截图或视频，所以无法检查"改动前后截图/视频"这条要求，那需要 GitHub API 另做。
+- PR 通过 GitHub 接口（`/api/v3`，复用已有 GitHub Token）按提交查询；接口不通或权限不足时自动退回提交信息，并在 `jira_report.pr_lookup` 里写明原因。企业 GitHub 的接口是否开放、Token 权限是否够，需现场确认。
+- 截图和视频在 Jira 附件里，这里不检查"改动前后截图/视频"这条要求。
 - 未在公司 Jira、公司 Mac 上实测；`transition_name` 必须与你们 Jira 工作流中的流转名称一致。
 - 本机 `.appbuilder/jira_ledger.json` 记录每个来源分支已处理到的提交。
