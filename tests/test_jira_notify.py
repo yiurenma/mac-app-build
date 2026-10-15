@@ -112,23 +112,71 @@ class GitAndFlowTests(unittest.TestCase):
         self.assertEqual([r['subject'] for r in rows], ['no key here', 'PBB-2 second'])
         self.assertEqual(J.commits_between(self.repo, None, self.shas[2]), [])
 
-    def run_notify(self, jira_conf, ledger=None, client=None, status='SUCCESS', share='https://tf/app'):
+    def run_notify(self, jira_conf, ledger=None, client=None, status='SUCCESS', share='https://tf/app', folder=None):
         data = Path(self.tmp.name) / 'data'
         data.mkdir()
         ledger_path = data / 'jira_ledger.json'
         if ledger is not None:
             ledger_path.write_text(json.dumps(ledger))
         patched = {}
-        row = {'status': status, 'params': json.dumps({'plugin_source': 'develop', 'gmx_job': 'https://j/1'})}
+        row = {'status': status, 'params': json.dumps({'plugin_source': 'develop', 'gmx_job': 'https://j/1',
+                                                       'plugin_url': 'https://github.example.com/org/plugin'})}
         state = {'runtime': {'plugin_source_sha': self.shas[2], 'gmx_build_number': 7,
                              'testfairy_app': {'share_url': share}}}
         config = {'jira': {'enabled': True, 'base_url': 'https://jira.example.com', **jira_conf}}
         with patch.object(J, 'LEDGER', ledger_path), patch.object(J, 'task', return_value=row), \
                 patch.object(J, 'read_state', return_value=state), \
-                patch.object(J, 'task_folder', return_value=Path(self.tmp.name)), \
+                patch.object(J, 'task_folder', return_value=folder or Path(self.tmp.name)), \
                 patch.object(J, 'patch_runtime', side_effect=lambda tid, **kw: patched.update(kw)):
             J.notify_jira('T1', client=client, llm=None, config=config)
         return patched.get('jira_report'), (json.loads(ledger_path.read_text()) if ledger_path.exists() else {})
+
+    def test_without_local_clone_commits_come_from_github(self):
+        # A reused Plugin build never clones the repo; the Jira step must still work.
+        calls = []
+
+        class FakeGitHub:
+            repo = 'org/plugin'
+            error, cache = None, {}
+
+            def __init__(self, *a, **kw):
+                self.calls = 0
+
+            def repo_get(self, path):
+                calls.append(path)
+                return {'status': 'ahead', 'commits': [
+                    {'sha': 'a1', 'commit': {'message': 'PBB-2 second\n\nbody'}},
+                    {'sha': 'a2', 'commit': {'message': 'no key here'}}]}
+
+            def for_commit(self, sha):
+                return None
+
+        empty = Path(self.tmp.name) / 'no-clone'
+        empty.mkdir()
+        jira = FakeJira()
+        with patch.object(J, 'PRLookup', FakeGitHub), patch('appbuilder.config.token_or_error', return_value='t'):
+            report, ledger = self.run_notify({'dry_run': False}, ledger={'develop': {'last_sha': self.shas[0]}},
+                                             client=jira, folder=empty)
+        self.assertEqual(calls, [f'/compare/{self.shas[0]}...{self.shas[2]}'])
+        self.assertEqual(report['status'], 'DONE')
+        self.assertEqual(jira.calls[0][1], 'PBB-2')
+        self.assertEqual(ledger['develop']['last_sha'], self.shas[2])
+
+    def test_same_source_as_last_time_reads_nothing(self):
+        jira = FakeJira()
+        empty = Path(self.tmp.name) / 'no-clone'
+        empty.mkdir()
+        with patch.object(J, 'PRLookup', side_effect=AssertionError('must not call GitHub')):
+            report, _ = self.run_notify({'dry_run': False}, ledger={'develop': {'last_sha': self.shas[2]}},
+                                        client=jira, folder=empty)
+        self.assertEqual((report['status'], report['commits_scanned'], jira.calls), ('DONE', 0, []))
+
+    def test_github_compare_that_is_not_ahead_is_refused(self):
+        api = J.GitHubCommits(lambda path: {'status': 'diverged', 'commits': []})
+        with self.assertRaisesRegex(RuntimeError, '单向前进'):
+            api.between('a', 'b')
+        rows = J.GitHubCommits(lambda path: [{'sha': 's', 'commit': {'message': 'T-1 x\ny'}}]).recent('b', 3)
+        self.assertEqual(rows, [{'sha': 's', 'subject': 'T-1 x', 'body': 'y'}])
 
     def test_first_run_only_records_baseline_and_touches_nothing(self):
         jira = FakeJira()

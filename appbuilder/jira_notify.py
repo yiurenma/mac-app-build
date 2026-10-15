@@ -109,6 +109,33 @@ def recent_commits(repo, new, count):
     return rows
 
 
+def _split_message(sha, message):
+    subject, _, body = (message or '').partition('\n')
+    return {'sha': sha, 'subject': subject.strip(), 'body': body.strip()}
+
+
+class GitHubCommits:
+    """Commit lists from the GitHub API, used when this task has no local Plugin clone
+    (for example the Plugin build was reused from an earlier task, or the folder was moved)."""
+
+    def __init__(self, getter):
+        self._get = getter
+
+    def between(self, old, new, limit=500):
+        if not old:
+            return []
+        data = self._get(f'/compare/{quote(old)}...{quote(new)}')
+        commits = data.get('commits') or []
+        if data.get('status') not in ('ahead', 'identical'):
+            raise RuntimeError('GitHub 比较结果不是单向前进（基线可能已不在来源分支）')
+        rows = [_split_message(c.get('sha', ''), (c.get('commit') or {}).get('message', '')) for c in commits]
+        return list(reversed(rows))[:limit]                    # newest first, like git log
+
+    def recent(self, new, count):
+        data = self._get(f'/commits?sha={quote(new)}&per_page={int(count)}')
+        return [_split_message(c.get('sha', ''), (c.get('commit') or {}).get('message', '')) for c in data or []]
+
+
 def github_api_base(plugin_url):
     """https://host/org/repo -> (https://host/api/v3, 'org/repo'); github.com uses api.github.com."""
     parts = urlsplit(plugin_url or '')
@@ -127,6 +154,13 @@ class PRLookup:
         self.base, self.repo = github_api_base(plugin_url)
         self.token, self.timeout, self.ca_bundle = token, timeout, ca_bundle
         self.max_calls, self.calls, self.cache, self.error = max_calls, 0, {}, None
+
+    def repo_get(self, path):
+        """GET /repos/<repo><path>; errors are raised (used for commit lists)."""
+        try:
+            return self._get(f'/repos/{self.repo}{path}')
+        except urllib.error.HTTPError as exc:
+            raise RuntimeError(f'GitHub 读取提交失败 HTTP {exc.code}') from None
 
     def _get(self, path):
         req = urllib.request.Request(self.base + path, headers={
@@ -449,31 +483,59 @@ def _notify_jira(task_id, client=None, llm=None, config=None, preview=None):
     if preview is None and (runtime.get('jira_report') or {}).get('status') in ('DONE', 'DRY_RUN'):
         return
     repo = task_folder(task_id) / 'plugin'
-    if preview is not None and not repo.exists():
-        raise ValueError('该任务的本地 Plugin 克隆已不存在，无法演练')
+    local = (repo / '.git').is_dir()
     branch = params.get('plugin_source') or 'unknown'
     ledger = _read_ledger()
     old = (ledger.get(branch) or {}).get('last_sha')
     llm = llm if llm is not None else get_llm(config)
+    github = None
+
+    def remote():
+        nonlocal github
+        if github is None:
+            from .config import token_or_error
+            github = PRLookup(params.get('plugin_url') or config['github']['plugin_url'], token_or_error(config),
+                              timeout=conf['timeout_seconds'], ca_bundle=conf.get('ca_bundle'))
+        return GitHubCommits(github.repo_get)
+
+    def between(a, b):
+        if local:
+            try:
+                return commits_between(repo, a, b)
+            except RuntimeError:
+                pass                                   # baseline not in this clone: ask GitHub
+        return remote().between(a, b)
+
+    def recent(b, n):
+        rows = recent_commits(repo, b, n) if local else []
+        return rows or remote().recent(b, n)
+
+    if not local:
+        action('JIRA', '本任务没有本地 Plugin 代码（可能复用了之前的 Plugin 构建），改从 GitHub 读取提交')
     if preview is not None:
         old = None
-        commits = recent_commits(repo, source_sha, int(preview))
+        commits = recent(source_sha, int(preview))
     elif old is None:
-        commits = recent_commits(repo, source_sha, conf['first_run_commits']) if conf['first_run_commits'] else []
+        commits = recent(source_sha, conf['first_run_commits']) if conf['first_run_commits'] else []
         if not commits:
             ledger[branch] = {'last_sha': source_sha}
             _write_ledger(ledger)
             patch_runtime(task_id, jira_report={'status': 'BASELINE', 'reason': '首次运行，仅记录基线，不改任何 ticket'})
             action('JIRA', '首次运行：记录基线提交，不改 ticket')
             return
+    elif old == source_sha:
+        commits = []                                   # nothing new since the last processed build
     else:
-        commits = commits_between(repo, old, source_sha)
+        commits = between(old, source_sha)
     prs = None
     if conf['use_pr_lookup'] and commits:
         try:
-            from .config import token_or_error
-            prs = PRLookup(params.get('plugin_url') or config['github']['plugin_url'], token_or_error(config),
-                           timeout=conf['timeout_seconds'], ca_bundle=conf.get('ca_bundle'))
+            if github is not None:
+                prs = github
+            else:
+                from .config import token_or_error
+                prs = PRLookup(params.get('plugin_url') or config['github']['plugin_url'], token_or_error(config),
+                               timeout=conf['timeout_seconds'], ca_bundle=conf.get('ca_bundle'))
         except Exception as exc:
             action('JIRA', safe_text(f'PR 查询不可用，改用提交信息: {exc}'))
     found, ambiguous = tickets_from_commits(commits, conf['key_pattern'], llm, prs)
