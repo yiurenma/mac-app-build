@@ -136,3 +136,12 @@
 .tool-tab.active{border-color:#75e5e1;background:#13303c;color:#eff4ff}
 .tools-panel>.panel{border:0;background:transparent;margin-top:0;padding:14px 0 0}
 @media(max-width:900px){.settings-grid{grid-template-columns:1fr}}
+.delivery-bar{display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;justify-content:space-between;margin-bottom:8px}
+.delivery-bar .tool-tabs{border:0;margin:0;padding:0}
+.delivery-search{display:flex;flex-direction:column;gap:6px;font-size:11px;color:#a3b8cf;font-weight:700;min-width:280px}
+.delivery-search input{background:#0e1b2d;border:1px solid #3b5368;border-radius:9px;color:#e5f1ff;padding:10px 12px;font:12px inherit}
+#delivery-table td{vertical-align:top}
+#delivery-table td small{display:block;color:#8aa0bb;margin-top:3px}
+#delivery-table details pre{white-space:pre-wrap;font:11px/1.6 ui-monospace,Menlo,monospace;color:#bccad9;background:#080f1b;border:1px solid #283a53;border-radius:8px;padding:10px;max-width:640px}
+.pill.manual{color:#ffd9a0;background:#3d3320}.pill.dry{color:#c3cfdf;background:#182337}.pill.sent{color:#98e6bf;background:#153b33}.pill.error{color:#ffa5a7;background:#452632}
+#delivery-table .pill{white-space:nowrap}

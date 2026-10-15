@@ -14,7 +14,7 @@ function fill(data){
   f.use_pr_lookup.checked=!!s.use_pr_lookup;f.key_pattern.value=s.key_pattern||'';
   f.first_run_commits.value=s.first_run_commits??0;f.max_tickets_per_run.value=s.max_tickets_per_run??40;
   f.flavor.value=s.flavor||'server';f.transition_fields.value=s.transition_fields||'';f.token.value='';
-  f.mail_enabled.checked=!!s.mail_enabled;f.mail_issue.value=s.mail_issue||'';f.mail_users.value=s.mail_users||'';
+  f.mail_enabled.checked=!!s.mail_enabled;f.mail_failure_once.checked=s.mail_failure_once!==false;f.mail_issue.value=s.mail_issue||'';f.mail_users.value=s.mail_users||'';
   el('jira-token-status').textContent=TOKEN_TEXT[data.token_source]??'';
   const b=el('build-jira-status');
   if(b)b.textContent='Jira 回填：'+(s.enabled?(s.dry_run?'已启用（演练模式，只记录不修改 Jira）':'已启用'):'未启用')+' · Token：'+(TOKEN_TEXT[data.token_source]??'未知')+
@@ -46,7 +46,7 @@ async function save(){
     use_pr_lookup:f.use_pr_lookup.checked,key_pattern:f.key_pattern.value.trim(),
     first_run_commits:parseInt(f.first_run_commits.value,10),max_tickets_per_run:parseInt(f.max_tickets_per_run.value,10),
     flavor:f.flavor.value,transition_fields:f.transition_fields.value,
-    mail_enabled:f.mail_enabled.checked,mail_issue:f.mail_issue.value.trim(),mail_users:f.mail_users.value};
+    mail_enabled:f.mail_enabled.checked,mail_failure_once:f.mail_failure_once.checked,mail_issue:f.mail_issue.value.trim(),mail_users:f.mail_users.value};
   if(Number.isNaN(body.first_run_commits))delete body.first_run_commits;
   if(Number.isNaN(body.max_tickets_per_run))delete body.max_tickets_per_run;
   if(f.token.value)body.token=f.token.value;

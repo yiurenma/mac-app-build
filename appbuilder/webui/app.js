@@ -37,7 +37,7 @@ function renderSelection(){const row=state.tasks.find(t=>t.id===state.selected);
       const a=create('a','jenkins-link','↗ APP 链接'+(row.delivery.app.app_version?' '+row.delivery.app.app_version:''));a.href=url.href;a.target='_blank';a.rel='noopener noreferrer';links.append(a);
     }}catch(e){}
   }
-  if(row.delivery?.jira_mail){const m=row.delivery.jira_mail;box.append(create('p','diag-note',m.status==='SENT'?'邮件通知 · 已通过 Jira 发给 '+m.to.length+' 人（'+m.to.join('、')+'）':'邮件通知 · 未发送：'+(m.reason||m.status)));}
+  if(row.delivery?.jira_mail){const m=row.delivery.jira_mail,what=m.kind==='failure'?'失败通知':'新包通知';box.append(create('p','diag-note',m.status==='SENT'?'邮件 · '+what+'已通过 Jira 发给 '+m.to.length+' 人（'+m.to.join('、')+'）':m.status==='SUPPRESSED'?'邮件 · '+m.reason:'邮件 · 未发送：'+(m.reason||m.status)));}
   const phases=['PLUGIN_CHECKOUT','PLUGIN_EDIT','PLUGIN_PUSH','PLUGIN_JENKINS','GMX_CHECKOUT','GMX_EDIT','GMX_LOCK','GMX_PUSH','GMX_JENKINS'];const idx=row.stage==='PLUGIN_PREPARE'?0:phases.indexOf(row.stage);
   $('stage-strip').querySelectorAll('div').forEach((e,i)=>{e.className='';if(row.status==='SUCCESS'||(idx>=0&&i<idx))e.className='done';else if(i===idx)e.className='current';});
   $('resume-build').hidden=['SUCCESS','RUNNING','QUEUED'].includes(row.status);
@@ -75,7 +75,7 @@ async function submitBuild(evt){evt.preventDefault();
 async function resumeTask(){const id=state.selected;if(!id)return;if(!confirm(`恢复任务 ${id}？\n将复用既有分支和 Jenkins Build，不重新创建任务。`))return;
  try{await api(`/api/tasks/${encodeURIComponent(id)}/resume`,{method:'POST',body:JSON.stringify({visible:true,verbose:true})});toast('已请求恢复任务');state.offset=0;await loadTasks();await loadLog(true);}catch(e){toast(e.message,true);}}
 async function refreshDoctor(){try{const r=await api('/api/doctor');const badge=$('doctor-badge');badge.className=r.ready?'dot-label':'dot-label bad';badge.textContent=r.ready?'● Environment ready':'● Setup required';badge.title=(r.messages||[]).join('\n');if(!r.ready)toast('环境检查：'+(r.messages||[]).slice(-1)[0],true);}catch(e){toast(e.message,true);}}
-const FOLD=['schedules','settings','tools'];
+const FOLD=['delivery','schedules','settings','tools'];
 FOLD.forEach(id=>{const e=document.getElementById(id);if(e)e.classList.add('fold','collapsed');});
 // Test tools are tabs inside the "测试工具" panel; old panel ids still open their tab.
 const TOOL_TABS=['diagnostics','live-tests','testfairy-tests','jira-tools'];

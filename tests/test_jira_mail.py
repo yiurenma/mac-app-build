@@ -47,6 +47,9 @@ class Fixture(unittest.TestCase):
             self.state['runtime'].update(values)
 
         p = patch.object(J, 'SETTINGS_FILE', self.file); p.start(); self.addCleanup(p.stop)
+        for name, file in (('MAIL_LOG', 'mail_log.jsonl'), ('MAIL_STATE', 'mail_state.json')):   # never the real data folder
+            p = patch.object(M, name, Path(self.tmp.name) / file); p.start(); self.addCleanup(p.stop)
+        p = patch.object(M, 'task_folder', lambda _: Path(self.tmp.name) / 'task'); p.start(); self.addCleanup(p.stop)
         for name, value in [('task', lambda _: self.row), ('read_state', lambda _: self.state),
                             ('patch_runtime', patch_runtime),
                             ('load_config', lambda: {'jira': {'base_url': BASE}})]:
@@ -134,19 +137,78 @@ class NotifyTeamTests(Fixture):
         M.notify_team(self.row['id'], client=jira)
         self.assertEqual(jira.calls[0][2]['to']['users'], [{'accountId': 'abc123'}])
 
-    def test_off_failed_build_or_no_link_sends_nothing(self):
+    def test_off_interrupted_or_success_without_link_sends_nothing(self):
         jira = FakeJira()
         self.save(mail_enabled=False, mail_issue='TRANSACT-9', mail_users='a', base_url=BASE)
         M.notify_team(self.row['id'], client=jira)
         self.assertEqual(self.writes, [])
         self.save(mail_enabled=True, mail_issue='TRANSACT-9', mail_users='a', base_url=BASE)
-        self.row['status'] = 'FAILED'
+        self.row['status'] = 'INTERRUPTED'                    # stopped on purpose: not a failure to report
         M.notify_team(self.row['id'], client=jira)
+        self.assertEqual(self.writes, [])
         self.row['status'] = 'SUCCESS'
         self.state['runtime'] = runtime(link=None)
         M.notify_team(self.row['id'], client=jira)
         self.assertEqual(jira.calls, [])
         self.assertEqual(self.state['runtime']['jira_mail']['status'], 'SKIPPED')
+
+    def failed(self, task_id, stage='GMX_JENKINS', note='GMX Build #41 失败'):
+        self.row = {**self.row, 'id': task_id, 'status': 'FAILED', 'stage': stage, 'note': note}
+        self.state = {'runtime': {}}
+
+    def test_failure_email_says_where_why_and_links_jenkins(self):
+        self.save(mail_enabled=True, mail_issue='TRANSACT-9', mail_users='a', base_url=BASE)
+        task_dir = Path(self.tmp.name) / 'task'
+        task_dir.mkdir()
+        (task_dir / 'run.log').write_text('ok\n[FAILED] GMX 构建失败 password=SECRET\nfinal\n')
+        self.failed('202610150900-aaaaaa')
+        jira = FakeJira()
+        links = [{'label': 'GMX Build #41', 'url': 'https://jenkins.example.com/job/x/41/'},
+                 {'label': 'GMX Job', 'url': 'https://jenkins.example.com/job/x/'}]
+        with patch('appbuilder.web._jenkins_links', return_value=links):
+            M.notify_team(self.row['id'], client=jira)
+        body = jira.calls[0][2]
+        self.assertEqual(body['subject'], '[构建失败] UK PayByBank · 失败在 GMX 构建')
+        for text in ('失败步骤：GMX 构建', '原因：GMX Build #41 失败',
+                     'GMX Build #41  https://jenkins.example.com/job/x/41/', '[FAILED] GMX 构建失败'):
+            self.assertIn(text, body['textBody'])
+        self.assertNotIn('GMX Job', body['textBody'])           # only concrete builds, not the job page
+        self.assertNotIn('SECRET', body['textBody'])
+        self.assertEqual(self.state['runtime']['jira_mail']['kind'], 'failure')
+        logged = M.read_mails()
+        self.assertEqual((logged[0]['kind'], logged[0]['status']), ('failure', 'SENT'))
+
+    def test_same_failure_reason_is_reported_once_until_a_success(self):
+        self.save(mail_enabled=True, mail_issue='TRANSACT-9', mail_users='a', base_url=BASE)
+        jira = FakeJira()
+        with patch('appbuilder.web._jenkins_links', return_value=[]):
+            self.failed('202610150900-aaaaaa', note='GMX Build #41 失败')
+            M.notify_team(self.row['id'], client=jira)
+            self.failed('202610150900-bbbbbb', note='GMX Build #42 失败')     # same reason, other build number
+            M.notify_team(self.row['id'], client=jira)
+            self.assertEqual(len(jira.calls), 1)
+            self.assertEqual(self.state['runtime']['jira_mail']['status'], 'SUPPRESSED')
+            self.failed('202610150900-cccccc', stage='PLUGIN_JENKINS', note='Plugin 失败')   # new reason: sent
+            M.notify_team(self.row['id'], client=jira)
+            self.assertEqual(len(jira.calls), 2)
+        # recovery: the success email says so, and the next failure is reported again
+        self.row = {'id': '202610150900-dddddd', 'status': 'SUCCESS', 'params': json.dumps(PARAMS)}
+        self.state = {'runtime': runtime()}
+        M.notify_team(self.row['id'], client=jira)
+        self.assertTrue(jira.calls[2][2]['textBody'].startswith('之前的构建失败已恢复'))
+        with patch('appbuilder.web._jenkins_links', return_value=[]):
+            self.failed('202610150900-eeeeee', stage='PLUGIN_JENKINS', note='Plugin 失败')
+            M.notify_team(self.row['id'], client=jira)
+        self.assertEqual(len(jira.calls), 4)
+
+    def test_dedupe_can_be_switched_off(self):
+        self.save(mail_enabled=True, mail_issue='TRANSACT-9', mail_users='a', base_url=BASE, mail_failure_once=False)
+        jira = FakeJira()
+        with patch('appbuilder.web._jenkins_links', return_value=[]):
+            for task_id in ('202610150900-aaaaaa', '202610150900-bbbbbb'):
+                self.failed(task_id)
+                M.notify_team(self.row['id'], client=jira)
+        self.assertEqual(len(jira.calls), 2)
 
     def test_missing_settings_are_recorded_not_raised(self):
         self.save(mail_enabled=True, mail_issue='', mail_users='', base_url=BASE)
@@ -160,6 +222,7 @@ class NotifyTeamTests(Fixture):
         mail = self.state['runtime']['jira_mail']
         self.assertEqual(mail['status'], 'FAILED')
         self.assertIn('HTTP 403', mail['reason'])
+        self.assertEqual(M.read_mails()[0]['status'], 'FAILED')       # failures are logged too
 
 
 class TestEmailTests(Fixture):
@@ -173,6 +236,7 @@ class TestEmailTests(Fixture):
         self.assertIn('POST https://jira.example.com/rest/api/2/issue/TRANSACT-9/notify', out['request'])
         self.assertIn('"name": "a"', out['request'])
         self.assertIn(LINK, jira.calls[0][2]['textBody'])
+        self.assertEqual(M.read_mails()[0]['kind'], 'test')
 
     def test_without_any_successful_build_a_plain_test_is_sent(self):
         self.save(base_url=BASE)
@@ -251,6 +315,17 @@ class JiraErrorDetailTests(unittest.TestCase):
         with patch('urllib.request.urlopen', side_effect=error), self.assertRaises(RuntimeError) as caught:
             client._call('POST', '/x', {})
         self.assertTrue(str(caught.exception).endswith('HTTP 400'))
+
+
+class MailLogTests(Fixture):
+    def test_newest_first_search_and_bad_lines_are_skipped(self):
+        M.log_mail({'kind': 'success', 'subject': 'A', 'task_id': 'T1', 'to': ['x']})
+        with M.MAIL_LOG.open('a') as out:
+            out.write('not json\n')
+        M.log_mail({'kind': 'failure', 'subject': 'B', 'task_id': 'T2', 'to': ['y']})
+        self.assertEqual([r['subject'] for r in M.read_mails()], ['B', 'A'])
+        self.assertEqual([r['subject'] for r in M.read_mails('t1')], ['A'])
+        self.assertTrue(M.read_mails()[0]['at'])
 
 
 class LegacyOutlookTemplateTests(unittest.TestCase):

@@ -75,13 +75,13 @@ class SharedBuildUITests(SharedBuildUIFixture, unittest.TestCase):
     def test_tool_panels_are_collapsed_and_open_one_at_a_time(self):
         p = self.page
         p.reload()
-        for i in ['schedules', 'settings', 'tools']:
+        for i in ['delivery', 'schedules', 'settings', 'tools']:
             expect(p.locator('#' + i)).to_be_hidden()
         self.assertEqual(p.locator('#mail-tests, [data-target=mail-tests], #jira-tests').count(), 0)
         # Menu: two groups, Chinese labels, the test tools behind one entry.
         self.assertEqual(p.locator('.sidebar-label').all_text_contents(), ['日常', '设置与排查'])
         self.assertEqual([t.split()[-1] for t in p.locator('.nav').all_inner_texts()],
-                         ['概览', '新建构建', '运行记录', '定时任务', '设置', '测试工具'])
+                         ['概览', '新建构建', '运行记录', '交付记录', '定时任务', '设置', '测试工具'])
         p.locator('[data-target=settings]').click()
         expect(p.locator('#settings')).to_be_visible()
         p.locator('[data-target=tools]').click()
@@ -289,6 +289,39 @@ class SharedBuildUITests(SharedBuildUIFixture, unittest.TestCase):
         destination=Path('/tmp/mac-app-build-ui');destination.mkdir(exist_ok=True)
         p.locator('#testfairy-tests').screenshot(path=str(destination/'testfairy-test.png'))
 
+    def test_delivery_page_lists_tickets_with_links_and_mails_with_bodies(self):
+        p=self.page;seen=[]
+        tickets={'jira_base':'https://jira.example.com','items':[
+            {'at':'2026-10-15T12:30:00','key':'TRANSACT-1','summary':'Fix <b>login</b>','steps':['comment','assign','transition'],
+             'link':'https://tenant.testfairy.com/join/abc','task_id':'T2','build':7,'result':'DONE','note':''},
+            {'at':'2026-10-15T12:30:00','key':'TRANSACT-2','summary':'','steps':[],'link':'javascript:alert(1)',
+             'task_id':'T2','build':7,'result':'MANUAL','note':'Fix Note 未配置'}]}
+        mails={'items':[{'at':'2026-10-15T12:31:00','kind':'failure','task_id':'T3','subject':'[构建失败] UK','to':['a','b'],
+                         'status':'SENT','reason':'','body':'失败步骤：GMX 构建'}]}
+        def handle(route):
+            seen.append(route.request.url)
+            route.fulfill(json=mails if '/mails' in route.request.url else tickets)
+        p.route('**/api/delivery/**',handle)
+        self.show('delivery')
+        expect(p.locator('#delivery-body tr')).to_have_count(2)
+        first=p.locator('#delivery-body tr').first
+        expect(first.locator('a',has_text='TRANSACT-1')).to_have_attribute('href','https://jira.example.com/browse/TRANSACT-1')
+        expect(first.locator('a',has_text='打开')).to_have_attribute('href','https://tenant.testfairy.com/join/abc')
+        expect(first).to_contain_text('Fix <b>login</b>')                 # shown as text, never as HTML
+        second=p.locator('#delivery-body tr').nth(1)
+        self.assertEqual(second.locator('a',has_text='打开').count(),0)     # a non-https link is not clickable
+        expect(second).to_contain_text('状态需手动改')
+        p.locator('[data-delivery=mails]').click()
+        expect(p.locator('#delivery-body tr')).to_have_count(1)
+        expect(p.locator('#delivery-body')).to_contain_text('构建失败')
+        expect(p.locator('#delivery-body')).to_contain_text('a、b')
+        p.locator('#delivery-body summary').click()
+        expect(p.locator('#delivery-body pre')).to_contain_text('失败步骤：GMX 构建')
+        p.locator('#delivery-search').fill('TRANSACT-9')
+        p.wait_for_timeout(600)
+        self.assertTrue(any('q=TRANSACT-9' in u for u in seen))
+        self.assertFalse(self.errors,self.errors)
+
     def test_settings_page_saves_github_and_browser_login_to_keychain(self):
         p=self.page;saved=[]
         def fake_save(body):
@@ -334,8 +367,8 @@ class SharedBuildUITests(SharedBuildUIFixture, unittest.TestCase):
         f.locator('[name=mail_users]').fill('44065253, 43123456')
         p.locator('#jira-save').click()
         expect(p.locator('#jira-settings-result')).to_contain_text('设置已保存')
-        self.assertEqual({k:posts['settings'][k] for k in ('mail_enabled','mail_issue','mail_users')},
-                         {'mail_enabled':True,'mail_issue':'TRANSACT-9','mail_users':'44065253, 43123456'})
+        self.assertEqual({k:posts['settings'][k] for k in ('mail_enabled','mail_issue','mail_users','mail_failure_once')},
+                         {'mail_enabled':True,'mail_issue':'TRANSACT-9','mail_users':'44065253, 43123456','mail_failure_once':True})
         expect(p.locator('#build-jira-status')).to_contain_text('邮件通知：已开启')
         p.locator('#jira-mail-test').click()
         expect(p.locator('#jira-settings-result')).to_contain_text('收件人：44065253、43123456')

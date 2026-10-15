@@ -11,6 +11,7 @@
   <script defer src="/jira.js"></script>
   <script defer src="/jenkins-token.js"></script>
   <script defer src="/settings.js"></script>
+  <script defer src="/delivery.js"></script>
 </head>
 <body>
   <div class="layout">
@@ -20,6 +21,7 @@
       <button class="nav active" data-target="overview"><span>▦</span> 概览</button>
       <button class="nav" data-target="new-build"><span>◇</span> 新建构建</button>
       <button class="nav" data-target="history"><span>≡</span> 运行记录</button>
+      <button class="nav" data-target="delivery"><span>✉</span> 交付记录</button>
       <button class="nav" data-target="schedules"><span>⏱</span> 定时任务</button>
       <div class="sidebar-label sidebar-label-gap">设置与排查</div>
       <button class="nav" data-target="settings"><span>⚙</span> 设置</button>
@@ -127,6 +129,12 @@
           </article>
         </section>
         <section class="panel table-panel" id="history"><div class="panel-head history-head"><div><span class="section-tag">BUILD HISTORY</span><h2>Recent builds</h2></div><button class="ghost-button" id="refresh-tasks">↻ Refresh</button></div><div class="table-wrap"><table><thead><tr><th>BUILD / PROJECT</th><th>VERSION</th><th>PIPELINE STAGE</th><th>CREATED</th><th>STATUS</th><th></th></tr></thead><tbody id="tasks-body"><tr><td class="empty-row" colspan="6">Loading tasks...</td></tr></tbody></table></div></section>
+<section class="panel diagnose-panel delivery-panel" id="delivery"><div class="panel-head"><div><span class="section-tag">给测试交付了什么</span><h2>交付记录</h2><p>哪些 Jira 拿到了哪个 App 链接，发了哪些邮件。按 Jira 编号搜，就能知道某张单在哪个包里。</p></div></div>
+<div class="delivery-bar"><div class="tool-tabs" role="tablist" aria-label="记录类型"><button type="button" role="tab" class="tool-tab active" data-delivery="tickets" aria-selected="true">Jira 更新</button><button type="button" role="tab" class="tool-tab" data-delivery="mails" aria-selected="false">邮件</button></div>
+<label class="delivery-search">搜索<input id="delivery-search" type="search" maxlength="100" placeholder="Jira 编号、标题、任务编号或邮件主题"><small class="label-help">例如输入 TRANSACT-210861，看这张单收到过哪些包。</small></label></div>
+<p id="delivery-status" class="diag-note" role="status"></p>
+<div class="table-wrap"><table id="delivery-table"><thead id="delivery-head"></thead><tbody id="delivery-body"></tbody></table></div>
+</section>
         <section class="panel diagnose-panel schedules-panel" id="schedules">
           <div class="panel-head"><div><span class="section-tag">RECURRING BUILDS</span><h2>Schedules</h2><p>输入 cron，由独立调度器按时自动创建构建。错过的时间只补跑最近一次；并发已满时排队等待，不会丢弃。账号密码使用 Mac Keychain，定时任务不保存任何密码。</p></div><div class="panel-icon">⏱</div></div>
           <div id="scheduler-status" class="diagnose-verdict unknown">调度器状态读取中…</div>
@@ -155,7 +163,7 @@
 <label class="field-toggle span-2">转给 Reporter<input type="checkbox" name="assign_to_reporter"><small class="label-help">把 ticket 的经办人改为它的 Reporter。</small></label>
 <label class="field-toggle span-2">优先从 PR 里找 Jira 号<input type="checkbox" name="use_pr_lookup"><small class="label-help">先看 PR 的标题、分支名、描述，找不到再看提交信息；GitHub 查询失败会自动退回提交信息。</small></label>
 </div><div class="group-head jira-mail-head"><span>✉</span> 邮件通知（通过 Jira 发送）</div><div class="form-grid">
-<label class="field-toggle span-2">构建成功后给团队发邮件<input type="checkbox" name="mail_enabled"><small class="label-help">每次构建成功并拿到 App 链接后发一封：App 链接、分支、构建号和本次更新的 Jira。由公司 Jira 服务器发出，不需要 Outlook。构建失败不发。</small></label>
+<label class="field-toggle span-2">构建结束后给团队发邮件<input type="checkbox" name="mail_enabled"><small class="label-help">成功并拿到 App 链接：发 App 链接、分支、构建号和本次更新的 Jira。失败：发失败在哪一步、原因、Jenkins 链接和日志最后几行。由公司 Jira 服务器发出，不需要 Outlook。发件人是 Jira Token 的主人，他自己收不到。</small></label><label class="field-toggle span-2">同一原因连续失败只发一次<input type="checkbox" name="mail_failure_once"><small class="label-help">定时任务每 6 小时跑一次，同一个问题没修好时只通知一次；恢复成功的那封邮件会写明“之前的失败已恢复”。</small></label>
 <label class="span-2">公告单号<input name="mail_issue" maxlength="40" placeholder="TRANSACT-123456"><small class="label-help">Jira 的发邮件接口必须挂在一张单上，建一张长期开着的单专门用来发通知即可。</small></label>
 <label class="span-2">收件人（Jira 用户名）<textarea name="mail_users" rows="2" maxlength="2000" placeholder="44065253, 43123456"></textarea><small class="label-help">填 Jira 用户名（通常是工号），用逗号、空格或换行分隔，最多 50 个。想收的人随时加上再保存。</small></label>
 </div><div class="jira-actions"><button type="button" class="ghost-button" id="jira-mail-test">发一封测试邮件</button></div><details class="advanced-panel"><summary>更多设置 · 通常无需修改</summary><div class="advanced-body"><div class="form-grid">
