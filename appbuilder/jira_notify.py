@@ -12,6 +12,7 @@ import json
 import os
 import re
 import subprocess
+from datetime import datetime
 import urllib.error
 import urllib.request
 from urllib.parse import urlsplit, quote
@@ -26,7 +27,7 @@ SETTINGS_FILE = DATA / 'jira_settings.json'
 EDITABLE = {'enabled': bool, 'dry_run': bool, 'base_url': str, 'transition_name': str, 'assign_to_reporter': bool,
             'use_pr_lookup': bool, 'key_pattern': str, 'first_run_commits': int, 'max_tickets_per_run': int,
             'flavor': str, 'transition_fields': str,
-            'mail_enabled': bool, 'mail_issue': str, 'mail_users': str}
+            'mail_enabled': bool, 'mail_issue': str, 'mail_users': str, 'mail_failure_once': bool}
 
 
 def _type_ok(key, value):
@@ -60,6 +61,7 @@ def settings(config):
     j.setdefault('mail_enabled', False)         # 构建成功后通过 Jira 给团队发邮件（jira_mail.py）
     j.setdefault('mail_issue', '')              # 用来发邮件的固定公告单
     j.setdefault('mail_users', '')              # 收件人 Jira 用户名，逗号/空格/换行分隔
+    j.setdefault('mail_failure_once', True)     # 同一原因连续失败只发一次，恢复成功时再发
     return j
 
 
@@ -555,6 +557,7 @@ def _notify_jira(task_id, client=None, llm=None, config=None, preview=None):
             errors.append({'key': key, 'error': safe_text(str(exc))[:200]})
             action('JIRA', safe_text(f'{key} 处理失败: {exc}'))
     report = {'status': 'PREVIEW' if preview is not None else ('DRY_RUN' if dry else ('DONE' if not errors else 'PARTIAL')),
+              'at': datetime.now().isoformat(timespec='seconds'), 'link': link, 'build': build,
               'commits_scanned': len(commits), 'tickets': results,
               'errors': errors, 'ignored_keys': ignored, 'ambiguous_commits': ambiguous, 'from': old, 'to': source_sha,
               'needs_manual': [{'key': r['key'], 'reason': r['manual']} for r in results if r.get('manual')],

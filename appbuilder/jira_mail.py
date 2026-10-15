@@ -1,26 +1,40 @@
-"""Email the team through Jira after a successful build.
+"""Email the team through Jira when a build finishes.
 
 Jira Server / Data Center has a REST call that sends an email about an issue to chosen
 users: POST /rest/api/2/issue/{key}/notify. The Jira server sends the mail, so no
 Outlook, mail account or password is involved; the saved Jira token is enough.
 
 The call must name an issue, so the team keeps one fixed "announcement" ticket and every
-email goes out through it. One email per successful build (with an App link); failed builds
-send nothing. A failure here never changes the build result, and nothing is retried
-automatically.
+email goes out through it. One email per finished build: a successful build with an App
+link gets the "new test package" email, a failed one (FAILED / NEEDS_ATTENTION / TIMEOUT)
+gets a failure email. With mail_failure_once (default on) the same failure reason repeating
+on the same branches is reported once until a build succeeds again. Every email is written
+to a local log (mail_log.jsonl) for the 交付记录 page. A failure here never changes the
+build result, and nothing is retried automatically.
 """
 from __future__ import annotations
 import json
 import re
 from urllib.parse import quote
 
-from .config import load_config
-from .store import task, read_state, patch_runtime
+import fcntl
+import os
+from datetime import datetime
+
+from .config import DATA, load_config
+from .store import task, read_state, patch_runtime, task_folder
 from .telemetry import action, safe_text
 
 USER = re.compile(r'[A-Za-z0-9._@+-]{1,128}')
 KEY = re.compile(r'[A-Z][A-Z0-9]{1,9}-\d{1,7}')
 MAX_USERS = 50
+MAIL_LOG = DATA / 'mail_log.jsonl'
+MAIL_STATE = DATA / 'mail_state.json'
+FAILED = ('FAILED', 'NEEDS_ATTENTION', 'TIMEOUT')
+STAGE_NAMES = {'INIT': '启动', 'PLUGIN_PREPARE': 'Plugin 代码准备', 'PLUGIN_CHECKOUT': 'Plugin 代码准备',
+               'PLUGIN_EDIT': 'Plugin 代码准备', 'PLUGIN_PUSH': 'Plugin 推送', 'PLUGIN_JENKINS': 'Plugin 构建',
+               'GMX_CHECKOUT': 'GMX 代码准备', 'GMX_EDIT': 'GMX 代码准备', 'GMX_LOCK': 'GMX 代码准备',
+               'GMX_PUSH': 'GMX 推送', 'GMX_JENKINS': 'GMX 构建', 'TESTFAIRY_LOOKUP': '取 App 链接'}
 
 
 def parse_users(text):
@@ -83,6 +97,115 @@ def compose(row, params, runtime, base_url, test=False):
     return safe_text(subject)[:250], '\n'.join(lines)
 
 
+def stage_name(stage):
+    return STAGE_NAMES.get(stage or '', stage or '未知步骤')
+
+
+def _log_tail(task_id, keep=8):
+    """The last few lines that explain a failure; scrubbed like every other log view."""
+    try:
+        path = task_folder(task_id) / 'run.log'
+        with path.open('rb') as stream:
+            stream.seek(max(0, path.stat().st_size - 12000))
+            text = stream.read().decode('utf-8', 'replace')
+    except OSError:
+        return []
+    hits = [line.strip() for line in text.splitlines()
+            if re.search(r'\[(?:FAILED|NEEDS_ATTENTION|TIMEOUT|ERROR)\]|失败|错误|Error|Exception', line)]
+    return [safe_text(line)[:300] for line in hits[-keep:]]
+
+
+def compose_failure(row, params, runtime, links=None, test=False):
+    """Subject and plain-text body for a failed build: where, why, and where to look."""
+    country, project = params.get('country', ''), params.get('project', '')
+    where = stage_name(row.get('stage'))
+    subject = f'{"[TEST] " if test else ""}[构建失败] {country} {project} · 失败在 {where}'.replace('  ', ' ')
+    lines = (['这是一封测试邮件（内容取自一次失败的历史构建）。', ''] if test else []) + [
+        '构建没有完成，需要处理。', '',
+        f'失败步骤：{where}',
+        f'结果：{row.get("status", "")}',
+        f'原因：{safe_text(row.get("note") or "未记录")[:500]}',
+        f'Plugin 分支：{params.get("plugin_source", "")} → {params.get("plugin_branch", "")}',
+        f'构建任务：{row["id"]}']
+    links = links or []
+    if links:
+        lines += ['', 'Jenkins：'] + [f'- {item["label"]}  {item["url"]}' for item in links]
+    tail = _log_tail(row['id'])
+    if tail:
+        lines += ['', '日志最后几行：'] + [f'  {line}' for line in tail]
+    lines += ['', '处理后可在 App Builder 的运行记录里点「从失败处继续」；定时任务下次也会再跑。',
+              '', '—— 由 APP Builder 自动发送']
+    return safe_text(subject)[:250], '\n'.join(lines)
+
+
+def _locked(path):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    handle = open(path.with_suffix('.lock'), 'a+')
+    fcntl.flock(handle, fcntl.LOCK_EX)
+    return handle
+
+
+def log_mail(entry):
+    """Append one email to the local log shown on the 交付记录 page."""
+    entry = {'at': datetime.now().isoformat(timespec='seconds'), **entry}
+    handle = _locked(MAIL_LOG)
+    try:
+        with MAIL_LOG.open('a', encoding='utf-8') as out:
+            out.write(json.dumps(entry, ensure_ascii=False) + '\n')
+    finally:
+        handle.close()
+    return entry
+
+
+def read_mails(query='', limit=300):
+    try:
+        lines = MAIL_LOG.read_text(encoding='utf-8').splitlines()
+    except OSError:
+        return []
+    rows = []
+    q = (query or '').strip().lower()
+    for line in reversed(lines):
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(row, dict):
+            continue
+        if q and q not in ' '.join(str(row.get(k, '')) for k in ('subject', 'task_id', 'body', 'to')).lower():
+            continue
+        rows.append(row)
+        if len(rows) >= limit:
+            break
+    return rows
+
+
+def _failure_key(params):
+    return '|'.join(str(params.get(k, '')) for k in ('plugin_source', 'gmx_source', 'country', 'project'))
+
+
+def _signature(row):
+    return f'{row.get("stage")}|{re.sub(r"[0-9]+", "#", safe_text(row.get("note") or ""))[:200]}'
+
+
+def _mail_state(update=None):
+    """Last reported failure per branch set. update(dict) -> new dict, saved atomically."""
+    handle = _locked(MAIL_STATE)
+    try:
+        try:
+            data = json.loads(MAIL_STATE.read_text(encoding='utf-8'))
+            data = data if isinstance(data, dict) else {}
+        except (OSError, ValueError):
+            data = {}
+        if update is not None:
+            data = update(data)
+            tmp = MAIL_STATE.with_suffix('.tmp')
+            tmp.write_text(json.dumps(data, ensure_ascii=False), encoding='utf-8')
+            os.replace(tmp, MAIL_STATE)
+        return data
+    finally:
+        handle.close()
+
+
 def html_body(text):
     """HTML version of the plain body: Jira sends HTML mail to most users and ignores
     textBody for them, so without this the email arrives with no content."""
@@ -121,18 +244,20 @@ def _client(conf):
 
 
 def notify_team(task_id, client=None, config=None):
-    """After notify_jira: send the one announcement email for this successful build."""
+    """After notify_jira: one email for this finished build (success or failure)."""
     from .jira_notify import settings
     row = task(task_id)
-    if row['status'] != 'SUCCESS':
+    status = row['status']
+    if status != 'SUCCESS' and status not in FAILED:
         return
     conf = settings(config or load_config())
     if not conf.get('mail_enabled'):
         return
     runtime = read_state(task_id).get('runtime', {})
-    if (runtime.get('jira_mail') or {}).get('status') == 'SENT':
+    if (runtime.get('jira_mail') or {}).get('status') in ('SENT', 'SUPPRESSED'):
         return
-    link = (runtime.get('testfairy_app') or {}).get('share_url')
+    params = json.loads(row['params'])
+    kind = 'success' if status == 'SUCCESS' else 'failure'
 
     def record(value):
         patch_runtime(task_id, jira_mail=value)
@@ -142,19 +267,44 @@ def notify_team(task_id, client=None, config=None):
         issue = check_issue(conf.get('mail_issue', ''))
         users = parse_users(conf.get('mail_users', ''))
     except ValueError as exc:
-        return record({'status': 'SKIPPED', 'reason': '邮件设置有误：' + str(exc)})
-    if not (isinstance(link, str) and link.startswith('https://')):
-        return record({'status': 'SKIPPED', 'reason': '本次没有 App 链接，不发邮件'})
+        return record({'status': 'SKIPPED', 'kind': kind, 'reason': '邮件设置有误：' + str(exc)})
     if not issue or not users or not conf.get('base_url'):
-        return record({'status': 'SKIPPED', 'reason': '未填写 Jira 地址、公告单号或收件人，不发邮件'})
-    params = json.loads(row['params'])
-    subject, body = compose(row, params, runtime, conf['base_url'])
+        return record({'status': 'SKIPPED', 'kind': kind, 'reason': '未填写 Jira 地址、公告单号或收件人，不发邮件'})
+    key = _failure_key(params)
+    recovered = False
+    if kind == 'success':
+        link = (runtime.get('testfairy_app') or {}).get('share_url')
+        if not (isinstance(link, str) and link.startswith('https://')):
+            return record({'status': 'SKIPPED', 'kind': kind, 'reason': '本次没有 App 链接，不发邮件'})
+        subject, body = compose(row, params, runtime, conf['base_url'])
+        recovered = bool(_mail_state().get(key))
+        if recovered:
+            body = '之前的构建失败已恢复。\n\n' + body
+    else:
+        signature = _signature(row)
+        if conf.get('mail_failure_once', True) and _mail_state().get(key) == signature:
+            return record({'status': 'SUPPRESSED', 'kind': kind,
+                           'reason': '同一原因的失败已经通知过，恢复成功前不再重复发'})
+        from .web import _jenkins_links
+        try:
+            links = [item for item in _jenkins_links(row, params) if '#' in item['label']]
+        except Exception:
+            links = []
+        subject, body = compose_failure(row, params, runtime, links)
+    entry = {'kind': kind, 'task_id': task_id, 'issue': issue, 'to': users, 'subject': subject, 'body': body}
     try:
         send(client or _client(conf), issue, users, subject, body, conf['flavor'])
     except Exception as exc:
-        return record({'status': 'FAILED', 'issue': issue, 'to': users, 'subject': subject,
-                       'reason': '邮件发送失败（不会自动重发）：' + safe_text(str(exc))[:300]})
-    record({'status': 'SENT', 'issue': issue, 'to': users, 'subject': subject})
+        reason = '邮件发送失败（不会自动重发）：' + safe_text(str(exc))[:300]
+        log_mail({**entry, 'status': 'FAILED', 'reason': reason})
+        return record({'status': 'FAILED', 'kind': kind, 'issue': issue, 'to': users, 'subject': subject,
+                       'reason': reason})
+    if kind == 'failure':
+        _mail_state(lambda data: {**data, key: _signature(row)})
+    elif recovered:
+        _mail_state(lambda data: {k: v for k, v in data.items() if k != key})
+    log_mail({**entry, 'status': 'SENT'})
+    record({'status': 'SENT', 'kind': kind, 'issue': issue, 'to': users, 'subject': subject})
 
 
 def latest_success():
@@ -193,10 +343,12 @@ def test_email(body, client=None, config=None):
         subject = '[TEST] APP Builder 邮件测试'
         text = '这是一封测试邮件。还没有带 App 链接的成功构建，所以没有附构建内容。\n\n—— 由 APP Builder 自动发送'
     request = describe_request(conf['base_url'], issue, users, subject, text, conf['flavor'])
+    entry = {'kind': 'test', 'task_id': task_id, 'issue': issue, 'to': users, 'subject': subject, 'body': text}
     try:
         send(client or _client(conf), issue, users, subject, text, conf['flavor'])
     except Exception as exc:
         message = safe_text(str(exc))
+        log_mail({**entry, 'status': 'FAILED', 'reason': message[:300]})
         hint = ''
         if 'No recipients' in message:
             hint = ('（Jira 不会给发起操作的人本人发通知：收件人只有你自己时就等于没人。'
@@ -208,4 +360,5 @@ def test_email(body, client=None, config=None):
         elif 'HTTP 404' in message:
             hint = '（公告单不存在，或 Token 看不到这张单）'
         raise ValueError('发送失败：' + message + hint + '\n\n本次请求（不含 Token）：\n' + request) from None
+    log_mail({**entry, 'status': 'SENT'})
     return {'ok': True, 'issue': issue, 'to': users, 'subject': subject, 'from_task': task_id, 'request': request}
