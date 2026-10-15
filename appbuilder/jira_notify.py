@@ -256,6 +256,22 @@ class UnknownTicket(Exception):
     """The key looked like a ticket but Jira has no such issue; it is ignored, not an error."""
 
 
+def _jira_reason(exc):
+    """Jira's own explanation from an error response ({errorMessages, errors}), shortened."""
+    try:
+        data = json.loads(exc.read(20000) or b'{}')
+    except Exception:
+        return ''
+    if not isinstance(data, dict):
+        return ''
+    parts = [str(m) for m in data.get('errorMessages') or []]
+    errors = data.get('errors')
+    if isinstance(errors, dict):
+        parts += [f'{k}: {v}' for k, v in errors.items()]
+    text = safe_text('；'.join(parts))[:300]
+    return f'（Jira 说明：{text}）' if text else ''
+
+
 class JiraClient:
     def __init__(self, base_url, *, flavor='server', timeout=30, ca_bundle=None, env=None):
         parts = urlsplit(base_url)
@@ -291,7 +307,7 @@ class JiraClient:
             with urllib.request.urlopen(req, timeout=self.timeout, context=ctx) as r:
                 raw = r.read()
         except urllib.error.HTTPError as exc:
-            message = f'Jira {method} {path.split("?")[0]} -> HTTP {exc.code}'
+            message = f'Jira {method} {path.split("?")[0]} -> HTTP {exc.code}' + _jira_reason(exc)
             raise (JiraNotFound(message) if exc.code == 404 else RuntimeError(message)) from None
         return json.loads(raw) if raw else {}
 
