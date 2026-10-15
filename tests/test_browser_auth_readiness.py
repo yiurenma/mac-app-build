@@ -46,8 +46,9 @@ class AuthReadinessFixtures:
         self.context = self.browser.new_context()
         self.addCleanup(self.context.close)
         self.page = self.context.new_page()
-        # Allow headed CI rendering to settle; negative cases set their own short bound.
-        self.page.set_default_timeout(5000)
+        # Allow headed CI rendering to settle (5s raced a loaded headed runner);
+        # negative cases set their own short bound.
+        self.page.set_default_timeout(15000)
         self.requests = []
 
     def load(self, html):

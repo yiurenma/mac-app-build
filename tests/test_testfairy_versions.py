@@ -66,7 +66,9 @@ class VersionTests(unittest.TestCase):
         self.worker.config['testfairy']['wait_seconds']=10  # 1s raced the budget on slow CI runners
         self.pages['/my']='<div class="app-card"><a href="/versions">See all versions</a></div>'
         self.pages['/versions']=card(9)+'<div class="unknown-pagination">Older</div>'
-        with self.assertRaisesRegex(NeedsAttention,'INCOMPLETE'):self.find()
+        # Running out of budget inside a page action is the same incomplete traversal;
+        # which wording wins depends on where the deadline lands on a loaded runner.
+        with self.assertRaisesRegex(NeedsAttention,'INCOMPLETE|等待预算已用尽'):self.find()
     def test_multiple_apps_are_not_guessed(self):
         app='<div class="app-card"><a href="/versions">See all versions</a></div>'
         self.pages['/my']=app+app
