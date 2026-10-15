@@ -50,7 +50,7 @@ class SharedBuildUIFixture:
         self.form = self.page.locator('#build-form')
 
     def field(self, name):
-        scope=self.page if name.startswith(('tf_test_','mail_test_')) else self.form
+        scope=self.page if name.startswith('tf_test_') else self.form
         return scope.locator(f'[name="{name}"]')
 
     def show(self, panel):
@@ -70,16 +70,17 @@ class SharedBuildUITests(SharedBuildUIFixture, unittest.TestCase):
     def test_tool_panels_are_collapsed_and_open_one_at_a_time(self):
         p = self.page
         p.reload()
-        ids = ['schedules', 'diagnostics', 'live-tests', 'testfairy-tests', 'mail-tests', 'jira-tests']
+        ids = ['schedules', 'diagnostics', 'live-tests', 'testfairy-tests', 'jira-tests']
         for i in ids:
             expect(p.locator('#' + i)).to_be_hidden()
+        self.assertEqual(p.locator('#mail-tests, [data-target=mail-tests]').count(), 0)   # Outlook test removed
         p.locator('[data-target=jira-tests]').click()
         expect(p.locator('#jira-tests')).to_be_visible()
-        p.locator('[data-target=mail-tests]').click()
-        expect(p.locator('#mail-tests')).to_be_visible()
+        p.locator('[data-target=testfairy-tests]').click()
+        expect(p.locator('#testfairy-tests')).to_be_visible()
         expect(p.locator('#jira-tests')).to_be_hidden()
-        p.locator('[data-target=mail-tests]').click()
-        expect(p.locator('#mail-tests')).to_be_hidden()
+        p.locator('[data-target=testfairy-tests]').click()
+        expect(p.locator('#testfairy-tests')).to_be_hidden()
         expect(p.locator('input[name=testfairy_enabled]')).to_be_checked()
         expect(p.locator('input[name=jenkins_api]')).to_be_checked()
         # Staff ID and tokens are saved separately to the Keychain, never part of a build or schedule.
@@ -90,7 +91,7 @@ class SharedBuildUITests(SharedBuildUIFixture, unittest.TestCase):
         p = self.page
         self.assertEqual(self.form.locator('[data-build]:visible').count(), 8)  # 03: switch + Jenkins token; 04: Jira token
         for name in ['outlook_auto_send','outlook_recipients','outlook_account']:
-            self.assertFalse(self.field(name).is_visible())
+            self.assertEqual(self.field(name).count(), 0)   # email now goes through Jira
         self.assertEqual(self.field('country').locator('option').count(), 25)
         self.assertEqual(self.field('country').input_value(), 'UK')
         self.assertEqual(p.locator('#gmx-build-live-form [name=country]').input_value(), 'UK')
@@ -243,9 +244,9 @@ class SharedBuildUITests(SharedBuildUIFixture, unittest.TestCase):
         p.screenshot(path='/tmp/mac-app-build-ui/desktop.png',full_page=True)
         self.assertFalse(self.errors,self.errors)
 
-    def test_independent_link_and_email_buttons_use_test_apis_without_build(self):
+    def test_independent_link_button_uses_test_api_without_build(self):
         p=self.page
-        self.assertEqual(p.locator('#build-form #tf-test-form, #build-form #mail-test-form').count(),0)
+        self.assertEqual(p.locator('#build-form #tf-test-form').count(),0)
         self.assertEqual(p.locator('#build-form .group-head:has(span)').all_text_contents(),['00 Jenkins 登录','01 Plugin','02 GMX','03 App 链接','04 Jira 回填'])
         p.locator('.nav[data-target=testfairy-tests]').click()
         self.assertEqual(p.locator('#tf-test-form input[type=password]').count(),0)
@@ -263,31 +264,41 @@ class SharedBuildUITests(SharedBuildUIFixture, unittest.TestCase):
             self.assertEqual(start.call_args.args[0]['expected_share_url'],'https://hsbc-mobilex.testfairy.com/join/current')
             self.assertNotIn('password',start.call_args.args[0])
             self.assertNotIn('username',start.call_args.args[0])
-            self.show_all();self.field('mail_test_task').select_option('202610111000-abcdef')
-            self.field('mail_test_to').fill('recipient@example.com')
-            result.update(status='BLOCKED',result={'message':'离线模拟：未调用发送','stage':'set_recipients','send_attempted':False,'error_number':-1708,'returncode':1})
-            p.locator('#test-outlook-send').click()
-            expect(p.locator('#mail-test-result')).to_contain_text('BLOCKED')
-            expect(p.locator('#mail-test-result')).to_contain_text('set_recipients')
-            expect(p.locator('#mail-test-result')).to_contain_text('send 调用：未调用')
-            expect(p.locator('#mail-test-result')).to_contain_text('原生错误号：-1708')
-            expect(p.locator('#mail-test-result')).to_contain_text('退出码：1')
-            self.assertTrue(start.call_args.args[0]['confirm_send'])
-            self.assertFalse(start.call_args.args[0]['allow_repeat_test'])
-            self.field('mail_test_allow_repeat').check()
-            p.locator('#test-outlook-send').click()
-            expect(p.locator('#test-outlook-send')).to_be_enabled()
-            self.assertTrue(start.call_args.args[0]['allow_repeat_test'])
-            self.assertFalse(self.field('mail_test_allow_repeat').is_checked())
-            self.assertLessEqual(self.field('mail_test_allow_repeat').bounding_box()['height'],24)
-            self.assertNotIn('allow_repeat_test',p.evaluate('buildBody()'))
-            self.assertEqual(start.call_args.args[0]['task_id'],'202610111000-abcdef')
-            self.assertEqual(start.call_args.args[0]['recipients'],'recipient@example.com')
         self.assertFalse(self.manual)
         self.assertFalse(self.errors,self.errors)
         destination=Path('/tmp/mac-app-build-ui');destination.mkdir(exist_ok=True)
         p.locator('#testfairy-tests').screenshot(path=str(destination/'testfairy-test.png'))
-        p.locator('#mail-tests').screenshot(path=str(destination/'outlook-test.png'))
+
+    def test_jira_panel_saves_mail_settings_and_sends_a_test_email(self):
+        p=self.page;posts={}
+        settings={'settings':{'enabled':True,'dry_run':True,'base_url':'https://jira.example.com','transition_name':'In Test',
+                   'assign_to_reporter':True,'use_pr_lookup':True,'key_pattern':'x','first_run_commits':0,'max_tickets_per_run':40,
+                   'flavor':'server','transition_fields':'','mail_enabled':False,'mail_issue':'','mail_users':''},'token_source':'keychain'}
+        def handle(route):
+            req=route.request
+            if req.method=='POST':
+                posts[req.url.rsplit('/',1)[1]]=json.loads(req.post_data)
+                if req.url.endswith('/mail-test'):
+                    return route.fulfill(json={'ok':True,'issue':'TRANSACT-9','to':['44065253','43123456'],'subject':'[TEST] [新测试包] UK','from_task':'T1'})
+                body=posts['settings'];settings['settings'].update({k:body[k] for k in ('mail_enabled','mail_issue','mail_users')})
+            route.fulfill(json=settings)
+        p.route('**/api/jira/**',handle)
+        p.reload();expect(p.locator('#plugin-branches option')).to_have_count(101)
+        self.show('jira-tests')
+        f=p.locator('#jira-form')
+        expect(p.locator('#build-jira-status')).to_contain_text('邮件通知：未开启')
+        f.locator('[name=mail_enabled]').check()
+        f.locator('[name=mail_issue]').fill('TRANSACT-9')
+        f.locator('[name=mail_users]').fill('44065253, 43123456')
+        p.locator('#jira-save').click()
+        expect(p.locator('#jira-result')).to_contain_text('设置已保存')
+        self.assertEqual({k:posts['settings'][k] for k in ('mail_enabled','mail_issue','mail_users')},
+                         {'mail_enabled':True,'mail_issue':'TRANSACT-9','mail_users':'44065253, 43123456'})
+        expect(p.locator('#build-jira-status')).to_contain_text('邮件通知：已开启')
+        p.locator('#jira-mail-test').click()
+        expect(p.locator('#jira-result')).to_contain_text('收件人：44065253、43123456')
+        self.assertEqual(posts['mail-test'],{'mail_issue':'TRANSACT-9','mail_users':'44065253, 43123456'})
+        self.assertFalse(self.errors,self.errors)
 
     def test_delivery_history_search_and_choices_are_independent(self):
         p=self.page
@@ -298,19 +309,16 @@ class SharedBuildUITests(SharedBuildUIFixture, unittest.TestCase):
           {id:'old-failed',project:'PayByBank',country:'UK',status:'FAILED'},
           {id:'new-success',project:'Wallet',country:'HK',status:'SUCCESS'}];
           renderTestTasks();""")
-        self.show_all();self.field('mail_test_search').fill('failed')
-        expect(self.field('mail_test_task').locator('option')).to_have_count(2)
-        self.field('mail_test_task').select_option('old-failed')
-        self.field('tf_test_search').fill('wallet')
-        self.field('tf_test_task').select_option('new-success')
+        self.show_all();self.field('tf_test_search').fill('failed')
+        expect(self.field('tf_test_task').locator('option')).to_have_count(2)
+        self.field('tf_test_task').select_option('old-failed')
         p.evaluate("state.selected='new-success';renderSelection();renderTestTasks()")
-        self.assertEqual(self.field('mail_test_task').input_value(),'old-failed')
-        self.assertEqual(self.field('tf_test_task').input_value(),'new-success')
-        self.field('mail_test_search').fill('HK')
+        self.assertEqual(self.field('tf_test_task').input_value(),'old-failed')
+        self.field('tf_test_search').fill('HK')
         # Keep the explicit choice visible during filtering and periodic refresh.
-        self.assertEqual(self.field('mail_test_task').input_value(),'old-failed')
-        expect(self.field('mail_test_task').locator('option')).to_have_count(3)
-        self.field('mail_test_task').select_option('new-success')
+        self.assertEqual(self.field('tf_test_task').input_value(),'old-failed')
+        expect(self.field('tf_test_task').locator('option')).to_have_count(3)
+        self.field('tf_test_task').select_option('new-success')
         self.assertEqual(self.field('tf_test_task').input_value(),'new-success')
         self.assertIn('信息不足会提示',self.field('tf_test_task').locator('..').inner_text())
         self.assertFalse(self.errors,self.errors)

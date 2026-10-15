@@ -101,7 +101,7 @@ def delivery_result(task_id):
     try:
         runtime=read_state(task_id).get('runtime',{})
         # Only generated, explicitly nonsecret delivery data is exposed.
-        return {'app':runtime.get('testfairy_app'), 'mail_preview':runtime.get('mail_preview'), 'mail_delivery':runtime.get('mail_delivery')}
+        return {'app':runtime.get('testfairy_app'), 'jira_mail':runtime.get('jira_mail')}
     except (OSError,ValueError):
         return {}
 
@@ -127,7 +127,6 @@ def form_defaults(config):
     j = config.get('jenkins', {})
     b = config.get('build', {})
     return {
-        'outlook_auto_send': False, 'outlook_recipients': '', 'outlook_account': '',
         'testfairy_enabled': True, 'jenkins_api': True,
         'plugin_branch': 'develop', 'gmx_branch': 'develop',
         'plugin_version': '1.3', 'country': 'UK', 'project_name': 'PayByBank',
@@ -273,8 +272,6 @@ def validate_build_parameters(body, config):
     params['gmx_parameters'] = gmx
     from .testfairy import settings
     params['testfairy'] = settings(body, config)
-    from .outlook import preferences
-    params['outlook'] = preferences(body)
     return params
 
 
@@ -610,12 +607,6 @@ def make_handler(csrf_token):
                 if delivery_match:
                     from .delivery_tests import poll
                     return self._send(poll(delivery_match[1]))
-                if p == '/api/outlook':
-                    from .outlook import OutlookAdapter
-                    try:
-                        return self._send(OutlookAdapter().probe())
-                    except Exception as exc:
-                        return self._failed(400, safe_text(str(exc)))
                 if p == '/api/doctor':
                     return self._send(get_doctor())
                 from .jenkins_token_api import handle_get as token_get

@@ -25,7 +25,8 @@ LEDGER = DATA / 'jira_ledger.json'
 SETTINGS_FILE = DATA / 'jira_settings.json'
 EDITABLE = {'enabled': bool, 'dry_run': bool, 'base_url': str, 'transition_name': str, 'assign_to_reporter': bool,
             'use_pr_lookup': bool, 'key_pattern': str, 'first_run_commits': int, 'max_tickets_per_run': int,
-            'flavor': str, 'transition_fields': str}
+            'flavor': str, 'transition_fields': str,
+            'mail_enabled': bool, 'mail_issue': str, 'mail_users': str}
 
 
 def _type_ok(key, value):
@@ -56,6 +57,9 @@ def settings(config):
     j.setdefault('transition_fields', '')       # 流转时必填字段的值，每行：问题类型 | 字段名 | 值
     j.setdefault('use_pr_lookup', True)         # PR 为主要来源；查询失败自动退回提交信息
     j.setdefault('timeout_seconds', 30)
+    j.setdefault('mail_enabled', False)         # 构建成功后通过 Jira 给团队发邮件（jira_mail.py）
+    j.setdefault('mail_issue', '')              # 用来发邮件的固定公告单
+    j.setdefault('mail_users', '')              # 收件人 Jira 用户名，逗号/空格/换行分隔
     return j
 
 
@@ -336,6 +340,7 @@ def process_ticket(client, key, info, link, build_label, conf, llm, dry_run):
     except JiraNotFound:
         raise UnknownTicket(key) from None
     fields = issue.get('fields', {})
+    result['summary'] = safe_text(str(fields.get('summary') or ''))[:200]
     reporter = fields.get('reporter') or {}
     status = (fields.get('status') or {}).get('name', '')
     issue_type = (fields.get('issuetype') or {}).get('name', '')

@@ -266,7 +266,7 @@ class StopSuccessTests(unittest.TestCase):
         store.update_task(task, status='SUCCESS', stage='TESTFAIRY_LOOKUP')
         self.assertTrue(schedules.get_schedule(row['id'])['enabled'])
         with patch('appbuilder.runner._run_unlocked', side_effect=lambda *a, **kw: self.success(task)), \
-                patch('appbuilder.outlook.notify_outcome', side_effect=RuntimeError('fixture mail failure')):
+                patch('appbuilder.jira_mail.notify_team', side_effect=RuntimeError('fixture mail failure')):
             runner.run(task)
         self.assertFalse(schedules.get_schedule(row['id'])['enabled'])
         self.assertEqual(store.task(task)['status'], 'SUCCESS')

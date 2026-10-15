@@ -46,19 +46,6 @@ class MetadataTests(unittest.TestCase):
         text=json.dumps(preview)
         self.assertIn('3.76.0',text);self.assertIn('1.3.2026.7',text);self.assertNotIn('SECRET',text)
         self.assertEqual(preview['status'],'PREVIEW_ONLY');self.assertEqual(preview['to'],[])
-    def test_jenkins_link_preview_handles_unrecorded_version_without_losing_link(self):
-        from appbuilder.outlook import outcome_preview
-        app={**expected_build(PARAMS,RUNTIME),'share_url':BASE+'/join/current?id=573108',
-             'app_version':None,'app_build':None,'matched_at':'today','lookup_method':'jenkins-console-html'}
-        app.pop('path')
-        runtime={**RUNTIME,'testfairy_app':app}
-        row={'id':'task','status':'SUCCESS','stage':'FINISHED','created':'today','note':''}
-        preview=outcome_preview(row,PARAMS,{'runtime':runtime,'completed':[]})
-        self.assertIn(BASE+'/join/current?id=573108',preview['body'])
-        self.assertIn('未记录（Jenkins 日志仅提供 APP 链接）',preview['body'])
-        self.assertNotIn('链接: 未提供',preview['body'])
-        self.assertNotIn('None',preview['body'])
-
     def test_feature_default_off_and_credentials_explicit_opt_in(self):
         self.assertEqual(settings({})['enabled'],False)
         self.assertFalse(settings({})['save_session'])

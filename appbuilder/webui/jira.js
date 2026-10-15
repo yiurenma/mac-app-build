@@ -13,9 +13,11 @@ function fill(data){
   f.use_pr_lookup.checked=!!s.use_pr_lookup;f.key_pattern.value=s.key_pattern||'';
   f.first_run_commits.value=s.first_run_commits??0;f.max_tickets_per_run.value=s.max_tickets_per_run??40;
   f.flavor.value=s.flavor||'server';f.transition_fields.value=s.transition_fields||'';f.token.value='';
+  f.mail_enabled.checked=!!s.mail_enabled;f.mail_issue.value=s.mail_issue||'';f.mail_users.value=s.mail_users||'';
   el('jira-token-status').textContent=TOKEN_TEXT[data.token_source]??'';
   const b=el('build-jira-status');
-  if(b)b.textContent='Jira 回填：'+(s.enabled?(s.dry_run?'已启用（演练模式，只记录不修改 Jira）':'已启用'):'未启用')+' · Token：'+(TOKEN_TEXT[data.token_source]??'未知');
+  if(b)b.textContent='Jira 回填：'+(s.enabled?(s.dry_run?'已启用（演练模式，只记录不修改 Jira）':'已启用'):'未启用')+' · Token：'+(TOKEN_TEXT[data.token_source]??'未知')+
+    ' · 邮件通知：'+(s.mail_enabled?'已开启':'未开启');
 }
 
 async function loadSettings(){
@@ -42,7 +44,8 @@ async function save(){
     transition_name:f.transition_name.value.trim(),assign_to_reporter:f.assign_to_reporter.checked,
     use_pr_lookup:f.use_pr_lookup.checked,key_pattern:f.key_pattern.value.trim(),
     first_run_commits:parseInt(f.first_run_commits.value,10),max_tickets_per_run:parseInt(f.max_tickets_per_run.value,10),
-    flavor:f.flavor.value,transition_fields:f.transition_fields.value};
+    flavor:f.flavor.value,transition_fields:f.transition_fields.value,
+    mail_enabled:f.mail_enabled.checked,mail_issue:f.mail_issue.value.trim(),mail_users:f.mail_users.value};
   if(Number.isNaN(body.first_run_commits))delete body.first_run_commits;
   if(Number.isNaN(body.max_tickets_per_run))delete body.max_tickets_per_run;
   if(f.token.value)body.token=f.token.value;
@@ -79,6 +82,17 @@ async function lookup(){
   finally{button.disabled=false;}
 }
 
+async function mailTest(){
+  const f=form(),button=el('jira-mail-test');button.disabled=true;out('正在通过 Jira 发送测试邮件…');
+  try{
+    const r=await api('/api/jira/mail-test',{method:'POST',body:JSON.stringify({mail_issue:f.mail_issue.value.trim(),mail_users:f.mail_users.value})});
+    out('已提交给 Jira，请收件人查收邮箱（通常 1–5 分钟）\n公告单：'+r.issue+'\n收件人：'+r.to.join('、')+'\n主题：'+r.subject+
+      (r.from_task?'\n内容取自构建：'+r.from_task:'')+
+      '\n\n如果只发给了自己却没收到：Jira 可能默认不给操作者本人发通知，可在 Jira 个人资料里把“自己的更改”通知打开，或加一位同事一起测。');
+  }catch(e){out('测试邮件失败：'+e.message);}
+  finally{button.disabled=false;}
+}
+
 function describe(r){
   if(r.status==='SKIPPED')return '无法演练：'+r.reason;
   const lines=['演练结果（只读，未修改 Jira）','查看的提交数：'+r.commits_scanned,'PR 查询：'+r.pr_lookup,''];
@@ -111,6 +125,7 @@ function init(){
   el('jira-test-connection').addEventListener('click',testConnection);
   el('jira-lookup').addEventListener('click',lookup);
   el('jira-preview').addEventListener('click',preview);
+  el('jira-mail-test').addEventListener('click',mailTest);
   // app.js obtains the CSRF token during init(); wait for it before the first request.
   const wait=setInterval(()=>{if(typeof state!=='undefined'&&state.csrf){clearInterval(wait);loadSettings();loadTasks();setInterval(()=>{loadTasks();if(!el('jira-form').contains(document.activeElement))loadSettings();},30000);}},300);
 }
