@@ -220,5 +220,57 @@ class TokenEndpointTests(unittest.TestCase):
         self.assertFalse(result['gmx']['ok'])
 
 
+
+BRANCH_JOB = HOST + '/job/uploads/job/upload%2FAUTO-1/'
+
+
+class QueueIdentityTests(unittest.TestCase):
+    def http(self, queue_item=None, builds=None):
+        routes = {}
+        if queue_item is not None:
+            routes[HOST + '/queue/item/77/api/json'] = (200, queue_item)
+        else:
+            routes[HOST + '/queue/item/77/api/json'] = (404, {})
+        routes[BRANCH_JOB + 'api/json'] = (200, {'builds': builds or []})
+        return FakeHttp(routes=routes)
+
+    def test_branch_job_written_with_double_encoding_is_the_same_job(self):
+        item = {'id': 77, 'task': {'url': HOST + '/job/uploads/job/upload%252FAUTO-1/'},
+                'executable': {'number': 2, 'url': HOST + '/job/uploads/job/upload%252FAUTO-1/2/'}}
+        found = api(self.http(item)).resolve_queue_build(BRANCH_JOB, 77)
+        self.assertEqual(found['build_url'], BRANCH_JOB + '2/')
+
+    def test_other_job_is_still_refused_and_the_message_shows_both_addresses(self):
+        item = {'id': 77, 'task': {'url': HOST + '/job/uploads/job/upload%2FOTHER/'}}
+        with self.assertRaisesRegex(NeedsAttention, 'OTHER.*本次'):
+            api(self.http(item)).resolve_queue_build(BRANCH_JOB, 77)
+
+    def test_expired_queue_item_is_linked_by_the_builds_own_queue_id(self):
+        state = {'runtime': {'gmx_formal_dispatch': {
+            'job_url': BRANCH_JOB, 'attempt_id': 'a1', 'state': 'ACCEPTED', 'policy': 'receipt-v1',
+            'http_status': 201, 'queue_id': 77, 'queue_url': HOST + '/queue/item/77/'}}}
+        http = self.http(None, builds=[{'number': 3, 'queueId': 90}, {'number': 2, 'queueId': 77}])
+        number = dispatch_identity.reconcile(api(http), BRANCH_JOB, 'T', 'gmx_formal', lambda t: state,
+                                             lambda t, **f: state['runtime'].update(f))
+        self.assertEqual(number, 2)
+        self.assertEqual(state['runtime']['gmx_formal_identity']['build_url'], BRANCH_JOB + '2/')
+        self.assertFalse(any(c[0] == 'POST' for c in http.calls))
+
+    def test_no_build_with_our_queue_id_still_stops_without_guessing(self):
+        state = {'runtime': {'gmx_formal_dispatch': {
+            'job_url': BRANCH_JOB, 'attempt_id': 'a1', 'state': 'ACCEPTED', 'policy': 'receipt-v1',
+            'http_status': 201, 'queue_id': 77, 'queue_url': HOST + '/queue/item/77/'}}}
+        http = self.http(None, builds=[{'number': 3, 'queueId': 90}])
+        with self.assertRaisesRegex(NeedsAttention, '队列记录已消失'):
+            dispatch_identity.reconcile(api(http), BRANCH_JOB, 'T', 'gmx_formal', lambda t: state,
+                                        lambda t, **f: state['runtime'].update(f))
+
+    def test_same_job_and_build_number_helpers(self):
+        self.assertTrue(dispatch_identity.same_job(BRANCH_JOB, HOST + '/job/uploads/job/upload%252FAUTO-1'))
+        self.assertFalse(dispatch_identity.same_job(BRANCH_JOB, 'https://other.invalid/job/uploads/job/upload%2FAUTO-1/'))
+        self.assertEqual(dispatch_identity.build_number(BRANCH_JOB, HOST + '/job/uploads/job/upload%252FAUTO-1/5/'), 5)
+        self.assertIsNone(dispatch_identity.build_number(BRANCH_JOB, HOST + '/job/uploads/job/upload%2FOTHER/5/'))
+
+
 if __name__ == '__main__':
     unittest.main()

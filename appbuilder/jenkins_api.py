@@ -28,7 +28,7 @@ import urllib.request
 from urllib.parse import urlsplit
 
 from .jenkins import NeedsAttention, callback_number_from_text, final_result_from_console
-from .telemetry import action
+from .telemetry import action, safe_text
 from .versions import folder
 
 RESULTS = ('SUCCESS', 'FAILURE', 'ABORTED', 'UNSTABLE', 'NOT_BUILT')
@@ -313,7 +313,7 @@ class ApiJenkins:
         return before
 
     def resolve_queue_build(self, job_url, queue_id):
-        from .dispatch_identity import build_number, queue_url
+        from .dispatch_identity import build_number, queue_url, same_job
         url = queue_url(job_url, queue_id)
         if not url:
             raise NeedsAttention('队列查询目标或排队编号无效')
@@ -329,8 +329,9 @@ class ApiJenkins:
             if item.get('cancelled') is True:
                 raise NeedsAttention('本次排队任务已取消；保留回执，不自动重新提交')
             task = item.get('task')
-            if not isinstance(task, dict) or task.get('url') != job_url:
-                raise NeedsAttention('队列响应 Job 与本次提交不一致；禁止跨 Job 关联')
+            if not isinstance(task, dict) or not same_job(task.get('url'), job_url):
+                shown = safe_text(str((task or {}).get('url') if isinstance(task, dict) else task))[:300]
+                raise NeedsAttention(f'队列响应 Job 与本次提交不一致；禁止跨 Job 关联（Jenkins 返回：{shown}；本次：{job_url}）')
             executable = item.get('executable')
             if executable is not None:
                 number = build_number(job_url, executable.get('url')) if isinstance(executable, dict) else None
@@ -342,6 +343,19 @@ class ApiJenkins:
             action('QUEUE', f'{self.site} 本次 queue {queue_id} 仍在排队；只读等待，不重新提交')
             time.sleep(min(max(0.01, self.poll), max(0, deadline - time.monotonic())))
         raise NeedsAttention('等待本次队列对应 Build 超时；保留回执，Resume 继续同一队列，不重新提交')
+
+    def find_build_by_queue_id(self, job_url, queue_id):
+        """The build of THIS job whose recorded queueId is ours, or None. Read-only."""
+        status, job = self.http.get_json(job_url, tree='builds[number,queueId]{0,100}')
+        if status != 200 or not isinstance(job, dict):
+            return None
+        hits = [b['number'] for b in job.get('builds') or []
+                if type(b.get('number')) is int and b.get('queueId') == queue_id]
+        if len(hits) != 1:
+            return None
+        action('QUEUE', f'{self.site} 排队记录已不可用；Build #{hits[0]} 记录的 queueId={queue_id} 与回执一致，据此关联')
+        return dict(queue_id=queue_id, job_url=job_url, relation='executable',
+                    build_url=job_url.rstrip('/') + '/' + str(hits[0]) + '/')
 
     def detect_new_build(self, job_url, baseline, minutes=12):
         deadline, start = time.monotonic() + minutes * 60, time.monotonic()

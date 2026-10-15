@@ -798,7 +798,7 @@ class JenkinsBrowser:
         No history-number inference, API credentials, redirects or build POSTs.
         Authentication/transport failures preserve the receipt for later Resume.
         """
-        from .dispatch_identity import build_number, queue_url
+        from .dispatch_identity import build_number, queue_url, same_job
         root = urlsplit(job_url)
         if (root.scheme != 'https' or not root.hostname or root.username or root.password
                 or root.query or root.fragment or '/job/' not in root.path
@@ -841,8 +841,10 @@ class JenkinsBrowser:
             if 'cancelled' in item and type(item['cancelled']) is not bool:
                 raise NeedsAttention('队列取消状态无效；禁止关联 Build')
             task = item.get('task')
-            if not isinstance(task, dict) or task.get('url') != job_url:
-                raise NeedsAttention('队列响应 Job 与本次提交不一致；禁止跨 Job 关联')
+            if not isinstance(task, dict) or not same_job(task.get('url'), job_url):
+                from .telemetry import safe_text
+                shown = safe_text(str(task.get('url') if isinstance(task, dict) else task))[:300]
+                raise NeedsAttention(f'队列响应 Job 与本次提交不一致；禁止跨 Job 关联（Jenkins 返回：{shown}；本次：{job_url}）')
             executable = item.get('executable')
             if executable is not None:
                 number = build_number(job_url, executable.get('url')) if isinstance(executable, dict) else None
@@ -855,6 +857,28 @@ class JenkinsBrowser:
             action('QUEUE', f'{self.site} 本次 queue {queue_id} 仍在排队；只读等待，不重新提交')
             time.sleep(min(max(0.01, getattr(self, 'poll', 10)), max(0, deadline-time.monotonic())))
         raise NeedsAttention('等待本次队列对应 Build 超时；保留回执，Resume 继续同一队列，不重新提交')
+
+    def find_build_by_queue_id(self, job_url, queue_id):
+        """Read-only: the build of this job whose recorded queueId is ours, or None."""
+        response = None
+        try:
+            response = self.context.request.get(job_url + 'api/json', params={'tree': 'builds[number,queueId]{0,100}'},
+                                                max_redirects=0, timeout=30000)
+            if response.status != 200 or 'json' not in response.headers.get('content-type', '').lower():
+                return None
+            job = response.json()
+        except (PlaywrightTimeout, PlaywrightError, ValueError):
+            return None
+        finally:
+            if response is not None:
+                response.dispose()
+        hits = [b['number'] for b in (job or {}).get('builds') or []
+                if type(b.get('number')) is int and b.get('queueId') == queue_id]
+        if len(hits) != 1:
+            return None
+        action('QUEUE', f'{self.site} 排队记录已不可用；Build #{hits[0]} 记录的 queueId={queue_id} 与回执一致，据此关联')
+        return dict(queue_id=queue_id, job_url=job_url, relation='executable',
+                    build_url=job_url.rstrip('/') + '/' + str(hits[0]) + '/')
 
     def _wait_build_ready(self):
         # DOMContentLoaded does not wait for async scripts that bind Jenkins controls.
