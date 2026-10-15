@@ -1,17 +1,13 @@
 """Receipt-only ownership for new tasks; never infer ownership from Build history/SHA."""
 import re
 import uuid
-from urllib.parse import unquote, urlsplit
+from urllib.parse import urlsplit
 
 
 def _plain_path(path):
-    """Branch jobs can be written job/a%2Fb/ or job/a%252Fb/; compare the decoded path."""
-    for _ in range(3):
-        decoded = unquote(path)
-        if decoded == path:
-            break
-        path = decoded
-    return path
+    """Branch jobs can be written job/a%2Fb/ or job/a%252Fb/. Only that one escape is
+    normalised; every other percent-escape (e.g. %31 for a digit) still has to match exactly."""
+    return re.sub(r'%(?:25)?2[fF]', '%2F', path)
 
 
 def same_job(first, second):
