@@ -83,9 +83,22 @@ def compose(row, params, runtime, base_url, test=False):
     return safe_text(subject)[:250], '\n'.join(lines)
 
 
+def html_body(text):
+    """HTML version of the plain body: Jira sends HTML mail to most users and ignores
+    textBody for them, so without this the email arrives with no content."""
+    import html
+    out = []
+    for line in text.split('\n'):
+        escaped = html.escape(line)
+        escaped = re.sub(r'https://[^\s<>&]+(?:&amp;[^\s<>&]+)*',
+                         lambda m: f'<a href="{m.group(0)}">{m.group(0)}</a>', escaped)
+        out.append(escaped)
+    return '<div style="font-family:sans-serif;font-size:14px;line-height:1.5">' + '<br>'.join(out) + '</div>'
+
+
 def request_for(issue, users, subject, body, flavor='server'):
     who = [{'accountId': u} if flavor == 'cloud' else {'name': u} for u in users]
-    payload = {'subject': subject, 'textBody': body,
+    payload = {'subject': subject, 'textBody': body, 'htmlBody': html_body(body),
                'to': {'reporter': False, 'assignee': False, 'watchers': False, 'voters': False, 'users': who}}
     return f'/rest/api/2/issue/{quote(issue)}/notify', payload
 
