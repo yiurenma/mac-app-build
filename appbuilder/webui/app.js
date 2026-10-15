@@ -70,12 +70,19 @@ async function submitBuild(evt){evt.preventDefault();
  if($('save-as-schedule').checked)return window.scheduleEditor.submit();
  const button=$('submit-build'),form=$('build-form'),body=buildBody();
  button.disabled=true;button.textContent='Starting build...';$('form-message').textContent='正在检查环境并创建任务...';$('form-message').classList.remove('error');
- try{const res=await api('/api/tasks',{method:'POST',body:JSON.stringify(body)});form.elements.testfairy_user.value='';form.elements.testfairy_password.value='';form.elements.jenkins_password.value='';form.elements.github_token.value='';form.elements.jenkins_user.value='';$('form-message').textContent='任务已创建：'+res.task.id;toast('构建任务已启动 · '+res.task.id);await refreshDoctor();await loadTasks();setSelected(res.task.id);document.getElementById('activity').scrollIntoView({behavior:'smooth',block:'start'});}
+ try{const res=await api('/api/tasks',{method:'POST',body:JSON.stringify(body)});form.elements.jira_token.value='';form.elements.jenkins_password.value='';form.elements.github_token.value='';form.elements.jenkins_user.value='';$('form-message').textContent='任务已创建：'+res.task.id;toast('构建任务已启动 · '+res.task.id);await refreshDoctor();await loadTasks();setSelected(res.task.id);document.getElementById('activity').scrollIntoView({behavior:'smooth',block:'start'});}
  catch(e){$('form-message').textContent=e.message;$('form-message').classList.add('error');toast(e.message,true)}finally{button.disabled=false;button.textContent='▶   Start build  ↗';}}
 async function resumeTask(){const id=state.selected;if(!id)return;if(!confirm(`恢复任务 ${id}？\n将复用既有分支和 Jenkins Build，不重新创建任务。`))return;
  try{await api(`/api/tasks/${encodeURIComponent(id)}/resume`,{method:'POST',body:JSON.stringify({visible:true,verbose:true})});toast('已请求恢复任务');state.offset=0;await loadTasks();await loadLog(true);}catch(e){toast(e.message,true);}}
 async function refreshDoctor(){try{const r=await api('/api/doctor');const badge=$('doctor-badge');badge.className=r.ready?'dot-label':'dot-label bad';badge.textContent=r.ready?'● Environment ready':'● Setup required';badge.title=(r.messages||[]).join('\n');if(!r.ready)toast('环境检查：'+(r.messages||[]).slice(-1)[0],true);}catch(e){toast(e.message,true);}}
-function nav(target){document.getElementById(target).scrollIntoView({behavior:'smooth',block:'start'});document.querySelectorAll('.nav').forEach(e=>e.classList.toggle('active',e.dataset.target===target));}
+const FOLD=['schedules','diagnostics','live-tests','testfairy-tests','mail-tests','jira-tests'];
+FOLD.forEach(id=>{const e=document.getElementById(id);if(e)e.classList.add('fold','collapsed');});
+function nav(target,keepOpen){const el=document.getElementById(target);
+ if(FOLD.includes(target)){const opening=keepOpen||el.classList.contains('collapsed');
+  FOLD.forEach(id=>{const e=document.getElementById(id);if(e)e.classList.add('collapsed');});
+  if(!opening){document.querySelectorAll('.nav').forEach(e=>e.classList.remove('active'));return;}
+  el.classList.remove('collapsed');}
+ el.scrollIntoView({behavior:'smooth',block:'start'});document.querySelectorAll('.nav').forEach(e=>e.classList.toggle('active',e.dataset.target===target));}
 let customFolderEdited=false;
 function syncSummary(){
   const f=$('build-form').elements;

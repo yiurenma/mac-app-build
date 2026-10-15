@@ -19,7 +19,7 @@ class CopyScenarios(shared.SharedBuildUIFixture):
         template = {**web.form_defaults(web.load_config()), 'country':'ALL', 'project_name':'CopiedApp',
                     'plugin_parent':PLUGIN_FEATURE_PARENT,
                     'gmx_issue_key':'UKPBB-77','plugin_branch':'feature/source','visible':False,
-                    'testfairy_enabled':True,'testfairy_save_credentials':True,
+                    'testfairy_enabled':True,
                     'outlook_auto_send':True,'outlook_recipients':'fixture@example.com'}
         allowed = set(schedules.BASIC_KEYS+schedules.OPTIONAL_TEXT+schedules.OPTIONAL_INT+schedules.OPTIONAL_BOOL)
         template = {k:v for k,v in template.items() if k in allowed}
@@ -29,7 +29,7 @@ class CopyScenarios(shared.SharedBuildUIFixture):
         with closing(schedules.connect()) as db, db:
             db.execute("UPDATE schedules SET generation=4,success_task_id='old-success',stopped_at='2020-01-01' WHERE id=?", (self.source['id'],))
         self.page.reload(); expect(self.page.locator('#plugin-branches option')).to_have_count(101)
-        self.page.evaluate("nav('schedules')")
+        self.page.evaluate("nav('schedules',true)")
         expect(self.page.locator('#schedules-body')).to_contain_text('source')
         self.source = schedules.get_schedule(self.source['id'])
 
@@ -39,9 +39,9 @@ class CopyScenarios(shared.SharedBuildUIFixture):
 
     def test_copy_cancel_repeat_click_and_save_new_identity(self):
         # Unsaved credentials from an unrelated draft must not leak into a copy.
-        self.field('testfairy_password').fill('draft-secret', force=True)
+        self.field('jira_token').fill('draft-secret', force=True)
         self.copy()
-        self.assertEqual(self.field('testfairy_password').input_value(), '')
+        self.assertEqual(self.field('jira_token').input_value(), '')
         self.assertEqual(self.field('country').input_value(), 'ALL')
         self.assertEqual(self.field('plugin_branch').input_value(), 'feature/source')
         self.assertEqual(self.field('plugin_parent').input_value(), PLUGIN_FEATURE_PARENT)
@@ -54,8 +54,8 @@ class CopyScenarios(shared.SharedBuildUIFixture):
         expect(self.page.locator('#form-message')).to_contain_text('不同名称')
         self.assertEqual(len(schedules.list_schedules()),1)
         self.page.locator('#schedule-cancel').click()
-        self.page.evaluate("nav('schedules')"); self.copy()
-        self.page.evaluate("nav('schedules')"); self.copy()
+        self.page.evaluate("nav('schedules',true)"); self.copy()
+        self.page.evaluate("nav('schedules',true)"); self.copy()
         self.assertEqual(len(schedules.list_schedules()),1)
         self.field('schedule_name').fill('copy one')
         self.page.evaluate('scheduleEditor.submit(); scheduleEditor.submit()')
@@ -78,12 +78,12 @@ class CopyScenarios(shared.SharedBuildUIFixture):
         self.assertFalse(self.field('schedule_stop_after_success').is_checked())
         self.field('schedule_stop_after_success').check()
         self.page.locator('#schedule-cancel').click()
-        self.page.evaluate("nav('schedules')")
+        self.page.evaluate("nav('schedules',true)")
         self.page.locator('#new-schedule').click()
         self.assertTrue(self.field('schedule_stop_after_success').is_checked())
         self.field('schedule_stop_after_success').uncheck()
         self.page.locator('#schedule-cancel').click()
-        self.page.evaluate("nav('schedules')"); self.copy()
+        self.page.evaluate("nav('schedules',true)"); self.copy()
         self.assertTrue(self.field('schedule_stop_after_success').is_checked())
         self.assertEqual(len(schedules.list_schedules()),1)
 
@@ -109,7 +109,7 @@ class CopyScenarios(shared.SharedBuildUIFixture):
             self.page.locator('#submit-build').click()
             self.assertTrue(entered.wait(3))
             try:
-                self.page.evaluate("nav('schedules')"); self.copy(); self.field('schedule_name').fill('second draft')
+                self.page.evaluate("nav('schedules',true)"); self.copy(); self.field('schedule_name').fill('second draft')
             finally:release.set()
             expect(self.page.locator('#submit-build')).to_be_enabled()
         expect(self.field('schedule_name')).to_have_value('second draft')
@@ -120,7 +120,7 @@ class CopyScenarios(shared.SharedBuildUIFixture):
     def test_stale_edit_cannot_reenable_stopped_cycle(self):
         # Simulate a running enabled cycle, then success while its editor is open.
         schedules.update_schedule(self.source['id'],enabled=True,restart_cycle=True)
-        self.page.reload(); self.page.evaluate("nav('schedules')")
+        self.page.reload(); self.page.evaluate("nav('schedules',true)")
         expect(self.page.locator('#schedules-body')).to_contain_text('source')
         self.page.locator('#schedules-body button',has_text='编辑').first.click()
         with closing(schedules.connect()) as db, db:

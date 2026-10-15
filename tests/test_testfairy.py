@@ -253,7 +253,8 @@ class BrowserTests(unittest.TestCase):
         with self.assertRaisesRegex(NeedsAttention,'多个'):self.worker.find(expected_build(PARAMS,RUNTIME))
     def test_wrong_build_times_out_without_using_latest(self):
         self.mode='wrong'
-        with self.assertRaisesRegex(NeedsAttention,'超时'):self.worker.find(expected_build(PARAMS,RUNTIME))
+        # Either wording is a timeout; which one wins depends on runner speed.
+        with self.assertRaisesRegex(NeedsAttention,'超时|等待预算已用尽'):self.worker.find(expected_build(PARAMS,RUNTIME))
     def test_no_existing_share_does_not_enable_public_access(self):
         self.worker.config['testfairy']['wait_seconds']=4
         self.mode='permission'
@@ -314,7 +315,7 @@ class ScheduleAuthenticationTests(unittest.TestCase):
         with patch('appbuilder.testfairy.saved_auth_available',return_value=False) as auth:
             result=validate_template({'testfairy_enabled':True})
         self.assertTrue(result['testfairy_enabled'])
-        self.assertFalse(result['testfairy_save_credentials'])
+        self.assertFalse(result.get('testfairy_save_credentials', False))  # legacy key is no longer in the form
         auth.assert_not_called()
     def test_schedule_preserves_legacy_configuration_without_using_it_for_lookup(self):
         from appbuilder.schedules import validate_template
