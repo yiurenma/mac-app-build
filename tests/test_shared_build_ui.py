@@ -279,7 +279,7 @@ class SharedBuildUITests(SharedBuildUIFixture, unittest.TestCase):
             if req.method=='POST':
                 posts[req.url.rsplit('/',1)[1]]=json.loads(req.post_data)
                 if req.url.endswith('/mail-test'):
-                    return route.fulfill(json={'ok':True,'issue':'TRANSACT-9','to':['44065253','43123456'],'subject':'[TEST] [新测试包] UK','from_task':'T1'})
+                    return route.fulfill(json={'ok':True,'issue':'TRANSACT-9','to':['44065253','43123456'],'subject':'[TEST] [新测试包] UK','from_task':'T1','request':'POST https://jira.example.com/rest/api/2/issue/TRANSACT-9/notify'})
                 body=posts['settings'];settings['settings'].update({k:body[k] for k in ('mail_enabled','mail_issue','mail_users')})
             route.fulfill(json=settings)
         p.route('**/api/jira/**',handle)
@@ -297,6 +297,7 @@ class SharedBuildUITests(SharedBuildUIFixture, unittest.TestCase):
         expect(p.locator('#build-jira-status')).to_contain_text('邮件通知：已开启')
         p.locator('#jira-mail-test').click()
         expect(p.locator('#jira-result')).to_contain_text('收件人：44065253、43123456')
+        expect(p.locator('#jira-result')).to_contain_text('POST https://jira.example.com/rest/api/2/issue/TRANSACT-9/notify')
         self.assertEqual(posts['mail-test'],{'mail_issue':'TRANSACT-9','mail_users':'44065253, 43123456'})
         self.assertFalse(self.errors,self.errors)
 

@@ -88,7 +88,7 @@ async function mailTest(){
     const r=await api('/api/jira/mail-test',{method:'POST',body:JSON.stringify({mail_issue:f.mail_issue.value.trim(),mail_users:f.mail_users.value})});
     out('已提交给 Jira，请收件人查收邮箱（通常 1–5 分钟）\n公告单：'+r.issue+'\n收件人：'+r.to.join('、')+'\n主题：'+r.subject+
       (r.from_task?'\n内容取自构建：'+r.from_task:'')+
-      '\n\n如果只发给了自己却没收到：Jira 可能默认不给操作者本人发通知，可在 Jira 个人资料里把“自己的更改”通知打开，或加一位同事一起测。');
+      '\n\n本次请求（不含 Token）：\n'+(r.request||''));
   }catch(e){out('测试邮件失败：'+e.message);}
   finally{button.disabled=false;}
 }
