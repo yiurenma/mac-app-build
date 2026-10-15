@@ -10,11 +10,13 @@ from appbuilder import cli, lifecycle
 
 class WebStartTests(unittest.TestCase):
     def run_web(self, mode, serve_effect=None):
-        with patch.object(cli, 'doctor_check'), patch.object(cli, 'load_config', return_value={}), \
+        with patch('appbuilder.handover.hand_over') as hand_over, \
+                patch.object(cli, 'doctor_check'), patch.object(cli, 'load_config', return_value={}), \
                 patch.object(lifecycle, 'state', return_value={'mode': mode}), \
                 patch.object(lifecycle, 'resume') as resume, \
                 patch('appbuilder.web.serve', side_effect=serve_effect) as serve:
             cli.main(['web', '--no-open'])
+        hand_over.assert_called_once_with()
         return resume, serve
 
     def test_paused_project_is_resumed_before_serving(self):

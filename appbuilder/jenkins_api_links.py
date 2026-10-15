@@ -9,8 +9,8 @@ HTML at all:
    "Build <names> #N completed: SUCCESS" line;
 2. Jenkins' record of that upload build (api/json) must name exactly this GMX build as its
    upstream cause and be finished with SUCCESS;
-3. the upload build's consoleText must contain exactly one complete testfairy.com/join link
-   (validated by the same rules as the browser path).
+3. the upload build's console page (HTML): the join link is only a hyperlink there, its
+   plain text shows just the label. The same parser and rules as the browser path apply.
 
 Anything missing or ambiguous raises NeedsAttention; the caller then falls back to the browser.
 """
@@ -18,7 +18,7 @@ import re
 from urllib.parse import quote
 
 from .jenkins import NeedsAttention
-from .jenkins_links import _BUILD_START, _COMPLETED, _TARGET, _URL, _build, validate_join_url
+from .jenkins_links import _BUILD_START, _COMPLETED, _TARGET, _build, join_url_from_html
 
 _STARTING = re.compile(r'Starting building:\s*(?P<name>[^\n#]+?)\s*#(?P<number>[1-9][0-9]*)\b')
 _FINISHED = re.compile(r'\bBuild\s+(?P<name>[^\n#]+?)\s*#(?P<number>[1-9][0-9]*)\s+completed:\s*(?P<result>[A-Z_]+)', re.I)
@@ -48,21 +48,6 @@ def upload_build_from_text(text, root):
         raise NeedsAttention('首个上传段未 completed: SUCCESS')
     job = root + ''.join('job/' + quote(name, safe='') + '/' for name in _names(start['name']))
     return job, int(start['number'])
-
-
-def join_url_from_text(text):
-    found = set()
-    for match in _URL.finditer(text):
-        raw = match.group()
-        if '?' not in raw:
-            raw = raw.rstrip('),;}.')
-        try:
-            found.add(validate_join_url(raw))
-        except NeedsAttention:
-            pass
-    if len(found) != 1:
-        raise NeedsAttention('上传构建日志中没有唯一、完整的 testfairy.com/join APP 链接')
-    return found.pop()
 
 
 def api_lookup(source_job_url, source_number, http, emit=lambda message: None):
@@ -98,7 +83,14 @@ def api_lookup(source_job_url, source_number, http, emit=lambda message: None):
         raise NeedsAttention('上传构建的上游记录不是本次 GMX 构建，拒绝采用')
     emit('[APP-LINK] Jenkins 记录确认：该上传构建由本次 GMX 构建触发并成功')
 
-    share = join_url_from_text(text(build_url + 'consoleText', 'upload_log'))
+    page = build_url + 'consoleFull'
+    status, final, _, raw = http.request('GET', page, accept='text/html')
+    _auth_check(status)
+    if status != 200:
+        raise NeedsAttention(f'上传构建日志页读取失败（HTTP {status}）')
+    html = raw.decode('utf-8', 'replace')
+    emit(f'[APP-LINK] upload_page: Token 读取上传构建日志页 HTTP=200，HTML字符数={len(html)}')
+    share = join_url_from_html(html, page)
     return {'share_url': share, 'source_job_url': source['job_url'],
             'source_build_number': source['number'], 'source_build_url': source['build_url'],
             'downstream_job_url': job_url, 'downstream_build_number': number,
