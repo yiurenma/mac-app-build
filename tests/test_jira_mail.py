@@ -74,6 +74,13 @@ class ParsingTests(unittest.TestCase):
                 M.check_issue(bad)
 
 
+class HtmlBodyTests(unittest.TestCase):
+    def test_text_is_escaped_and_links_with_query_stay_whole(self):
+        out = M.html_body('a <b> & c\nhttps://x.example/join/a?id=1&v=2 next')
+        self.assertIn('a &lt;b&gt; &amp; c<br>', out)
+        self.assertIn('<a href="https://x.example/join/a?id=1&amp;v=2">https://x.example/join/a?id=1&amp;v=2</a> next', out)
+
+
 class ComposeTests(unittest.TestCase):
     row = {'id': 'T1'}
 
@@ -115,6 +122,10 @@ class NotifyTeamTests(Fixture):
                                       'users': [{'name': '44065253'}, {'name': '43123456'}]})
         self.assertIn(LINK, body['textBody'])
         self.assertIn('TRANSACT-1 Fix login', body['textBody'])
+        # HTML recipients see htmlBody only: same content, links clickable, text escaped.
+        self.assertIn(f'<a href="{LINK}">', body['htmlBody'])
+        self.assertIn('TRANSACT-1 Fix login', body['htmlBody'])
+        self.assertIn('<br>', body['htmlBody'])
         self.assertEqual(self.state['runtime']['jira_mail']['status'], 'SENT')
 
     def test_cloud_uses_account_ids(self):
