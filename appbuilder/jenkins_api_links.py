@@ -1,55 +1,105 @@
-"""APP link lookup over Jenkins' own HTTP endpoints with a user API token.
+"""APP link lookup with the Jenkins API token: plain-text logs plus Jenkins' own records.
 
-Same evidence chain and parsers as the browser path (jenkins_links): the fixed GMX
-build's full HTML console -> the first successful upload-to-testfairy/master build ->
-its full HTML console -> the single testfairy.com/join link. Only the transport differs:
-no browser, no SSO session. Any failure raises NeedsAttention so the caller can fall
-back to the browser.
+The browser path (jenkins_links) parses the rendered console HTML. The HTML Jenkins
+serves to a non-browser client is not always the same, so the token path does not parse
+HTML at all:
+
+1. the fixed GMX build's consoleText -> the FIRST "[Pipeline] build (... upload-to-
+   testfairy » master)" segment -> "Starting building: <names> #N" and its own
+   "Build <names> #N completed: SUCCESS" line;
+2. Jenkins' record of that upload build (api/json) must name exactly this GMX build as its
+   upstream cause and be finished with SUCCESS;
+3. the upload build's consoleText must contain exactly one complete testfairy.com/join link
+   (validated by the same rules as the browser path).
+
+Anything missing or ambiguous raises NeedsAttention; the caller then falls back to the browser.
 """
+import re
+from urllib.parse import quote
+
 from .jenkins import NeedsAttention
-from .jenkins_links import _build, _exact_target, join_url_from_html, upload_build_from_html
+from .jenkins_links import _BUILD_START, _COMPLETED, _TARGET, _URL, _build, validate_join_url
 
-MAX_BYTES = 64 * 1024 * 1024
+_STARTING = re.compile(r'Starting building:\s*(?P<name>[^\n#]+?)\s*#(?P<number>[1-9][0-9]*)\b')
+_FINISHED = re.compile(r'\bBuild\s+(?P<name>[^\n#]+?)\s*#(?P<number>[1-9][0-9]*)\s+completed:\s*(?P<result>[A-Z_]+)', re.I)
 
 
-def http_fetch(user, token, *, timeout=30, ca_bundle=None):
-    from .jenkins_api import JenkinsHttp
+def _names(display):
+    parts = [p.strip() for p in display.split('»')]
+    if len(parts) < 2 or parts[-2:] != ['upload-to-testfairy', 'master'] or not all(parts):
+        raise NeedsAttention('上传构建名称不是 … » upload-to-testfairy » master')
+    return parts
 
-    http = JenkinsHttp(user, token, timeout=timeout, ca_bundle=ca_bundle)
 
-    def fetch(url):
+def upload_build_from_text(text, root):
+    """(job_url, number) of the first upload-to-testfairy/master segment that succeeded."""
+    first = _TARGET.search(text)
+    if not first:
+        raise NeedsAttention('纯文本日志未找到首个 » upload-to-testfairy » master) 构建段')
+    following = _BUILD_START.search(text, first.end())
+    segment = text[first.end():following.start() if following else len(text)]
+    start = _STARTING.search(segment)
+    done = _FINISHED.search(segment)
+    if not start or not done:
+        raise NeedsAttention('首个上传段缺少 Starting building 或完成行')
+    if done['number'] != start['number'] or _names(done['name']) != _names(start['name']):
+        raise NeedsAttention('首个上传段开始行与完成行的构建不一致')
+    if done['result'].upper() != 'SUCCESS' or not _COMPLETED.search(segment):
+        raise NeedsAttention('首个上传段未 completed: SUCCESS')
+    job = root + ''.join('job/' + quote(name, safe='') + '/' for name in _names(start['name']))
+    return job, int(start['number'])
+
+
+def join_url_from_text(text):
+    found = set()
+    for match in _URL.finditer(text):
+        raw = match.group()
+        if '?' not in raw:
+            raw = raw.rstrip('),;}.')
         try:
-            status, final, headers, raw = http.request('GET', url, accept='text/html')
-        except NeedsAttention as exc:
-            raise NeedsAttention(str(exc)) from None
-        charset = 'utf-8'
-        for key, value in headers.items():
-            if key.lower() == 'content-type' and 'charset=' in value:
-                charset = value.split('charset=', 1)[1].split(';')[0].strip() or 'utf-8'
-        return status, final, raw.decode(charset, 'replace')
-    return fetch
+            found.add(validate_join_url(raw))
+        except NeedsAttention:
+            pass
+    if len(found) != 1:
+        raise NeedsAttention('上传构建日志中没有唯一、完整的 testfairy.com/join APP 链接')
+    return found.pop()
 
 
-def api_lookup(source_job_url, source_number, fetch, emit=lambda message: None):
+def api_lookup(source_job_url, source_number, http, emit=lambda message: None):
+    from .jenkins_api import _auth_check, jenkins_root
+
     source = _build(source_job_url, source_number)
 
-    def read(url, name):
-        status, final, html = fetch(url)
-        if status in (401, 403):
-            raise NeedsAttention(f'Jenkins 拒绝了 Token（HTTP {status}），可能 Token 无效、无权限或公司禁用了 Token 访问')
-        if status in (301, 302, 303, 307, 308):
-            raise NeedsAttention('Jenkins 把 Token 请求重定向到登录页，公司可能只允许浏览器 SSO')
-        if status != 200 or not _exact_target(final, url):
+    def text(url, name):
+        status, _, _, raw = http.request('GET', url, accept='text/plain')
+        _auth_check(status)
+        if status != 200:
             raise NeedsAttention(f'{name} 读取失败（HTTP {status}）')
-        emit(f'[APP-LINK] {name}: Token 读取 HTTP=200，HTML字符数={len(html)}')
-        return html
+        body = raw.decode('utf-8', 'replace')
+        emit(f'[APP-LINK] {name}: Token 读取纯文本日志 HTTP=200，字符数={len(body)}')
+        return body
 
-    full = source['build_url'] + 'consoleFull'
-    downstream = upload_build_from_html(read(full, 'source_full'), full)
-    emit(f'[APP-LINK] first_upload_segment: 上传构建 #{downstream["number"]}')
-    full2 = downstream['build_url'] + 'consoleFull'
-    share = join_url_from_html(read(full2, 'downstream_full'), full2)
+    job_url, number = upload_build_from_text(text(source['build_url'] + 'consoleText', 'source_log'),
+                                             jenkins_root(source['job_url']))
+    build_url = job_url + f'{number}/'
+    emit(f'[APP-LINK] first_upload_segment: 上传构建 #{number}')
+
+    status, info = http.get_json(source['job_url'], tree='fullName')
+    full_name = (info or {}).get('fullName') if status == 200 else None
+    status, upload = http.get_json(build_url, tree='building,result,actions[causes[upstreamProject,upstreamBuild]]')
+    if status != 200 or not isinstance(upload, dict):
+        raise NeedsAttention(f'上传构建记录读取失败（HTTP {status}）')
+    if upload.get('building') is not False or upload.get('result') != 'SUCCESS':
+        raise NeedsAttention('上传构建未以 SUCCESS 结束')
+    causes = [c for holder in upload.get('actions') or [] for c in (holder or {}).get('causes') or []
+              if isinstance(c, dict)]
+    if not any(c.get('upstreamBuild') == source['number'] and full_name and c.get('upstreamProject') == full_name
+               for c in causes):
+        raise NeedsAttention('上传构建的上游记录不是本次 GMX 构建，拒绝采用')
+    emit('[APP-LINK] Jenkins 记录确认：该上传构建由本次 GMX 构建触发并成功')
+
+    share = join_url_from_text(text(build_url + 'consoleText', 'upload_log'))
     return {'share_url': share, 'source_job_url': source['job_url'],
             'source_build_number': source['number'], 'source_build_url': source['build_url'],
-            'downstream_job_url': downstream['job_url'], 'downstream_build_number': downstream['number'],
-            'downstream_build_url': downstream['build_url']}
+            'downstream_job_url': job_url, 'downstream_build_number': number,
+            'downstream_build_url': build_url}

@@ -1,61 +1,100 @@
-"""APP link via Jenkins API token: same evidence chain as the browser path, no browser."""
+"""APP link via the Jenkins API token: plain-text logs plus Jenkins' upstream record."""
+import json
 import unittest
+from unittest.mock import patch
 
 from appbuilder.app_links import token_lookup
 from appbuilder.jenkins import NeedsAttention
-from appbuilder.jenkins_api_links import api_lookup
-from test_jenkins_links import GMX_JOB, JOIN, SOURCE, UPLOAD, block, console_html
+from appbuilder.jenkins_api import JenkinsHttp
+from appbuilder.jenkins_api_links import api_lookup, join_url_from_text, upload_build_from_text
+
+HOST = 'https://jenkins.link-fixture.invalid'
+GMX_JOB = HOST + '/job/GMX/job/upload%2FAUTO-1/'
+SOURCE = {'job_url': GMX_JOB, 'number': 2, 'build_url': GMX_JOB + '2/'}
+UPLOAD_JOB = HOST + '/job/ci/job/shared/job/upload-to-testfairy/job/master/'
+JOIN = 'https://tenant.testfairy.com/join/svpzsf?id=575185'
 
 
-class FakeJenkins:
-    def __init__(self, pages=None, status=200, redirect=False):
-        self.pages = pages if pages is not None else {
-            SOURCE['build_url'] + 'consoleFull': console_html('build start\n' + block()),
-            UPLOAD['build_url'] + 'consoleFull': console_html('uploading\nShare: ' + JOIN + '\n'),
-        }
-        self.status, self.redirect, self.urls = status, redirect, []
+def gmx_log(result='SUCCESS', number=38220, extra=''):
+    return ('Started by user George\n[Pipeline] stage\n'
+            '[Pipeline] build (Building ci » shared » upload-to-testfairy » master)\n'
+            'Scheduling project: ci » shared » upload-to-testfairy » master\n'
+            f'Starting building: ci » shared » upload-to-testfairy » master #{number}\n'
+            f'Build ci » shared » upload-to-testfairy » master #{number} completed: {result}\n'
+            '[Pipeline] }\n' + extra + 'Finished: SUCCESS\n')
 
-    def __call__(self, url):
-        self.urls.append(url)
-        if self.redirect:
-            return 302, url, ''
+
+class FakeHttp(JenkinsHttp):
+    def __init__(self, gmx=None, upload_log=None, upload=None, full_name='GMX/upload%2FAUTO-1', status=200):
+        self.calls = []
+        self.status = status
+        self.texts = {GMX_JOB + '2/consoleText': gmx if gmx is not None else gmx_log(),
+                      UPLOAD_JOB + '38220/consoleText': upload_log if upload_log is not None
+                      else f'Uploading...\nShare this build: {JOIN}\nFinished: SUCCESS\n'}
+        self.jsons = {GMX_JOB + 'api/json': {'fullName': full_name},
+                      UPLOAD_JOB + '38220/api/json': upload if upload is not None else {
+                          'building': False, 'result': 'SUCCESS',
+                          'actions': [{'causes': [{'upstreamProject': 'GMX/upload%2FAUTO-1', 'upstreamBuild': 2}]}]}}
+
+    def request(self, method, url, data=None, accept='application/json'):
+        self.calls.append(url)
         if self.status != 200:
-            return self.status, url, ''
-        if url not in self.pages:
-            return 404, url, ''
-        return 200, url, self.pages[url]
+            return self.status, url, {}, b''
+        path = url.split('?')[0]
+        if path in self.texts:
+            return 200, url, {'Content-Type': 'text/plain'}, self.texts[path].encode()
+        if path in self.jsons:
+            return 200, url, {'Content-Type': 'application/json'}, json.dumps(self.jsons[path]).encode()
+        return 404, url, {}, b''
+
+
+class TextParsingTests(unittest.TestCase):
+    def test_first_upload_segment_and_job_url_from_plain_text(self):
+        self.assertEqual(upload_build_from_text(gmx_log(), HOST + '/'), (UPLOAD_JOB, 38220))
+
+    def test_failed_or_incomplete_first_segment_is_refused(self):
+        for text in (gmx_log(result='FAILURE'), gmx_log().replace('completed: SUCCESS', ''),
+                     'no upload here\nFinished: SUCCESS\n'):
+            with self.subTest(text=text[:40]), self.assertRaises(NeedsAttention):
+                upload_build_from_text(text, HOST + '/')
+
+    def test_join_link_must_be_unique_and_complete(self):
+        self.assertEqual(join_url_from_text(f'a {JOIN}\nb {JOIN}\n'), JOIN)
+        with self.assertRaises(NeedsAttention):
+            join_url_from_text(f'{JOIN}\nhttps://tenant.testfairy.com/join/other\n')
+        with self.assertRaises(NeedsAttention):
+            join_url_from_text('no link\n')
 
 
 class ApiLookupTests(unittest.TestCase):
-    def test_reads_source_then_upload_console_and_returns_the_join_link(self):
-        jenkins = FakeJenkins()
-        result = api_lookup(GMX_JOB, 812, jenkins)
+    def test_reads_logs_checks_upstream_record_and_returns_the_link(self):
+        http = FakeHttp()
+        result = api_lookup(GMX_JOB, 2, http)
         self.assertEqual(result['share_url'], JOIN)
-        self.assertEqual(result['downstream_build_url'], UPLOAD['build_url'])
-        self.assertEqual(jenkins.urls, [SOURCE['build_url'] + 'consoleFull', UPLOAD['build_url'] + 'consoleFull'])
+        self.assertEqual(result['downstream_build_url'], UPLOAD_JOB + '38220/')
+        self.assertFalse(any('consoleFull' in c for c in http.calls))
 
-    def test_refused_token_or_sso_redirect_is_reported_not_followed(self):
-        for jenkins, words in ((FakeJenkins(status=401), 'HTTP 401'), (FakeJenkins(status=403), 'HTTP 403'),
-                               (FakeJenkins(redirect=True), '重定向')):
-            with self.subTest(words=words), self.assertRaisesRegex(NeedsAttention, words):
-                api_lookup(GMX_JOB, 812, jenkins)
+    def test_upload_build_triggered_by_another_build_is_refused(self):
+        other = {'building': False, 'result': 'SUCCESS',
+                 'actions': [{'causes': [{'upstreamProject': 'GMX/upload%2FAUTO-1', 'upstreamBuild': 1}]}]}
+        with self.assertRaisesRegex(NeedsAttention, '上游'):
+            api_lookup(GMX_JOB, 2, FakeHttp(upload=other))
 
-    def test_failed_upload_segment_is_not_accepted(self):
-        pages = {SOURCE['build_url'] + 'consoleFull': console_html(block(result='FAILURE'))}
+    def test_unfinished_upload_build_is_refused(self):
+        running = {'building': True, 'result': None, 'actions': []}
         with self.assertRaises(NeedsAttention):
-            api_lookup(GMX_JOB, 812, FakeJenkins(pages))
+            api_lookup(GMX_JOB, 2, FakeHttp(upload=running))
 
 
 class TokenLookupTests(unittest.TestCase):
     def test_success_marks_transport_and_failure_returns_none_for_browser_fallback(self):
         messages = []
-        ok = token_lookup({}, SOURCE, emit=messages.append, fetch=FakeJenkins())
+        ok = token_lookup({}, SOURCE, emit=messages.append, http=FakeHttp())
         self.assertEqual((ok['share_url'], ok['transport']), (JOIN, 'jenkins-api-token'))
-        self.assertIsNone(token_lookup({}, SOURCE, emit=messages.append, fetch=FakeJenkins(status=403)))
+        self.assertIsNone(token_lookup({}, SOURCE, emit=messages.append, http=FakeHttp(status=403)))
         self.assertTrue(any('改用浏览器' in m and 'HTTP 403' in m for m in messages))
 
     def test_no_saved_token_means_browser_without_any_request(self):
-        from unittest.mock import patch
         with patch('appbuilder.auth.jenkins_api_credentials', return_value=None):
             self.assertIsNone(token_lookup({}, SOURCE, emit=lambda m: None))
 

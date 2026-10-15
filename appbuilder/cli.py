@@ -68,6 +68,7 @@ def args_parser():
     login = sub.add_parser('login', help='手动登录 Jenkins，保存本地认证状态')
     login.add_argument('--site', choices=['plugin', 'gmx'], required=True)
     sub.add_parser('doctor', help='检查本机 Python/Git/Playwright/Token')
+    sub.add_parser('update', help='一条命令更新：停止旧服务 → git pull → 启动 Web（由 ./app-build 处理）')
     web = sub.add_parser('web', help='启动 Mac 本地 Web Console (http://127.0.0.1:8765)')
     web.add_argument('--port', type=int, default=8765, help='本地页面端口（默认 8765）')
     web.add_argument('--no-open', action='store_true', help='只启动服务，不自动打开浏览器')
@@ -275,8 +276,21 @@ def main(argv=None):
         # A local dashboard can open even when Jenkins/token is not configured;
         # preflight errors are visible in the page and builds still require strict doctor.
         doctor_check(load_config(), strict=False)
+        from . import lifecycle
+        if lifecycle.state().get('mode') != 'RUNNING':
+            # Starting the page is an explicit wish to run again: lift the pause left by stop.
+            print('[WEB] 检测到之前执行过 stop，自动解除暂停', flush=True)
+            lifecycle.resume()
         from .web import serve
-        serve(port=a.port, open_browser=not a.no_open)
+        try:
+            serve(port=a.port, open_browser=not a.no_open)
+        except OSError as exc:
+            if exc.errno in (48, 98):          # macOS / Linux: address already in use
+                print(f'[WEB] 端口 {a.port} 已被占用：多半是旧的服务还在运行。'
+                      f'先执行 ./app-build stop；若仍被占用，用 lsof -nP -iTCP:{a.port} -sTCP:LISTEN 找到进程后 kill',
+                      file=sys.stderr, flush=True)
+                raise SystemExit(1)
+            raise
         return
     if a.command == 'scheduler':
         from . import scheduler

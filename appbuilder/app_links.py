@@ -8,28 +8,28 @@ from .jenkins import JenkinsBrowser, NeedsAttention
 from .jenkins_links import source_build, lookup_app_link, validate_join_url
 
 
-def token_lookup(config, source, *, emit=None, credentials=None, fetch=None):
+def token_lookup(config, source, *, emit=None, credentials=None, http=None):
     """Try the Jenkins API token first. Returns None (caller uses the browser) when no
-    token is saved or Jenkins refuses it; the reason is reported, never the token."""
+    token is saved or the token path cannot prove the link; the reason is reported."""
     from .telemetry import action
     report = emit if emit is not None else (lambda message: action('APP-LINK', message))
-    if fetch is None:
+    if http is None:
         if credentials is None:
             from .auth import jenkins_api_credentials
             credentials = jenkins_api_credentials('gmx')
             if not credentials:
                 report('[APP-LINK] 未保存工号或 Platform Jenkins Token；改用浏览器')
                 return None
-        from .jenkins_api_links import http_fetch
+        from .jenkins_api import JenkinsHttp
         jenkins = (config or {}).get('jenkins', {})
-        fetch = http_fetch(*credentials, timeout=int(jenkins.get('api_timeout_seconds', 30)),
+        http = JenkinsHttp(*credentials, timeout=int(jenkins.get('api_timeout_seconds', 30)),
                            ca_bundle=jenkins.get('ca_bundle'))
     from .jenkins_api_links import api_lookup
     try:
         report('[APP-LINK] 使用 Jenkins API Token 读取日志（不打开浏览器）')
-        result = api_lookup(source['job_url'], source['number'], fetch, emit=report)
+        result = api_lookup(source['job_url'], source['number'], http, emit=report)
     except NeedsAttention as exc:
-        reason = str(exc) if type(exc) is NeedsAttention else '未知原因'
+        reason = str(exc) if type(exc).__name__ in ('NeedsAttention', 'TokenUnavailable') else '未知原因'
         report(f'[APP-LINK] Token 方式未取到链接，改用浏览器：{reason}')
         return None
     except Exception as exc:
@@ -49,8 +49,12 @@ def lookup_task_app(config, data, workdir, params, runtime, *, visible=None, emi
     use_token = params.get('jenkins_api') is True if prefer_token is None else prefer_token
     result = token_lookup(config, source, emit=emit) if use_token else None
     if result is None:
+        # Log in with the saved Keychain account like the build steps do; only fall back to a
+        # manual sign-in when nothing is saved (or the automatic attempt cannot finish).
+        from .auth import read_credentials
         with JenkinsBrowser(config, Path(data), Path(workdir), 'gmx', visible=show,
-                            verbose=bool(params.get('verbose')), manual_login=show) as browser:
+                            verbose=bool(params.get('verbose')),
+                            manual_login=show and not read_credentials()) as browser:
             result = lookup_app_link(browser, source['job_url'], source['number'], emit=emit)
     # Preserve the old delivery object's identity fields, without inventing an
     # App version/build that the Jenkins URL alone does not establish.
