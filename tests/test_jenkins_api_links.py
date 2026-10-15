@@ -6,7 +6,7 @@ from unittest.mock import patch
 from appbuilder.app_links import token_lookup
 from appbuilder.jenkins import NeedsAttention
 from appbuilder.jenkins_api import JenkinsHttp
-from appbuilder.jenkins_api_links import api_lookup, join_url_from_text, upload_build_from_text
+from appbuilder.jenkins_api_links import api_lookup, upload_build_from_text
 
 HOST = 'https://jenkins.link-fixture.invalid'
 GMX_JOB = HOST + '/job/GMX/job/upload%2FAUTO-1/'
@@ -29,8 +29,11 @@ class FakeHttp(JenkinsHttp):
         self.calls = []
         self.status = status
         self.texts = {GMX_JOB + '2/consoleText': gmx if gmx is not None else gmx_log(),
-                      UPLOAD_JOB + '38220/consoleText': upload_log if upload_log is not None
-                      else f'Uploading...\nShare this build: {JOIN}\nFinished: SUCCESS\n'}
+                      # Plain text shows only the label; the link itself is a hyperlink in the page.
+                      UPLOAD_JOB + '38220/consoleText': 'Uploading...\nShare this build: Open in TestFairy\n',
+                      UPLOAD_JOB + '38220/consoleFull': upload_log if upload_log is not None else (
+                          '<html><body><pre class="console-output">Uploading...\nShare this build: '
+                          f'<a href="{JOIN.replace("&", "&amp;")}">Open in TestFairy</a>\nFinished: SUCCESS\n</pre></body></html>')}
         self.jsons = {GMX_JOB + 'api/json': {'fullName': full_name},
                       UPLOAD_JOB + '38220/api/json': upload if upload is not None else {
                           'building': False, 'result': 'SUCCESS',
@@ -58,13 +61,6 @@ class TextParsingTests(unittest.TestCase):
             with self.subTest(text=text[:40]), self.assertRaises(NeedsAttention):
                 upload_build_from_text(text, HOST + '/')
 
-    def test_join_link_must_be_unique_and_complete(self):
-        self.assertEqual(join_url_from_text(f'a {JOIN}\nb {JOIN}\n'), JOIN)
-        with self.assertRaises(NeedsAttention):
-            join_url_from_text(f'{JOIN}\nhttps://tenant.testfairy.com/join/other\n')
-        with self.assertRaises(NeedsAttention):
-            join_url_from_text('no link\n')
-
 
 class ApiLookupTests(unittest.TestCase):
     def test_reads_logs_checks_upstream_record_and_returns_the_link(self):
@@ -72,13 +68,24 @@ class ApiLookupTests(unittest.TestCase):
         result = api_lookup(GMX_JOB, 2, http)
         self.assertEqual(result['share_url'], JOIN)
         self.assertEqual(result['downstream_build_url'], UPLOAD_JOB + '38220/')
-        self.assertFalse(any('consoleFull' in c for c in http.calls))
+        # The big GMX log is read as plain text; only the small upload page is HTML.
+        self.assertNotIn(GMX_JOB + '2/consoleFull', http.calls)
+        self.assertIn(UPLOAD_JOB + '38220/consoleFull', http.calls)
 
     def test_upload_build_triggered_by_another_build_is_refused(self):
         other = {'building': False, 'result': 'SUCCESS',
                  'actions': [{'causes': [{'upstreamProject': 'GMX/upload%2FAUTO-1', 'upstreamBuild': 1}]}]}
         with self.assertRaisesRegex(NeedsAttention, '上游'):
             api_lookup(GMX_JOB, 2, FakeHttp(upload=other))
+
+    def test_link_comes_from_the_upload_page_hyperlink_and_must_be_unique(self):
+        two = ('<html><body><pre class="console-output">'
+               f'<a href="{JOIN}">a</a> <a href="https://tenant.testfairy.com/join/other">b</a></pre></body></html>')
+        with self.assertRaises(NeedsAttention):
+            api_lookup(GMX_JOB, 2, FakeHttp(upload_log=two))
+        none = '<html><body><pre class="console-output">no link here</pre></body></html>'
+        with self.assertRaises(NeedsAttention):
+            api_lookup(GMX_JOB, 2, FakeHttp(upload_log=none))
 
     def test_unfinished_upload_build_is_refused(self):
         running = {'building': True, 'result': None, 'actions': []}
