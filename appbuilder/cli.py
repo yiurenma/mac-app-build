@@ -273,6 +273,9 @@ def main(argv=None):
         doctor_check(load_config())
         return
     if a.command == 'web':
+        # New ZIP version: bring the previous folder's data along and retire its services.
+        from .handover import hand_over
+        hand_over()
         # A local dashboard can open even when Jenkins/token is not configured;
         # preflight errors are visible in the page and builds still require strict doctor.
         doctor_check(load_config(), strict=False)
