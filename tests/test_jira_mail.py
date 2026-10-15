@@ -211,6 +211,29 @@ class SettingsTests(unittest.TestCase):
             self.assertEqual(A.handle_post('/api/jira/mail-test', {}), (400, {'error': '发送失败：HTTP 403'}))
 
 
+class JiraErrorDetailTests(unittest.TestCase):
+    def test_http_error_carries_jiras_own_explanation(self):
+        import io
+        import urllib.error
+        body = json.dumps({'errorMessages': ['No recipients'], 'errors': {'to': "User 'x' does not exist"}}).encode()
+        error = urllib.error.HTTPError('https://jira.example.com/x', 400, 'Bad Request', {}, io.BytesIO(body))
+        client = J.JiraClient(BASE, env={'JIRA_TOKEN': 't'})
+        with patch('urllib.request.urlopen', side_effect=error), self.assertRaises(RuntimeError) as caught:
+            client._call('POST', '/rest/api/2/issue/A-1/notify', {})
+        self.assertIn('HTTP 400', str(caught.exception))
+        self.assertIn('No recipients', str(caught.exception))
+        self.assertIn("User 'x' does not exist", str(caught.exception))
+
+    def test_unreadable_error_body_keeps_the_plain_message(self):
+        import io
+        import urllib.error
+        error = urllib.error.HTTPError('https://jira.example.com/x', 400, 'Bad Request', {}, io.BytesIO(b'<html>'))
+        client = J.JiraClient(BASE, env={'JIRA_TOKEN': 't'})
+        with patch('urllib.request.urlopen', side_effect=error), self.assertRaises(RuntimeError) as caught:
+            client._call('POST', '/x', {})
+        self.assertTrue(str(caught.exception).endswith('HTTP 400'))
+
+
 class LegacyOutlookTemplateTests(unittest.TestCase):
     def test_schedules_saved_with_outlook_options_still_load(self):
         from appbuilder import schedules, web
