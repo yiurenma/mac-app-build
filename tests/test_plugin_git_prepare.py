@@ -70,6 +70,17 @@ class PluginGitPrepareTests(unittest.TestCase):
         for p in XCCONFIGS:self.assertEqual((self.home/'two'/p).read_text(),'BUNDLE_VERSION_SHORT = 1.3.1\n')
         self.assertEqual(remote_tip(URL,TARGET,self.env),second['build_sha'])
 
+    def test_source_code_with_trailing_whitespace_does_not_stop_the_merge(self):
+        # Real case: develop gained Swift files with trailing spaces / blank line at EOF;
+        # `git diff --cached --check` on the whole merge failed with exit 2.
+        first,_=self.run_prepare('one')
+        (self.source/'Code.swift').write_text('let a = 1   \n//  \n\n');source=self.commit_source('teammate code')
+        second,_=self.run_prepare('two')
+        self.assertEqual(second['source_sha'],source)
+        self.assertEqual(second['target_before'],first['build_sha'])
+        self.assertEqual((self.home/'two'/'Code.swift').read_text(),'let a = 1   \n//  \n\n')   # their code untouched
+        self.assertEqual(remote_tip(URL,TARGET,self.env),second['build_sha'])
+
     def test_unchanged_second_run_does_not_create_empty_commit(self):
         first,_=self.run_prepare('one');second,_=self.run_prepare('two')
         self.assertEqual(first['build_sha'],second['build_sha'])

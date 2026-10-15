@@ -91,7 +91,9 @@ def prepare(root: Path, url, source, target, version, env, progress, checkpoint)
             save(phase='EDITING')
             edit_plugin_versions(root, version)
             git(['add', '--', *XCCONFIGS], cwd=root)
-            git(['diff', '--cached', '--check'], cwd=root)
+            # Whitespace check on OUR edit only. The staged merge also carries every
+            # commit from the source branch; teammates' trailing spaces must not stop a build.
+            git(['diff', '--cached', '--check', '--', *XCCONFIGS], cwd=root)
             if git(['diff', '--name-only'], cwd=root):
                 raise PluginPreparationError('版本修改后仍有未暂存变更')
             parents = [base]
