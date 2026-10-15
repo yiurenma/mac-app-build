@@ -159,6 +159,8 @@ class TestEmailTests(Fixture):
             out = M.test_email({'mail_issue': 'transact-9', 'mail_users': 'a b'}, client=jira)
         self.assertEqual((out['issue'], out['to'], out['from_task']), ('TRANSACT-9', ['a', 'b'], self.row['id']))
         self.assertTrue(jira.calls[0][2]['subject'].startswith('[TEST]'))
+        self.assertIn('POST https://jira.example.com/rest/api/2/issue/TRANSACT-9/notify', out['request'])
+        self.assertIn('"name": "a"', out['request'])
         self.assertIn(LINK, jira.calls[0][2]['textBody'])
 
     def test_without_any_successful_build_a_plain_test_is_sent(self):
@@ -172,6 +174,12 @@ class TestEmailTests(Fixture):
     def test_errors_explain_the_likely_cause(self):
         self.save(base_url=BASE)
         with patch.object(M, 'latest_success', return_value=None):
+            jira = FakeJira(RuntimeError('Jira POST /x -> HTTP 400（Jira 说明：No recipients were defined for notification.）'))
+            with self.assertRaises(ValueError) as caught:
+                M.test_email({'mail_issue': 'TRANSACT-9', 'mail_users': 'a'}, client=jira)
+            self.assertIn('至少再加一位同事', str(caught.exception))
+            self.assertIn('本次请求（不含 Token）', str(caught.exception))
+            self.assertIn('/rest/api/2/issue/TRANSACT-9/notify', str(caught.exception))
             for code, hint in ((400, '用户名不存在'), (403, '不允许'), (404, '公告单不存在')):
                 jira = FakeJira(RuntimeError(f'Jira POST /x -> HTTP {code}'))
                 with self.subTest(code=code), self.assertRaisesRegex(ValueError, hint):

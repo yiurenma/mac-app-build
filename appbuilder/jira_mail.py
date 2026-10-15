@@ -83,11 +83,22 @@ def compose(row, params, runtime, base_url, test=False):
     return safe_text(subject)[:250], '\n'.join(lines)
 
 
-def send(client, issue, users, subject, body, flavor='server'):
+def request_for(issue, users, subject, body, flavor='server'):
     who = [{'accountId': u} if flavor == 'cloud' else {'name': u} for u in users]
     payload = {'subject': subject, 'textBody': body,
                'to': {'reporter': False, 'assignee': False, 'watchers': False, 'voters': False, 'users': who}}
-    return client._call('POST', f'/rest/api/2/issue/{quote(issue)}/notify', payload)
+    return f'/rest/api/2/issue/{quote(issue)}/notify', payload
+
+
+def send(client, issue, users, subject, body, flavor='server'):
+    path, payload = request_for(issue, users, subject, body, flavor)
+    return client._call('POST', path, payload)
+
+
+def describe_request(base_url, issue, users, subject, body, flavor='server'):
+    """The exact request, for the page: method, URL and JSON body (no token)."""
+    path, payload = request_for(issue, users, subject, body, flavor)
+    return 'POST ' + base_url.rstrip('/') + path + '\n' + json.dumps(payload, ensure_ascii=False, indent=2)
 
 
 def _client(conf):
@@ -168,16 +179,20 @@ def test_email(body, client=None, config=None):
     else:
         subject = '[TEST] APP Builder 邮件测试'
         text = '这是一封测试邮件。还没有带 App 链接的成功构建，所以没有附构建内容。\n\n—— 由 APP Builder 自动发送'
+    request = describe_request(conf['base_url'], issue, users, subject, text, conf['flavor'])
     try:
         send(client or _client(conf), issue, users, subject, text, conf['flavor'])
     except Exception as exc:
         message = safe_text(str(exc))
         hint = ''
-        if 'HTTP 400' in message:
+        if 'No recipients' in message:
+            hint = ('（Jira 不会给发起操作的人本人发通知：收件人只有你自己时就等于没人。'
+                    '请至少再加一位同事的用户名）')
+        elif 'HTTP 400' in message:
             hint = '（常见原因：用户名不存在，或公告单号不对）'
         elif 'HTTP 403' in message or 'HTTP 401' in message:
             hint = '（Token 无效，或公司 Jira 不允许用接口发通知）'
         elif 'HTTP 404' in message:
             hint = '（公告单不存在，或 Token 看不到这张单）'
-        raise ValueError('发送失败：' + message + hint) from None
-    return {'ok': True, 'issue': issue, 'to': users, 'subject': subject, 'from_task': task_id}
+        raise ValueError('发送失败：' + message + hint + '\n\n本次请求（不含 Token）：\n' + request) from None
+    return {'ok': True, 'issue': issue, 'to': users, 'subject': subject, 'from_task': task_id, 'request': request}
