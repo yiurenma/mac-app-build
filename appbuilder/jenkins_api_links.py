@@ -6,40 +6,27 @@ its full HTML console -> the single testfairy.com/join link. Only the transport 
 no browser, no SSO session. Any failure raises NeedsAttention so the caller can fall
 back to the browser.
 """
-import base64
-import ssl
-import urllib.error
-import urllib.request
-
 from .jenkins import NeedsAttention
 from .jenkins_links import _build, _exact_target, join_url_from_html, upload_build_from_html
 
 MAX_BYTES = 64 * 1024 * 1024
 
 
-class _NoRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, *args, **kwargs):
-        return None          # a redirect usually means an SSO login page; never follow it
-
-
 def http_fetch(user, token, *, timeout=30, ca_bundle=None):
-    context = ssl.create_default_context(cafile=ca_bundle) if ca_bundle else ssl.create_default_context()
-    opener = urllib.request.build_opener(_NoRedirect, urllib.request.HTTPSHandler(context=context))
-    auth = 'Basic ' + base64.b64encode(f'{user}:{token}'.encode()).decode()
+    from .jenkins_api import JenkinsHttp
+
+    http = JenkinsHttp(user, token, timeout=timeout, ca_bundle=ca_bundle)
 
     def fetch(url):
-        request = urllib.request.Request(url, headers={'Authorization': auth, 'Accept': 'text/html'})
         try:
-            with opener.open(request, timeout=timeout) as response:
-                body = response.read(MAX_BYTES + 1)
-                if len(body) > MAX_BYTES:
-                    raise NeedsAttention('Jenkins 日志过大，Token 方式不读取')
-                charset = response.headers.get_content_charset() or 'utf-8'
-                return response.status, response.geturl(), body.decode(charset, 'replace')
-        except urllib.error.HTTPError as exc:
-            return exc.code, url, ''
-        except (urllib.error.URLError, OSError, ssl.SSLError) as exc:
-            raise NeedsAttention(f'无法连接 Jenkins（{type(exc).__name__}）') from None
+            status, final, headers, raw = http.request('GET', url, accept='text/html')
+        except NeedsAttention as exc:
+            raise NeedsAttention(str(exc)) from None
+        charset = 'utf-8'
+        for key, value in headers.items():
+            if key.lower() == 'content-type' and 'charset=' in value:
+                charset = value.split('charset=', 1)[1].split(';')[0].strip() or 'utf-8'
+        return status, final, raw.decode(charset, 'replace')
     return fetch
 
 

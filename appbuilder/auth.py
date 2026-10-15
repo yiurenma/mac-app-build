@@ -262,35 +262,55 @@ def read_jira_token():
 
 
 JENKINS_API_SERVICE = 'mac-app-builder.jenkins-api-token'
+JENKINS_API_SITES = ('plugin', 'gmx')   # two different Jenkins servers, one token each
 
 
-def store_jenkins_api_token(token: str):
-    """Jenkins user API token for read-only REST/console access; Keychain only."""
+def _keychain_write(service, account, secret, label):
+    if sys.platform != 'darwin':
+        raise CredentialError(f'保存{label}目前仅支持 macOS Keychain')
+    result = subprocess.run(['security', 'add-generic-password', '-U', '-s', service, '-a', account, '-w', secret],
+                            text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    if result.returncode:
+        raise CredentialError(f'{label}保存到 Mac Keychain 失败')
+
+
+def _keychain_read(service, account):
+    if sys.platform != 'darwin':
+        return None
+    result = subprocess.run(['security', 'find-generic-password', '-s', service, '-a', account, '-w'],
+                            text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    return (result.stdout.strip() or None) if result.returncode == 0 else None
+
+
+def store_jenkins_api_token(site: str, token: str):
+    """Jenkins user API token for one Jenkins server (plugin or gmx); Keychain only."""
+    if site not in JENKINS_API_SITES:
+        raise CredentialError('未知的 Jenkins')
     token = str(token or '').strip()
     if not token or len(token) > 512 or any(c.isspace() for c in token):
         raise CredentialError('Jenkins API Token 不能为空、过长或包含空白')
-    if sys.platform != 'darwin':
-        raise CredentialError('保存 Jenkins API Token 目前仅支持 macOS Keychain')
-    result = subprocess.run(
-        ['security', 'add-generic-password', '-U', '-s', JENKINS_API_SERVICE, '-a', 'default', '-w', token],
-        text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    if result.returncode:
-        raise CredentialError('Jenkins API Token 保存到 Mac Keychain 失败')
+    _keychain_write(JENKINS_API_SERVICE + '.' + site, 'token', token, 'Jenkins API Token ')
 
 
-def read_jenkins_api_token():
-    if sys.platform != 'darwin':
-        return None
-    result = subprocess.run(
-        ['security', 'find-generic-password', '-s', JENKINS_API_SERVICE, '-a', 'default', '-w'],
-        text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    return (result.stdout.strip() or None) if result.returncode == 0 else None
+def read_jenkins_api_token(site: str):
+    return _keychain_read(JENKINS_API_SERVICE + '.' + site, 'token') if site in JENKINS_API_SITES else None
+
+
+def store_jenkins_api_user(user: str):
+    """Jenkins user ID used with the API tokens (the staff number)."""
+    user = str(user or '').strip()
+    if not user or len(user) > 128 or any(c.isspace() for c in user) or ':' in user:
+        raise CredentialError('Jenkins 用户 ID 不能为空、过长，且不能包含空白或冒号')
+    _keychain_write(JENKINS_API_SERVICE + '.user', 'default', user, 'Jenkins 用户 ID ')
 
 
 def read_jenkins_username():
-    """The saved Jenkins account name (no password read)."""
-    if sys.platform != 'darwin':
-        return None
-    result = subprocess.run(['security', 'find-generic-password', '-s', SERVICE + '.account',
-                             '-a', 'default', '-w'], text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    return (result.stdout.strip() or None) if result.returncode == 0 else None
+    """API user ID; falls back to the saved browser-login account name."""
+    return (_keychain_read(JENKINS_API_SERVICE + '.user', 'default')
+            or _keychain_read(SERVICE + '.account', 'default'))
+
+
+def jenkins_api_credentials(site):
+    """(user, token) for one Jenkins server, or None when either is missing."""
+    user, token = read_jenkins_username(), read_jenkins_api_token(site)
+    return (user, token) if user and token else None

@@ -128,7 +128,7 @@ def form_defaults(config):
     b = config.get('build', {})
     return {
         'outlook_auto_send': False, 'outlook_recipients': '', 'outlook_account': '',
-        'testfairy_enabled': True,
+        'testfairy_enabled': True, 'jenkins_api': True,
         'plugin_branch': 'develop', 'gmx_branch': 'develop',
         'plugin_version': '1.3', 'country': 'UK', 'project_name': 'PayByBank',
         'visible': True, 'verbose': True,
@@ -248,7 +248,7 @@ def build_preferences(body, config, country, project):
 def validate_build_parameters(body, config):
     """Single validation path for immediate builds and saved schedule templates."""
     from .cli import create_params
-    for key in ('visible', 'verbose'):
+    for key in ('visible', 'verbose', 'jenkins_api'):
         if key in body and not isinstance(body[key], bool):
             raise ValueError(f'{key} 必须是开关值')
     defaults = form_defaults(config)
@@ -268,6 +268,7 @@ def validate_build_parameters(body, config):
     )
     params = create_params(args, config)
     params['jenkins_settings'] = jenkins
+    params['jenkins_api'] = body.get('jenkins_api', False)   # missing means an old template: keep the browser
     params['build_settings'] = build
     params['gmx_parameters'] = gmx
     from .testfairy import settings
@@ -285,12 +286,11 @@ def create_build(body, *, schedule_claim=None):
     github_token = str(body.get('github_token') or '').strip()
     body = dict(body)
     jira_token = str(body.pop('jira_token', '') or '').strip()   # Keychain only; never part of task params
-    jenkins_api_token = str(body.pop('jenkins_api_token', '') or '').strip()
     user = str(body.get('jenkins_user') or '').strip()
     password = str(body.get('jenkins_password') or '')
     if bool(user) != bool(password):
         raise ValueError('Jenkins 账号和密码必须同时填写，或同时留空使用 Keychain')
-    if len(user) > 256 or len(password) > 4096 or len(github_token) > 4096 or len(jira_token) > 4096 or len(jenkins_api_token) > 512:
+    if len(user) > 256 or len(password) > 4096 or len(github_token) > 4096 or len(jira_token) > 4096:
         raise ValueError('账号、密码或 Token 长度超限')
     params = validate_build_parameters(body, config)
     from .testfairy import credentials as testfairy_credentials
@@ -309,9 +309,6 @@ def create_build(body, *, schedule_claim=None):
     if jira_token:
         from .auth import store_jira_token
         store_jira_token(jira_token)
-    if jenkins_api_token:
-        from .auth import store_jenkins_api_token
-        store_jenkins_api_token(jenkins_api_token)
     if user:
         store_credentials(user, password)
     doctor_check(config, strict=True)
@@ -570,7 +567,7 @@ def make_handler(csrf_token):
             try:
                 if p == '/':
                     return self._asset('index.html')
-                if p in ('/app.css', '/app.js', '/schedules.js', '/jira.js'):
+                if p in ('/app.css', '/app.js', '/schedules.js', '/jira.js', '/jenkins-token.js'):
                     return self._asset(p[1:])
                 if p == '/api/health':
                     return self._send({'app': 'mac-app-builder', 'service': 'web-console', 'version': __version__})
@@ -621,6 +618,10 @@ def make_handler(csrf_token):
                         return self._failed(400, safe_text(str(exc)))
                 if p == '/api/doctor':
                     return self._send(get_doctor())
+                from .jenkins_token_api import handle_get as token_get
+                handled = token_get(p, parse_qs(u.query))
+                if handled is not None:
+                    return self._send(handled[1], status=handled[0])
                 from .jira_api import handle_get as jira_get
                 handled = jira_get(p, parse_qs(u.query))
                 if handled is not None:
@@ -704,6 +705,10 @@ def make_handler(csrf_token):
                 m = re.fullmatch(r'/api/tasks/([^/?]+)/resume', self.path)
                 if m:
                     return self._send({'task': resume_build(m[1], body)})
+                from .jenkins_token_api import handle_post as token_post
+                handled = token_post(self.path, body)
+                if handled is not None:
+                    return self._send(handled[1], status=handled[0])
                 from .jira_api import handle_post as jira_post
                 handled = jira_post(self.path, body)
                 if handled is not None:

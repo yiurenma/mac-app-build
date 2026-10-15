@@ -17,7 +17,7 @@ from .store import task, read_state, patch_runtime, complete, update_task, task_
 from .gitops import credentials, clone_branch, git, changed_files, commit_and_push, verify_pushed, recover_pushed_commit, publish_gmx
 from .verify import plugin_commit, gmx_commit
 from .edits import edit_plugin_versions, update_mobile_ci, update_lock_from_hashes, validate_lock, ensure_lock_other_entries_unchanged, XCCONFIGS
-from .jenkins import JenkinsBrowser, ensure_bootstrap, formal_build, plugin_artifact_info, plugin_upload_hashes, NeedsAttention
+from .jenkins import JenkinsBrowser, ensure_bootstrap, formal_build, plugin_artifact_info, plugin_upload_hashes, NeedsAttention, read_full_console
 from .telemetry import set_verbose, debug, action, operation, safe_text, is_verbose
 
 
@@ -239,6 +239,33 @@ def plugin_target_lease(params):
             fcntl.flock(lock, fcntl.LOCK_UN)
 
 
+def with_jenkins(task_id, conf, home, site, params, job_url, body):
+    """Run one Jenkins step with the API token when the task asks for it, else the browser.
+
+    Token problems (missing token, 401/403, SSO redirect) fall back to the browser for
+    this step. That is safe at any point for receipt-v1 tasks: a dispatch receipt saved
+    by the token attempt is honoured by the browser attempt and never resubmitted.
+    """
+    if params.get('jenkins_api') is True:
+        from .auth import jenkins_api_credentials
+        from .jenkins_api import ApiJenkins, TokenUnavailable
+        creds = jenkins_api_credentials(site)
+        if read_state(task_id)['runtime'].get('dispatch_policy') != 'receipt-v1':
+            log(f'[JENKINS-API] {site} 旧任务不使用 Token 方式，沿用浏览器')
+        elif not creds:
+            log(f'[JENKINS-API] {site} 未保存工号或 {site} Jenkins Token，改用浏览器')
+        else:
+            try:
+                with ApiJenkins(conf, site, creds) as api:
+                    api.probe(job_url)
+                    return body(api)
+            except TokenUnavailable as exc:
+                log(f'[JENKINS-API] {site} Token 方式不可用，改用浏览器：{exc}')
+    with JenkinsBrowser(conf, DATA, home, site, visible=params.get('visible', False),
+                        verbose=params.get('verbose', False)) as browser:
+        return body(browser)
+
+
 def prepare_plugin_task(task_id, params, plugin, env, max_lines=100):
     """New tasks use frozen-source merge preparation; saved legacy tasks stay legacy."""
     plugin_branch, version = params['plugin_branch'], params['plugin_version']
@@ -322,13 +349,14 @@ def _run_unlocked(task_id, transient_credentials=None, *, reuse_verifier=None):
             def plugin_build():
                 rt = read_state(task_id)['runtime']
                 verify_pushed(plugin, plugin_branch, rt['plugin_sha'], env)
-                with JenkinsBrowser(conf, DATA, home, 'plugin', visible=params.get('visible', False), verbose=params.get('verbose', False)) as browser:
+                def on_jenkins(browser):
                     ensure_bootstrap(browser, params['plugin_job'], task_id, 'plugin')
                     num, _ = formal_build(browser, params['plugin_job'], task_id, 'plugin')
                     v, hashes, artifact_build = plugin_artifact_info(browser, params['plugin_job'], num, task_id)
                     patch_runtime(task_id, artifact_version=v, plugin_artifact_number=artifact_build,
                                   plugin_artifact_hashes=hashes)
                     log(f'[ARTIFACT] 完整依赖版本: {v}, Build #{artifact_build}')
+                with_jenkins(task_id, conf, home, 'plugin', params, params['plugin_job'], on_jenkins)
             if not plugin_reused:
                 step(task_id, 'PLUGIN_JENKINS', plugin_build)
             if params.get('plugin_flow_version') == 2:
@@ -364,8 +392,9 @@ def _run_unlocked(task_id, transient_credentials=None, *, reuse_verifier=None):
                         number = rt.get('plugin_artifact_number')
                         if not number:
                             raise NeedsAttention('缺少当前 Plugin Artifact Build 编号，禁止使用旧 SHA256')
-                        with JenkinsBrowser(conf, DATA, home, 'plugin', visible=params.get('visible', False), verbose=params.get('verbose', False)) as browser:
-                            hashes = plugin_upload_hashes(browser, params['plugin_job'], number, artifact, confirmed_success=True)
+                        hashes = with_jenkins(task_id, conf, home, 'plugin', params, params['plugin_job'],
+                                              lambda browser: plugin_upload_hashes(browser, params['plugin_job'], number,
+                                                                                   artifact, confirmed_success=True))
                         patch_runtime(task_id, plugin_artifact_hashes=hashes)
                     if rt.get('gmx_sha'):
                         if validate_lock(lock, artifact) != hashes:
@@ -392,7 +421,7 @@ def _run_unlocked(task_id, transient_credentials=None, *, reuse_verifier=None):
                 def gmx_build():
                     rt = read_state(task_id)['runtime']
                     verify_pushed(gmx, gmx_branch, rt['gmx_sha'], env)
-                    with JenkinsBrowser(conf, DATA, home, 'gmx', visible=params.get('visible', False), verbose=params.get('verbose', False)) as browser:
+                    def on_jenkins(browser):
                         browser.gmx_settings = params.get('gmx_parameters', {})
                         ensure_bootstrap(browser, params['gmx_job'], task_id, 'gmx')
                         num, console = formal_build(browser, params['gmx_job'], task_id, 'gmx',
@@ -405,14 +434,17 @@ def _run_unlocked(task_id, transient_credentials=None, *, reuse_verifier=None):
                             log('[GMX] SYNC_UPLOAD=false：此 Jenkins SUCCESS 不等于下游 Upload 完成，需独立核对')
                         if regex:
                             # Check actual final build console, not previously cached success.
-                            if not console:
+                            if not console and hasattr(browser, 'page'):
                                 browser.visit(params['gmx_job'] + str(num) + '/consoleText')
                                 console = browser.page.locator('body').evaluate('(e) => e.innerText.slice(-30000)')
+                            elif not console:
+                                console = read_full_console(browser, params['gmx_job'], num)[-30000:]
                             if not re.search(regex, console):
                                 raise NeedsAttention('GMX Build 已成功，但未检测到配置中的 Upload 成功日志')
                             uploaded = 'VERIFIED_BY_CONFIGURED_LOG_PATTERN'
                         patch_runtime(task_id, gmx_build_number=num, upload_validation=uploaded)
                         log(f'[GMX] Jenkins SUCCESS #{num} | 上传校验: {uploaded}')
+                    with_jenkins(task_id, conf, home, 'gmx', params, params['gmx_job'], on_jenkins)
                 step(task_id, 'GMX_JENKINS', gmx_build)
         if params.get('testfairy', {}).get('enabled') and not app_reused:
             from .app_links import lookup_task_app

@@ -47,7 +47,7 @@ OPTIONAL_TEXT = ('outlook_recipients', 'outlook_account', 'testfairy_login_url',
 OPTIONAL_INT = ('discover_poll_seconds', 'poll_seconds', 'result_poll_seconds',
                 'console_settle_seconds', 'discover_timeout_minutes', 'build_timeout_minutes',
                 'callback_timeout_minutes', 'max_changed_lines')
-OPTIONAL_BOOL = ('outlook_auto_send', 'testfairy_enabled', 'testfairy_save_credentials', 'visible', 'verbose', 'gmx_sync_upload', 'gmx_skip_test', 'gmx_force', 'gmx_keep_alive')
+OPTIONAL_BOOL = ('outlook_auto_send', 'testfairy_enabled', 'jenkins_api', 'testfairy_save_credentials', 'visible', 'verbose', 'gmx_sync_upload', 'gmx_skip_test', 'gmx_force', 'gmx_keep_alive')
 SECRET_KEYS = ('testfairy_user', 'testfairy_password', 'jenkins_user', 'jenkins_password', 'github_token', 'jira_token', 'jenkins_api_token')
 
 

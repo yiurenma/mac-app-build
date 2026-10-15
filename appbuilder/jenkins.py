@@ -1417,6 +1417,8 @@ def formal_build(browser: JenkinsBrowser, job_url, task_id, site, country='', pr
 
 def authenticated_console_response(browser, url, timeout, *, deadline=None):
     """Read-only retry after normal browser login; never replay a build POST."""
+    if hasattr(browser, 'api_console'):
+        return browser.api_console(url)          # API-token transport: plain authenticated GET
     def remaining_timeout():
         if deadline is None:return timeout
         remaining=deadline-time.monotonic()

@@ -56,7 +56,7 @@ class TokenLookupTests(unittest.TestCase):
 
     def test_no_saved_token_means_browser_without_any_request(self):
         from unittest.mock import patch
-        with patch('appbuilder.auth.read_jenkins_api_token', return_value=None):
+        with patch('appbuilder.auth.jenkins_api_credentials', return_value=None):
             self.assertIsNone(token_lookup({}, SOURCE, emit=lambda m: None))
 
 

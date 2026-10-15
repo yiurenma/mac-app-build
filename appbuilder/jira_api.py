@@ -28,9 +28,7 @@ def _token_saved():
 
 def public_settings():
     conf = J.settings(load_config())
-    from .auth import read_jenkins_api_token, read_jenkins_username
-    jenkins = {'token_saved': bool(read_jenkins_api_token()), 'user': read_jenkins_username() or ''}
-    return {'settings': {k: conf.get(k) for k in J.EDITABLE}, 'token_source': _token_saved(), 'jenkins_api': jenkins}
+    return {'settings': {k: conf.get(k) for k in J.EDITABLE}, 'token_source': _token_saved()}
 
 
 def _clean(body):

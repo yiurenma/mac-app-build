@@ -14,8 +14,6 @@ function fill(data){
   f.first_run_commits.value=s.first_run_commits??0;f.max_tickets_per_run.value=s.max_tickets_per_run??40;
   f.flavor.value=s.flavor||'server';f.transition_fields.value=s.transition_fields||'';f.token.value='';
   el('jira-token-status').textContent=TOKEN_TEXT[data.token_source]??'';
-  const k=el('build-jenkins-status'),api=data.jenkins_api||{};
-  if(k)k.textContent='Jenkins API Token：'+(api.token_saved?'已保存（用户名 '+(api.user||'未保存，将改用浏览器')+'）':'未保存，将用浏览器登录取链接');
   const b=el('build-jira-status');
   if(b)b.textContent='Jira 回填：'+(s.enabled?(s.dry_run?'已启用（演练模式，只记录不修改 Jira）':'已启用'):'未启用')+' · Token：'+(TOKEN_TEXT[data.token_source]??'未知');
 }

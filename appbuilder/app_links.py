@@ -15,14 +15,11 @@ def token_lookup(config, source, *, emit=None, credentials=None, fetch=None):
     report = emit if emit is not None else (lambda message: action('APP-LINK', message))
     if fetch is None:
         if credentials is None:
-            from .auth import read_jenkins_api_token, read_jenkins_username
-            token, user = read_jenkins_api_token(), read_jenkins_username()
-            if not token:
+            from .auth import jenkins_api_credentials
+            credentials = jenkins_api_credentials('gmx')
+            if not credentials:
+                report('[APP-LINK] 未保存工号或 Platform Jenkins Token；改用浏览器')
                 return None
-            if not user:
-                report('[APP-LINK] 已保存 Jenkins API Token，但没有已保存的 Jenkins 用户名；改用浏览器')
-                return None
-            credentials = (user, token)
         from .jenkins_api_links import http_fetch
         jenkins = (config or {}).get('jenkins', {})
         fetch = http_fetch(*credentials, timeout=int(jenkins.get('api_timeout_seconds', 30)),
@@ -42,14 +39,15 @@ def token_lookup(config, source, *, emit=None, credentials=None, fetch=None):
     return result
 
 
-def lookup_task_app(config, data, workdir, params, runtime, *, visible=None, emit=None):
+def lookup_task_app(config, data, workdir, params, runtime, *, visible=None, emit=None, prefer_token=None):
     """Use the saved GMX source pair; never create or select a newer build."""
     source = source_build(params, runtime)
     show = bool(params.get('visible', True) if visible is None else visible)
     # Use the task's saved Jenkins settings, just as the formal build does.
     from .runner import effective_task_config
     config = effective_task_config(config, params)
-    result = token_lookup(config, source, emit=emit)
+    use_token = params.get('jenkins_api') is True if prefer_token is None else prefer_token
+    result = token_lookup(config, source, emit=emit) if use_token else None
     if result is None:
         with JenkinsBrowser(config, Path(data), Path(workdir), 'gmx', visible=show,
                             verbose=bool(params.get('verbose')), manual_login=show) as browser:
@@ -94,6 +92,6 @@ def lookup_history(task_id, *, config, data, visible=True, emit=None):
     params = json.loads(row['params'])
     runtime = store.read_state(task_id).get('runtime', {})
     app = lookup_task_app(config, data, store.task_folder(task_id) / 'app-link-lookup',
-                          params, runtime, visible=visible, emit=emit)
+                          params, runtime, visible=visible, emit=emit, prefer_token=True)
     store.patch_runtime(task_id, testfairy_app=app)
     return app

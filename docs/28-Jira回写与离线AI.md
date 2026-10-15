@@ -32,10 +32,13 @@
 - 文本类必填字段没配置、或配置的值不在可选值里：照常评论和转给 Reporter，但不改状态，在评论里提醒手动处理，并列入 `jira_report.needs_manual`。这不算失败。
 - “查询 ticket”会显示问题类型、流转时的必填字段、可选值以及是否已配置。
 
-## New build 表单里的第 3、4 步
-- 第 3 步“App 链接”：只有开关和 Jenkins API Token。有 Token 时直接用 Jenkins 接口读两段完整日志（GMX 构建 → upload-to-testfairy 构建），不打开浏览器；Jenkins 拒绝 Token（401/403）或重定向到 SSO 登录页时，自动改用浏览器方式，并在日志里写明原因。用户名沿用已保存的 Jenkins 账号。
-- 第 4 步“Jira 回填”：只有 Jira Token。其他设置在左侧 Jira 页面。邮件通知收在第 4 步下方的折叠区，默认关闭。
-- 两个 Token 都只存 Mac 钥匙串，不进任务、定时计划或日志。
+## New build 表单：00 Jenkins 登录，第 3、4 步
+- 00“Jenkins 登录”：开关默认开启，填一次工号和两个 Token（Plugin Jenkins、Platform Jenkins 各一个，Token 只在生成它的那台 Jenkins 有效），点“保存到钥匙串”，之后不用再填。“测试 Token”只读询问两台 Jenkins 的 `whoAmI`。
+- 开关开启时，Plugin 构建、GMX 构建、取 App 链接都走 Jenkins 自己的接口（`build` / `buildWithParameters` 提交，201 + `/queue/item/N/` 作为派发回执，`api/json` 读状态和参数，`consoleText` 读日志），不打开浏览器。用 API Token 认证的请求不需要 CSRF crumb。
+- GMX 提交前按 Job 的参数定义核对参数名、可选值和开关类型；构建开始后回读实际参数，与提交不一致就停下。
+- 没保存 Token、旧任务、Jenkins 拒绝 Token（401/403）或跳转 SSO 登录页时，该步骤自动改用浏览器。已提交的构建由回执保护，改用浏览器后不会重复提交。
+- 第 3 步“App 链接”只有开关；第 4 步“Jira 回填”只有 Jira Token，邮件通知收在下方折叠区，默认关闭。
+- Token 和工号只存 Mac 钥匙串，不进任务、定时计划或日志。
 
 ## 认证
 Token 优先在页面里填写（存入 Mac 钥匙串，不写入配置、日志或任务数据）；也可用环境变量 `JIRA_TOKEN`（Bearer PAT），或 `JIRA_USER` + `JIRA_API_TOKEN`，环境变量优先。`jira.base_url` 必须 https。企业根证书可用 `jira.ca_bundle` 指定。`flavor: server` 按用户名指派，`cloud` 按 accountId。
