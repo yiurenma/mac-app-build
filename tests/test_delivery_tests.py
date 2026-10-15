@@ -150,19 +150,21 @@ class DeliveryTestAPIs(unittest.TestCase):
             with self.assertRaises(ValueError):
                 dt.start({'kind':'testfairy','request_id':'c'*32,'task_id':self.task_id,'expected_share_url':'https://evil.invalid/join/not-app'})
         lookup.assert_not_called()
-    def run_link_test(self,wanted,error=None,diagnostics=None):
+    def run_link_test(self,wanted,error=None,diagnostics=None,transport=None):
         from test_testfairy import PARAMS,RUNTIME,expected_build
         expected=expected_build(PARAMS,RUNTIME)
         app={**expected,'share_url':'https://hsbc-mobilex.testfairy.com/join/current',
              'source_job_url':PARAMS['gmx_job'],'source_build_number':RUNTIME['gmx_build_number'],
              'source_build_url':expected['build_url'],'downstream_build_url':'https://jenkins.invalid/job/upload-to-testfairy/job/master/42/',
              'app_version':None,'app_build':None,'diagnostics':diagnostics or {}}
+        if transport:app['transport']=transport
         body={'kind':'testfairy','request_id':'c'*32,'task_id':self.task_id,'expected_share_url':wanted}
         with patch('appbuilder.app_links.lookup_task_app',return_value=app,side_effect=error) as lookup,patch('appbuilder.web.create_build') as build,patch('appbuilder.store.task',return_value={'params':json.dumps(PARAMS)}),patch('appbuilder.store.read_state',return_value={'runtime':RUNTIME}):
             dt.start(body)
         lookup.assert_called_once()
         self.assertEqual(lookup.call_args.args[3:5],(PARAMS,RUNTIME))
         self.assertTrue(lookup.call_args.kwargs['visible'])
+        self.assertTrue(lookup.call_args.kwargs['prefer_token'])
         build.assert_not_called();self.assertNotIn('SECRET',(Path(self.tmp.name)/'delivery-tests.sqlite').read_bytes().decode('latin1'))
         return dt.poll('c'*32)
     def test_expected_link_is_compared_to_formal_extraction_not_echoed(self):
@@ -174,6 +176,12 @@ class DeliveryTestAPIs(unittest.TestCase):
         self.assertEqual(result['status'],'EXTRACTED')
         self.assertEqual(result['result']['actual_share_url'],'https://hsbc-mobilex.testfairy.com/join/current')
         self.assertIsNone(result['result']['app']['app_version'])
+        self.assertIn('方式：浏览器', result['result']['message'])
+
+    def test_link_test_prefers_the_saved_jenkins_token_and_says_which_way_was_used(self):
+        result=self.run_link_test('',transport='jenkins-api-token')
+        self.assertIn('方式：Jenkins API Token', result['result']['message'])
+        self.assertEqual(result['result']['transport'],'jenkins-api-token')
     def test_browser_failure_keeps_first_error_and_safe_log_references(self):
         from appbuilder.jenkins import NeedsAttention
         error=NeedsAttention('离线测试失败 password=SECRET')

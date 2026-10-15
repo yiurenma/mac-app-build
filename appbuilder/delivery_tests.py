@@ -137,14 +137,24 @@ def start(body):
         try:
             if kind=='testfairy':
                 from .app_links import lookup_task_app
-                app=lookup_task_app(config,DATA,DATA/'delivery-tests'/test_id,params,runtime,visible=True)
+                notes=[]
+                # The test always tries the saved Jenkins API token first, even for tasks
+                # created before the token switch existed; the browser is the fallback.
+                app=lookup_task_app(config,DATA,DATA/'delivery-tests'/test_id,params,runtime,visible=True,
+                                    emit=notes.append,prefer_token=True)
                 actual=app['share_url']
+                if app.get('transport')=='jenkins-api-token':
+                    transport='方式：Jenkins API Token（未打开浏览器）'
+                else:
+                    reasons=[n.replace('[APP-LINK] ','') for n in notes if '改用浏览器' in n]
+                    transport='方式：浏览器'+('（'+safe_text(reasons[-1])+'）' if reasons else '')
                 matched=actual==inputs['wanted'] if inputs['wanted'] else None
                 status=('MATCH' if matched else 'MISMATCH') if matched is not None else 'EXTRACTED'
                 finish(test_id,status,{
                     'message':'已从指定 GMX 构建的 Jenkins 完整日志提取 APP 链接'+
                               ('，预期链接'+('匹配' if matched else '不匹配') if matched is not None else '')+
-                              '；未启动打包',
+                              '；未启动打包\n'+transport,
+                    'transport':app.get('transport') or 'browser',
                     'expected_share_url':inputs['wanted'],'actual_share_url':actual,
                     'task_id':inputs['task_id'],'build_url':app['build_url'],
                     'source_job_url':app['source_job_url'],'source_build_number':app['source_build_number'],
