@@ -50,6 +50,17 @@ class SharedAppLookupTests(unittest.TestCase):
         self.assertFalse(factory.call_args.kwargs['visible'])
         self.assertFalse(factory.call_args.kwargs['manual_login'])
 
+    def test_visible_lookup_signs_in_with_saved_account_and_asks_only_without_one(self):
+        params = {**PARAMS, 'visible': True}
+        for saved, manual in ((('44065253', 'pw'), False), (None, True)):
+            with self.subTest(saved=bool(saved)), \
+                    patch('appbuilder.auth.read_credentials', return_value=saved), \
+                    patch.object(app_links, 'JenkinsBrowser', return_value=self.browser) as factory, \
+                    patch.object(app_links, 'lookup_app_link', return_value=self.result):
+                app_links.lookup_task_app(self.config, self.directory, self.directory, params, RUNTIME)
+            self.assertTrue(factory.call_args.kwargs['visible'])
+            self.assertEqual(factory.call_args.kwargs['manual_login'], manual)
+
     def test_reused_job_and_number_are_one_pair_despite_current_numbers(self):
         runtime = {**RUNTIME, 'gmx_formal_number': 813,
                    'app_reuse': {'job_url': OLD, 'build_number': 709, 'build_url': OLD + '709/',
