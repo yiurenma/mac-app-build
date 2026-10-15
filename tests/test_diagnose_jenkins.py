@@ -136,7 +136,7 @@ class UiContracts(unittest.TestCase):
         html=(web.STATIC/'index.html').read_text();js=(web.STATIC/'app.js').read_text()
         self.assertIn('id="diagnose-form"',html)
         self.assertIn('id="diagnose-output"',html)
-        self.assertIn('Jenkins URL Test',html)
+        self.assertIn('Jenkins 构建检查',html)
         self.assertIn("'/api/diagnose/start'",js)
         self.assertIn('id="diagnose-gmx-form"',html)
 
