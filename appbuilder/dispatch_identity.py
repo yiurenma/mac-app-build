@@ -4,12 +4,27 @@ import uuid
 from urllib.parse import urlsplit
 
 
+def _plain_path(path):
+    """Branch jobs can be written job/a%2Fb/ or job/a%252Fb/. Only that one escape is
+    normalised; every other percent-escape (e.g. %31 for a digit) still has to match exactly."""
+    return re.sub(r'%(?:25)?2[fF]', '%2F', path)
+
+
+def same_job(first, second):
+    """Same Jenkins job, tolerating the two percent-encodings Jenkins uses for branch names."""
+    if not isinstance(first, str) or not isinstance(second, str):
+        return False
+    a, b = urlsplit(first), urlsplit(second)
+    return (a.scheme == b.scheme == 'https' and a.netloc == b.netloc and not a.query and not b.query
+            and _plain_path(a.path).rstrip('/') == _plain_path(b.path).rstrip('/'))
+
+
 def build_number(job, url):
     if not isinstance(url,str):return None
     j,u=urlsplit(job),urlsplit(url)
     if (j.scheme!='https' or u.scheme!=j.scheme or u.netloc!=j.netloc or u.username or u.password
             or u.query or u.fragment):return None
-    match=re.fullmatch(re.escape(j.path.rstrip('/')+'/')+r'([1-9][0-9]*)/?',u.path)
+    match=re.fullmatch(re.escape(_plain_path(j.path).rstrip('/')+'/')+r'([1-9][0-9]*)/?',_plain_path(u.path))
     return int(match[1]) if match else None
 
 
@@ -81,7 +96,15 @@ def reconcile(browser, job, task_id, key, read_state, patch_runtime, **parameter
         resolver=getattr(browser,'resolve_queue_build',None)
         if not callable(resolver):
             raise NeedsAttention('已有 queue_id，但缺少经核实的队列到 Build 提取器；Resume 不会重新提交')
-        observed=resolver(job,queue)
+        try:
+            observed=resolver(job,queue)
+        except NeedsAttention as exc:
+            # The queue item is gone (Jenkins drops it ~5 min after it starts) or did not
+            # match. Every build records the queue id it came from; that exact link is proof.
+            finder=getattr(browser,'find_build_by_queue_id',None)
+            observed=finder(job,queue) if callable(finder) else None
+            if not observed:
+                raise exc
         if (not isinstance(observed,dict) or observed.get('queue_id')!=queue
                 or observed.get('job_url')!=job or observed.get('relation')!='executable'
                 or not build_number(job,observed.get('build_url'))):
