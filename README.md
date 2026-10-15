@@ -425,7 +425,7 @@ Plugin / GMX 分支 Push 后，Jenkins 可能需要时间扫描分支并创建 J
 [现场单元测试使用手册](docs/14-v0.6.6-Plugin-GMX-Jenkins现场单元测试.md)
 
 
-进入 Web Console 左侧 **Jenkins URL Test**。这里提供两个**独立测试入口**：
+进入 Web Console 左侧 **测试工具 → Jenkins 构建检查**。这里提供两个**独立测试入口**：
 
 - **Plugin Jenkins · 单元测试**：粘贴已有 Plugin 分支 Job URL 或 `/2/` Callback Build URL，指定 Build Number（例如 2）和预期 SUCCESS，点击“打开 Chrome · 测试 Plugin”。
 - **GMX Jenkins · 单元测试**：粘贴已有 GMX 分支 Job URL 或 `/2/` Build URL，指定 Build Number（例如 2）和预期 SUCCESS，点击“打开 Chrome · 测试 GMX”。
@@ -450,7 +450,7 @@ URL 必须属于 `config.yaml` 中配置的 Plugin 或 GMX Jenkins 父 Job；不
 
 ## App 链接与邮件通知
 
-New build 第 03 步默认取本次 App 链接。邮件通知不再使用本机 Outlook（New Outlook 不支持脚本控制，后台也无法获得控制权限），改为通过 Jira 发送：在左侧 **Jira** 页面打开“构建成功后给团队发邮件”，填写一张固定的公告单号和收件人的 Jira 用户名，点“发一封测试邮件”确认能收到。之后每次构建成功并拿到 App 链接，会由公司 Jira 服务器发一封邮件：App 链接、分支、构建号和本次更新的 Jira。构建失败不发；发送失败只记录，不重发，也不改变构建结果。详见 [Jira 回写](docs/28-Jira回写与离线AI.md)。
+New build 第 03 步默认取本次 App 链接。邮件通知不再使用本机 Outlook（New Outlook 不支持脚本控制，后台也无法获得控制权限），改为通过 Jira 发送：在左侧 **设置 → Jira 回填与邮件通知** 打开“构建成功后给团队发邮件”，填写一张固定的公告单号和收件人的 Jira 用户名，点“发一封测试邮件”确认能收到。之后每次构建成功并拿到 App 链接，会由公司 Jira 服务器发一封邮件：App 链接、分支、构建号和本次更新的 Jira。构建失败不发；发送失败只记录，不重发，也不改变构建结果。详见 [Jira 回写](docs/28-Jira回写与离线AI.md)。
 
 新建 Plugin 任务使用 `release/v<版本>` 和 `release-build/job/release_v<版本中的点替换为下划线>/`；两段输入生成时间戳版本，三段输入保持固定版本。此前保存的本项目默认 `feature-build/job/` 配置仅在创建新任务时映射回 release 父路径；不改写计划模板、历史任务或其他项目的自定义路径。已有 release/feature 任务 Resume 保留原分支、Jenkins URL 和进度；只读诊断继续支持这两个已知目录下的具体分支 Job/Build。
 
@@ -492,3 +492,13 @@ Recent builds 每条记录旁的“查看运行数据”打开只读抽屉，不
 旧版长期运行进程中的代码不会自动更新。首次使用本命令必须从含该功能的项目目录运行；命令会通过真实参数和工作目录识别旧服务。已脱离项目父进程、且无法证明归属的外部守护进程不按猜测终止。
 
 验证边界：Linux 本地可控后台父子进程实测通过；Mac proc_pidinfo、proc_pidpath、KERN_PROCARGS2 和 launchctl 读取路径按代码及模拟场景验证，尚未在用户 Mac 上实际执行停机。
+
+
+## 页面布局（v0.9）
+
+- 左侧菜单分两组。**日常**：概览、新建构建、运行记录、交付记录、定时任务。**设置与排查**：设置、测试工具。
+- **设置**：只需配置一次的东西都在这里，全部存在 Mac 钥匙串：Jenkins 工号与两个 API Token、GitHub Token、Jenkins 浏览器登录（备用）、Jira 回填与邮件通知。新建构建表单里不再出现任何 Token 或密码。
+- **测试工具**：Jenkins 构建检查、GMX 实测（会真实触发构建）、App 链接、Jira 查单与演练，用标签切换。
+- **概览**：最上面是“需要你处理”（失败的构建、要手动改状态的 Jira 单、错过的定时运行），下面是正在运行的构建（逐步进度）、上次交付（App 链接、更新的 Jira、邮件）、定时任务、构建后自动做的事。
+- **交付记录**：哪些 Jira 拿到了哪个 App 链接、发了哪些邮件（新包、构建失败、测试），可按 Jira 编号搜索。
+- **邮件**：构建成功发新包邮件，失败发失败邮件（失败在哪一步、原因、Jenkins 链接）；同一原因连续失败默认只发一次。

@@ -63,7 +63,10 @@ class WebPATTests(unittest.TestCase):
         html=(web.STATIC/'index.html').read_text()
         js=(web.STATIC/'app.js').read_text()
         self.assertIn('name="github_token" type="password"',html)
-        self.assertIn('data-build name="github_token"', html)
-        self.assertIn("form.elements.github_token.value=''",js)
+        # Set once on the settings page; never part of a build body or schedule template.
+        self.assertNotIn('data-build name="github_token"', html)
+        self.assertIn('id="credentials-form"', html)
+        settings_js=(web.STATIC/'settings.js').read_text()
+        self.assertIn("f.github_token.value=''",settings_js)
 
 if __name__=='__main__':unittest.main()

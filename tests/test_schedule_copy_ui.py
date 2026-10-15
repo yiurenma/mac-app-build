@@ -38,9 +38,9 @@ class CopyScenarios(shared.SharedBuildUIFixture):
 
     def test_copy_cancel_repeat_click_and_save_new_identity(self):
         # Unsaved credentials from an unrelated draft must not leak into a copy.
-        self.field('jira_token').fill('draft-secret', force=True)
+        self.page.locator('#jenkins-token-plugin').fill('draft-secret', force=True)
         self.copy()
-        self.assertEqual(self.field('jira_token').input_value(), '')
+        self.assertNotIn('draft-secret', json.dumps(self.page.evaluate('buildBody()')))
         self.assertEqual(self.field('country').input_value(), 'ALL')
         self.assertEqual(self.field('plugin_branch').input_value(), 'feature/source')
         self.assertEqual(self.field('plugin_parent').input_value(), PLUGIN_FEATURE_PARENT)

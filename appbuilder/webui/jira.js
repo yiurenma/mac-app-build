@@ -4,6 +4,7 @@
 const el=id=>document.getElementById(id);
 const form=()=>el('jira-form').elements;
 const out=text=>{el('jira-result').textContent=text;};
+const note=text=>{el('jira-settings-result').textContent=text;};   // settings-page messages
 const TOKEN_TEXT={keychain:'已保存在 Mac 钥匙串',env:'使用环境变量 JIRA_TOKEN','':'尚未保存 Token'};
 
 function fill(data){
@@ -13,7 +14,7 @@ function fill(data){
   f.use_pr_lookup.checked=!!s.use_pr_lookup;f.key_pattern.value=s.key_pattern||'';
   f.first_run_commits.value=s.first_run_commits??0;f.max_tickets_per_run.value=s.max_tickets_per_run??40;
   f.flavor.value=s.flavor||'server';f.transition_fields.value=s.transition_fields||'';f.token.value='';
-  f.mail_enabled.checked=!!s.mail_enabled;f.mail_issue.value=s.mail_issue||'';f.mail_users.value=s.mail_users||'';
+  f.mail_enabled.checked=!!s.mail_enabled;f.mail_failure_once.checked=s.mail_failure_once!==false;f.mail_issue.value=s.mail_issue||'';f.mail_users.value=s.mail_users||'';
   el('jira-token-status').textContent=TOKEN_TEXT[data.token_source]??'';
   const b=el('build-jira-status');
   if(b)b.textContent='Jira 回填：'+(s.enabled?(s.dry_run?'已启用（演练模式，只记录不修改 Jira）':'已启用'):'未启用')+' · Token：'+(TOKEN_TEXT[data.token_source]??'未知')+
@@ -21,7 +22,7 @@ function fill(data){
 }
 
 async function loadSettings(){
-  try{fill(await api('/api/jira/settings'));}catch(e){out('读取 Jira 设置失败：'+e.message);}
+  try{fill(await api('/api/jira/settings'));}catch(e){note('读取 Jira 设置失败：'+e.message);}
 }
 
 async function loadTasks(){
@@ -45,24 +46,24 @@ async function save(){
     use_pr_lookup:f.use_pr_lookup.checked,key_pattern:f.key_pattern.value.trim(),
     first_run_commits:parseInt(f.first_run_commits.value,10),max_tickets_per_run:parseInt(f.max_tickets_per_run.value,10),
     flavor:f.flavor.value,transition_fields:f.transition_fields.value,
-    mail_enabled:f.mail_enabled.checked,mail_issue:f.mail_issue.value.trim(),mail_users:f.mail_users.value};
+    mail_enabled:f.mail_enabled.checked,mail_failure_once:f.mail_failure_once.checked,mail_issue:f.mail_issue.value.trim(),mail_users:f.mail_users.value};
   if(Number.isNaN(body.first_run_commits))delete body.first_run_commits;
   if(Number.isNaN(body.max_tickets_per_run))delete body.max_tickets_per_run;
   if(f.token.value)body.token=f.token.value;
   const button=el('jira-save');button.disabled=true;
   try{
     fill(await api('/api/jira/settings',{method:'POST',body:JSON.stringify(body)}));
-    toast('Jira 设置已保存');out('设置已保存'+(body.token?'，Token 已存入 Mac 钥匙串':'')+'。建议点“测试连接”确认。');
-  }catch(e){toast(e.message,true);out('保存失败：'+e.message);}
+    toast('Jira 设置已保存');note('设置已保存'+(body.token?'，Token 已存入 Mac 钥匙串':'')+'。建议点“测试连接”确认。');
+  }catch(e){toast(e.message,true);note('保存失败：'+e.message);}
   finally{f.token.value='';button.disabled=false;}
 }
 
 async function testConnection(){
-  const button=el('jira-test-connection');button.disabled=true;out('正在连接 Jira…（只读）');
+  const button=el('jira-test-connection');button.disabled=true;note('正在连接 Jira…（只读）');
   try{
     const r=await api('/api/jira/test-connection',{method:'POST',body:'{}'});
-    out('连接成功\n当前身份：'+r.user+(r.login?' ('+r.login+')':''));
-  }catch(e){out('连接失败：'+e.message);}
+    note('连接成功\n当前身份：'+r.user+(r.login?' ('+r.login+')':''));
+  }catch(e){note('连接失败：'+e.message);}
   finally{button.disabled=false;}
 }
 
@@ -83,13 +84,13 @@ async function lookup(){
 }
 
 async function mailTest(){
-  const f=form(),button=el('jira-mail-test');button.disabled=true;out('正在通过 Jira 发送测试邮件…');
+  const f=form(),button=el('jira-mail-test');button.disabled=true;note('正在通过 Jira 发送测试邮件…');
   try{
     const r=await api('/api/jira/mail-test',{method:'POST',body:JSON.stringify({mail_issue:f.mail_issue.value.trim(),mail_users:f.mail_users.value})});
-    out('已提交给 Jira，请收件人查收邮箱（通常 1–5 分钟）\n公告单：'+r.issue+'\n收件人：'+r.to.join('、')+'\n主题：'+r.subject+
+    note('已提交给 Jira，请收件人查收邮箱（通常 1–5 分钟）\n公告单：'+r.issue+'\n收件人：'+r.to.join('、')+'\n主题：'+r.subject+
       (r.from_task?'\n内容取自构建：'+r.from_task:'')+
       '\n\n本次请求（不含 Token）：\n'+(r.request||''));
-  }catch(e){out('测试邮件失败：'+e.message);}
+  }catch(e){note('测试邮件失败：'+e.message);}
   finally{button.disabled=false;}
 }
 

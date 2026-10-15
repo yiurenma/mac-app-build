@@ -54,13 +54,18 @@ class SharedBuildUIFixture:
         return scope.locator(f'[name="{name}"]')
 
     def show(self, panel):
-        # Tool panels are collapsed by default; open one the same way a person does.
-        self.page.locator(f'.nav[data-target={panel}]').click()
+        # Panels are collapsed by default; open one the same way a person does. A test
+        # tool (old panel id) is a tab inside 测试工具: open that panel, then its tab.
+        tools = {'diagnostics', 'live-tests', 'testfairy-tests', 'jira-tools'}
+        self.page.locator(f'.nav[data-target={"tools" if panel in tools else panel}]').click()
+        if panel in tools:
+            self.page.locator(f'[data-tool={panel}]').click()
         expect(self.page.locator('#' + panel)).to_be_visible()
 
     def show_all(self):
         # Only for tests that drive several tool panels in one flow.
-        self.page.evaluate("document.querySelectorAll('.fold').forEach(e=>e.classList.remove('collapsed'))")
+        self.page.evaluate("document.querySelectorAll('.fold').forEach(e=>e.classList.remove('collapsed'));"
+                           "['diagnostics','live-tests','testfairy-tests','jira-tools'].forEach(id=>document.getElementById(id).hidden=false)")
 
     def open_details(self):
         self.form.locator('details').evaluate_all('(nodes)=>nodes.forEach(n=>n.open=true)')
@@ -70,26 +75,41 @@ class SharedBuildUITests(SharedBuildUIFixture, unittest.TestCase):
     def test_tool_panels_are_collapsed_and_open_one_at_a_time(self):
         p = self.page
         p.reload()
-        ids = ['schedules', 'diagnostics', 'live-tests', 'testfairy-tests', 'jira-tests']
-        for i in ids:
+        for i in ['delivery', 'schedules', 'settings', 'tools']:
             expect(p.locator('#' + i)).to_be_hidden()
-        self.assertEqual(p.locator('#mail-tests, [data-target=mail-tests]').count(), 0)   # Outlook test removed
-        p.locator('[data-target=jira-tests]').click()
-        expect(p.locator('#jira-tests')).to_be_visible()
-        p.locator('[data-target=testfairy-tests]').click()
-        expect(p.locator('#testfairy-tests')).to_be_visible()
-        expect(p.locator('#jira-tests')).to_be_hidden()
-        p.locator('[data-target=testfairy-tests]').click()
+        self.assertEqual(p.locator('#mail-tests, [data-target=mail-tests], #jira-tests').count(), 0)
+        # Menu: two groups, Chinese labels, the test tools behind one entry.
+        self.assertEqual(p.locator('.sidebar-label').all_text_contents(), ['日常', '设置与排查'])
+        self.assertEqual([t.split()[-1] for t in p.locator('.nav').all_inner_texts()],
+                         ['概览', '新建构建', '运行记录', '交付记录', '定时任务', '设置', '测试工具'])
+        p.locator('[data-target=settings]').click()
+        expect(p.locator('#settings')).to_be_visible()
+        p.locator('[data-target=tools]').click()
+        expect(p.locator('#tools')).to_be_visible()
+        expect(p.locator('#settings')).to_be_hidden()
+        expect(p.locator('#diagnostics')).to_be_visible()          # first tab by default
         expect(p.locator('#testfairy-tests')).to_be_hidden()
+        p.locator('[data-tool=testfairy-tests]').click()
+        expect(p.locator('#testfairy-tests')).to_be_visible()
+        expect(p.locator('#diagnostics')).to_be_hidden()
+        expect(p.locator('[data-tool=testfairy-tests]')).to_have_attribute('aria-selected', 'true')
+        p.evaluate("nav('jira-tools')")                             # an old panel id opens its tab
+        expect(p.locator('#jira-tools')).to_be_visible()
+        p.locator('[data-target=tools]').click()
+        expect(p.locator('#tools')).to_be_hidden()
         expect(p.locator('input[name=testfairy_enabled]')).to_be_checked()
         expect(p.locator('input[name=jenkins_api]')).to_be_checked()
-        # Staff ID and tokens are saved separately to the Keychain, never part of a build or schedule.
-        self.assertEqual(p.locator('#jenkins-token-box [data-build]').count(), 0)
+        # Staff ID and tokens live on the settings page, never part of a build or schedule.
+        self.assertEqual(p.locator('#build-form #jenkins-token-box, #build-form #credentials-form').count(), 0)
+        self.assertEqual(p.locator('#settings #jenkins-token-box, #settings #credentials-form, #settings #jira-form').count(), 3)
+        self.assertEqual(p.locator('#jenkins-token-box [data-build], #credentials-form [data-build]').count(), 0)
+        for name in ('jira_token', 'github_token', 'jenkins_user', 'jenkins_password'):
+            self.assertEqual(self.form.locator(f'[name={name}]').count(), 0)
         self.assertNotIn('jenkins-token', ' '.join(p.evaluate('Object.keys(buildBody())')))
 
     def test_defaults_help_branch_paging_refresh_and_manual_fallback(self):
         p = self.page
-        self.assertEqual(self.form.locator('[data-build]:visible').count(), 8)  # 03: switch + Jenkins token; 04: Jira token
+        self.assertEqual(self.form.locator('[data-build]:visible').count(), 7)  # tokens moved to the settings page
         for name in ['outlook_auto_send','outlook_recipients','outlook_account']:
             self.assertEqual(self.field(name).count(), 0)   # email now goes through Jira
         self.assertEqual(self.field('country').locator('option').count(), 25)
@@ -149,7 +169,7 @@ class SharedBuildUITests(SharedBuildUIFixture, unittest.TestCase):
         self.field('gmx_force').uncheck();self.field('gmx_keep_alive').check()
         self.field('country').select_option('ALL')
         expected=p.evaluate('buildBody()')
-        for key in ['github_token','jenkins_user','jenkins_password','jira_token']:expected.pop(key)
+
         p.locator('#save-as-schedule').check()
         self.field('schedule_name').fill('nightly')
         self.field('schedule_cron').fill('* * * * *')
@@ -165,7 +185,7 @@ class SharedBuildUITests(SharedBuildUIFixture, unittest.TestCase):
         self.assertFalse(row['enabled'])
         self.show_all();p.locator('#schedules-body button', has_text='编辑').click()
         actual=p.evaluate('buildBody()')
-        for key in ['github_token','jenkins_user','jenkins_password','jira_token']:actual.pop(key)
+
         self.assertEqual(actual, expected)
         self.field('schedule_name').fill('renamed')
         p.locator('#submit-build').click()
@@ -247,8 +267,8 @@ class SharedBuildUITests(SharedBuildUIFixture, unittest.TestCase):
     def test_independent_link_button_uses_test_api_without_build(self):
         p=self.page
         self.assertEqual(p.locator('#build-form #tf-test-form').count(),0)
-        self.assertEqual(p.locator('#build-form .group-head:has(span)').all_text_contents(),['00 Jenkins 登录','01 Plugin','02 GMX','03 App 链接','04 Jira 回填'])
-        p.locator('.nav[data-target=testfairy-tests]').click()
+        self.assertEqual(p.locator('#build-form .group-head:has(span)').all_text_contents(),['00 Jenkins 登录','01 Plugin','02 GMX','03 App 链接','04 Jira 回填与邮件'])
+        self.show('testfairy-tests')
         self.assertEqual(p.locator('#tf-test-form input[type=password]').count(),0)
         self.field('tf_test_expected').fill('https://hsbc-mobilex.testfairy.com/join/current')
         p.route('**/api/tasks',lambda route:route.fulfill(json={'tasks':[{'id':'202610111000-abcdef','project':'PayByBank','country':'UK','status':'FAILED','stage':'GMX_JENKINS'}]}))
@@ -269,6 +289,89 @@ class SharedBuildUITests(SharedBuildUIFixture, unittest.TestCase):
         destination=Path('/tmp/mac-app-build-ui');destination.mkdir(exist_ok=True)
         p.locator('#testfairy-tests').screenshot(path=str(destination/'testfairy-test.png'))
 
+    def test_overview_shows_running_last_delivery_and_attention(self):
+        p=self.page
+        data={'running':{'task_id':'T4','created':'2026-10-15T21:42:00','status':'RUNNING','steps':[
+                  {'label':'Plugin 构建','state':'done'},{'label':'GMX 构建','state':'current'},{'label':'取 App 链接','state':'waiting'},
+                  {'label':'回填 Jira','state':'waiting'},{'label':'发邮件','state':'waiting'}]},
+              'last':{'task_id':'T2','created':'2026-10-15T16:56:00','link':'https://tenant.testfairy.com/join/abc',
+                      'jira_status':'DONE','tickets':['TRANSACT-1'],'mail_status':'SENT','mail_to':3},
+              'attention':[{'kind':'task','task_id':'T3','status':'FAILED','stage':'GMX_JENKINS','text':'<b>boom</b>'},
+                           {'kind':'missed','name':'nightly','count':2,'planned':'x'}],
+              'schedules':{'online':True,'items':[{'name':'nightly','cron':'0 */6 * * *','enabled':True,'next_run':'2026-10-16T00:00:00'}]},
+              'automation':{'jira_enabled':True,'jira_dry_run':True,'mail_enabled':True,'mail_failure_once':True},'counts':{}}
+        p.route('**/api/overview',lambda route:route.fulfill(json=data))
+        p.reload();expect(p.locator('#plugin-branches option')).to_have_count(101)
+        expect(p.locator('#ov-running li')).to_have_count(5)
+        expect(p.locator('#ov-running li.current')).to_have_text('●GMX 构建')
+        expect(p.locator('#ov-last a')).to_have_attribute('href','https://tenant.testfairy.com/join/abc')
+        expect(p.locator('#ov-last')).to_contain_text('TRANSACT-1 → 已更新')
+        expect(p.locator('#ov-last')).to_contain_text('已发 3 人')
+        expect(p.locator('#ov-attention')).to_be_visible()
+        expect(p.locator('#ov-attention')).to_contain_text('T3 失败（GMX 构建）：<b>boom</b>')   # text, not HTML
+        expect(p.locator('#ov-attention')).to_contain_text('错过 2 次')
+        expect(p.locator('#ov-schedules')).to_contain_text('调度器运行中')
+        expect(p.locator('#ov-auto')).to_contain_text('演练模式')
+        p.locator('#ov-attention button',has_text='查看 →').click()          # links open the right panel
+        expect(p.locator('#schedules')).to_be_visible()
+        expect(p.locator('#crumb')).to_have_text('定时任务')
+        self.assertFalse(self.errors,self.errors)
+
+    def test_delivery_page_lists_tickets_with_links_and_mails_with_bodies(self):
+        p=self.page;seen=[]
+        tickets={'jira_base':'https://jira.example.com','items':[
+            {'at':'2026-10-15T12:30:00','key':'TRANSACT-1','summary':'Fix <b>login</b>','steps':['comment','assign','transition'],
+             'link':'https://tenant.testfairy.com/join/abc','task_id':'T2','build':7,'result':'DONE','note':''},
+            {'at':'2026-10-15T12:30:00','key':'TRANSACT-2','summary':'','steps':[],'link':'javascript:alert(1)',
+             'task_id':'T2','build':7,'result':'MANUAL','note':'Fix Note 未配置'}]}
+        mails={'items':[{'at':'2026-10-15T12:31:00','kind':'failure','task_id':'T3','subject':'[构建失败] UK','to':['a','b'],
+                         'status':'SENT','reason':'','body':'失败步骤：GMX 构建'}]}
+        def handle(route):
+            seen.append(route.request.url)
+            route.fulfill(json=mails if '/mails' in route.request.url else tickets)
+        p.route('**/api/delivery/**',handle)
+        self.show('delivery')
+        expect(p.locator('#delivery-body tr')).to_have_count(2)
+        first=p.locator('#delivery-body tr').first
+        expect(first.locator('a',has_text='TRANSACT-1')).to_have_attribute('href','https://jira.example.com/browse/TRANSACT-1')
+        expect(first.locator('a',has_text='打开')).to_have_attribute('href','https://tenant.testfairy.com/join/abc')
+        expect(first).to_contain_text('Fix <b>login</b>')                 # shown as text, never as HTML
+        second=p.locator('#delivery-body tr').nth(1)
+        self.assertEqual(second.locator('a',has_text='打开').count(),0)     # a non-https link is not clickable
+        expect(second).to_contain_text('状态需手动改')
+        p.locator('[data-delivery=mails]').click()
+        expect(p.locator('#delivery-body tr')).to_have_count(1)
+        expect(p.locator('#delivery-body')).to_contain_text('构建失败')
+        expect(p.locator('#delivery-body')).to_contain_text('a、b')
+        p.locator('#delivery-body summary').click()
+        expect(p.locator('#delivery-body pre')).to_contain_text('失败步骤：GMX 构建')
+        p.locator('#delivery-search').fill('TRANSACT-9')
+        p.wait_for_timeout(600)
+        self.assertTrue(any('q=TRANSACT-9' in u for u in seen))
+        self.assertFalse(self.errors,self.errors)
+
+    def test_settings_page_saves_github_and_browser_login_to_keychain(self):
+        p=self.page;saved=[]
+        def fake_save(body):
+            saved.append(dict(body))
+            return {'github':True,'jenkins_user':body.get('jenkins_user') or ''}
+        with patch('appbuilder.credentials_api.save',side_effect=fake_save), \
+                patch('appbuilder.credentials_api.status',return_value={'github':False,'jenkins_user':''}):
+            p.reload();expect(p.locator('#plugin-branches option')).to_have_count(101)
+            self.show('settings')
+            expect(p.locator('#credentials-status')).to_contain_text('GitHub Token：未保存')
+            f=p.locator('#credentials-form')
+            f.locator('[name=github_token]').fill('pat-value')
+            f.locator('[name=jenkins_user]').fill('george')
+            f.locator('[name=jenkins_password]').fill('pw-value')
+            p.locator('#credentials-save').click()
+            expect(p.locator('#credentials-status')).to_contain_text('浏览器登录：已保存（george）')
+        self.assertEqual(saved,[{'github_token':'pat-value','jenkins_user':'george','jenkins_password':'pw-value'}])
+        self.assertEqual(f.locator('[name=github_token]').input_value(),'')       # secrets cleared after saving
+        self.assertEqual(f.locator('[name=jenkins_password]').input_value(),'')
+        self.assertNotIn('github_token',p.evaluate('buildBody()'))
+        self.assertFalse(self.errors,self.errors)
+
     def test_jira_panel_saves_mail_settings_and_sends_a_test_email(self):
         p=self.page;posts={}
         settings={'settings':{'enabled':True,'dry_run':True,'base_url':'https://jira.example.com','transition_name':'In Test',
@@ -284,20 +387,20 @@ class SharedBuildUITests(SharedBuildUIFixture, unittest.TestCase):
             route.fulfill(json=settings)
         p.route('**/api/jira/**',handle)
         p.reload();expect(p.locator('#plugin-branches option')).to_have_count(101)
-        self.show('jira-tests')
+        self.show('settings')
         f=p.locator('#jira-form')
         expect(p.locator('#build-jira-status')).to_contain_text('邮件通知：未开启')
         f.locator('[name=mail_enabled]').check()
         f.locator('[name=mail_issue]').fill('TRANSACT-9')
         f.locator('[name=mail_users]').fill('44065253, 43123456')
         p.locator('#jira-save').click()
-        expect(p.locator('#jira-result')).to_contain_text('设置已保存')
-        self.assertEqual({k:posts['settings'][k] for k in ('mail_enabled','mail_issue','mail_users')},
-                         {'mail_enabled':True,'mail_issue':'TRANSACT-9','mail_users':'44065253, 43123456'})
+        expect(p.locator('#jira-settings-result')).to_contain_text('设置已保存')
+        self.assertEqual({k:posts['settings'][k] for k in ('mail_enabled','mail_issue','mail_users','mail_failure_once')},
+                         {'mail_enabled':True,'mail_issue':'TRANSACT-9','mail_users':'44065253, 43123456','mail_failure_once':True})
         expect(p.locator('#build-jira-status')).to_contain_text('邮件通知：已开启')
         p.locator('#jira-mail-test').click()
-        expect(p.locator('#jira-result')).to_contain_text('收件人：44065253、43123456')
-        expect(p.locator('#jira-result')).to_contain_text('POST https://jira.example.com/rest/api/2/issue/TRANSACT-9/notify')
+        expect(p.locator('#jira-settings-result')).to_contain_text('收件人：44065253、43123456')
+        expect(p.locator('#jira-settings-result')).to_contain_text('POST https://jira.example.com/rest/api/2/issue/TRANSACT-9/notify')
         self.assertEqual(posts['mail-test'],{'mail_issue':'TRANSACT-9','mail_users':'44065253, 43123456'})
         self.assertFalse(self.errors,self.errors)
 
