@@ -145,3 +145,17 @@
 #delivery-table details pre{white-space:pre-wrap;font:11px/1.6 ui-monospace,Menlo,monospace;color:#bccad9;background:#080f1b;border:1px solid #283a53;border-radius:8px;padding:10px;max-width:640px}
 .pill.manual{color:#ffd9a0;background:#3d3320}.pill.dry{color:#c3cfdf;background:#182337}.pill.sent{color:#98e6bf;background:#153b33}.pill.error{color:#ffa5a7;background:#452632}
 #delivery-table .pill{white-space:nowrap}
+/* v0.9 overview dashboard */
+.overview{display:flex;flex-direction:column;gap:16px}
+.overview-head{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between}
+.overview-head h1{margin:0;font-size:28px;letter-spacing:-.5px}.overview-head p{margin:4px 0 0;color:#9aacbf;font-size:13px}
+.ov-attention{border:1px solid #6b4a2a;background:#2a2116;border-radius:14px;padding:16px 20px}
+.ov-attention h2{margin:0 0 8px;font-size:15px;color:#ffd9a0}.ov-attention ul{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:6px;font-size:13px}
+.ov-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.ov-card{border:1px solid #28374c;background:#101827;border-radius:14px;padding:18px 20px;display:flex;flex-direction:column;gap:10px;min-width:0}
+.ov-card h2{margin:0;font-size:16px}.ov-card .text-btn{align-self:flex-start;padding:0}
+.ov-body{display:flex;flex-direction:column;gap:6px;font-size:13px;color:#c3cfdf;overflow-wrap:anywhere}
+.ov-line.ok{color:#70d9b9}.ov-line.bad{color:#ff9497}
+.ov-steps{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.ov-steps li{display:flex;gap:10px}.ov-steps .done .ov-mark{color:#70d9b9}.ov-steps .current{color:#75e5e1}.ov-steps .waiting{color:#8291ab}
+@media(max-width:900px){.ov-grid{grid-template-columns:1fr}}

@@ -289,6 +289,34 @@ class SharedBuildUITests(SharedBuildUIFixture, unittest.TestCase):
         destination=Path('/tmp/mac-app-build-ui');destination.mkdir(exist_ok=True)
         p.locator('#testfairy-tests').screenshot(path=str(destination/'testfairy-test.png'))
 
+    def test_overview_shows_running_last_delivery_and_attention(self):
+        p=self.page
+        data={'running':{'task_id':'T4','created':'2026-10-15T21:42:00','status':'RUNNING','steps':[
+                  {'label':'Plugin 构建','state':'done'},{'label':'GMX 构建','state':'current'},{'label':'取 App 链接','state':'waiting'},
+                  {'label':'回填 Jira','state':'waiting'},{'label':'发邮件','state':'waiting'}]},
+              'last':{'task_id':'T2','created':'2026-10-15T16:56:00','link':'https://tenant.testfairy.com/join/abc',
+                      'jira_status':'DONE','tickets':['TRANSACT-1'],'mail_status':'SENT','mail_to':3},
+              'attention':[{'kind':'task','task_id':'T3','status':'FAILED','stage':'GMX_JENKINS','text':'<b>boom</b>'},
+                           {'kind':'missed','name':'nightly','count':2,'planned':'x'}],
+              'schedules':{'online':True,'items':[{'name':'nightly','cron':'0 */6 * * *','enabled':True,'next_run':'2026-10-16T00:00:00'}]},
+              'automation':{'jira_enabled':True,'jira_dry_run':True,'mail_enabled':True,'mail_failure_once':True},'counts':{}}
+        p.route('**/api/overview',lambda route:route.fulfill(json=data))
+        p.reload();expect(p.locator('#plugin-branches option')).to_have_count(101)
+        expect(p.locator('#ov-running li')).to_have_count(5)
+        expect(p.locator('#ov-running li.current')).to_have_text('●GMX 构建')
+        expect(p.locator('#ov-last a')).to_have_attribute('href','https://tenant.testfairy.com/join/abc')
+        expect(p.locator('#ov-last')).to_contain_text('TRANSACT-1 → 已更新')
+        expect(p.locator('#ov-last')).to_contain_text('已发 3 人')
+        expect(p.locator('#ov-attention')).to_be_visible()
+        expect(p.locator('#ov-attention')).to_contain_text('T3 失败（GMX 构建）：<b>boom</b>')   # text, not HTML
+        expect(p.locator('#ov-attention')).to_contain_text('错过 2 次')
+        expect(p.locator('#ov-schedules')).to_contain_text('调度器运行中')
+        expect(p.locator('#ov-auto')).to_contain_text('演练模式')
+        p.locator('#ov-attention button',has_text='查看 →').click()          # links open the right panel
+        expect(p.locator('#schedules')).to_be_visible()
+        expect(p.locator('#crumb')).to_have_text('定时任务')
+        self.assertFalse(self.errors,self.errors)
+
     def test_delivery_page_lists_tickets_with_links_and_mails_with_bodies(self):
         p=self.page;seen=[]
         tickets={'jira_base':'https://jira.example.com','items':[

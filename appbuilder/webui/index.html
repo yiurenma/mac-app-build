@@ -12,6 +12,7 @@
   <script defer src="/jenkins-token.js"></script>
   <script defer src="/settings.js"></script>
   <script defer src="/delivery.js"></script>
+  <script defer src="/overview.js"></script>
 </head>
 <body>
   <div class="layout">
@@ -36,23 +37,29 @@
     </aside>
     <main class="main">
       <header class="topbar">
-        <div class="breadcrumbs">WORKSPACE <span>/</span> <strong>Overview</strong></div>
+        <div class="breadcrumbs">APP BUILDER <span>/</span> <strong id="crumb">概览</strong></div>
         <div class="top-actions"><span id="doctor-badge" class="dot-label muted">● 检测中</span><button id="doctor-refresh" class="icon-button" title="重新检查环境">↻</button><div class="avatar">M</div></div>
       </header>
       <div class="content">
-        <section class="hero" id="overview">
-          <div class="hero-copy"><span class="eyebrow"><span class="eyebrow-line"></span> BUILD ORCHESTRATION</span><h1>From code to <em>build.</em><br>All in one place.</h1><p>自动化 Plugin → GMX → Jenkins 构建流水线。从分支管理到 Artifacts，所有进度一目了然。</p><div class="hero-actions"><button class="btn btn-primary" id="hero-start">＋ &nbsp; Create a build <span>↗</span></button><span class="local-note">⦿&nbsp; Running securely on your Mac</span></div></div>
-          <div class="hero-graphic" aria-hidden="true"><div class="orb orb-1"></div><div class="orb orb-2"></div><div class="circuit circuit-one"></div><div class="circuit circuit-two"></div><div class="core-card"><div class="core-icon">✦</div><div class="core-top">PIPELINE READY</div><div class="core-title">PLUGIN / GMX</div><div class="core-bars"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><span>BUILD ENGINE · 06</span></div></div>
+        <section class="overview" id="overview" aria-label="概览">
+          <div class="overview-head"><div><h1>概览</h1><p>现在在跑什么、上次交付了什么、有没有要你处理的。</p></div><button class="btn btn-primary" id="hero-start" type="button">＋ 手动构建一次</button></div>
+          <section class="ov-attention" id="ov-attention" aria-label="需要你处理" hidden><h2>需要你处理</h2><ul id="ov-attention-list"></ul></section>
+          <div class="ov-grid">
+            <section class="ov-card" aria-labelledby="ov-running-title"><h2 id="ov-running-title">正在运行</h2><div id="ov-running" class="ov-body">现在没有在跑的构建。</div></section>
+            <section class="ov-card" aria-labelledby="ov-last-title"><h2 id="ov-last-title">上次交付</h2><div id="ov-last" class="ov-body">还没有成功的构建。</div><button class="text-btn" type="button" data-go="delivery">全部交付记录 →</button></section>
+            <section class="ov-card" aria-labelledby="ov-sched-title"><h2 id="ov-sched-title">定时任务</h2><div id="ov-schedules" class="ov-body">读取中…</div><button class="text-btn" type="button" data-go="schedules">管理定时任务 →</button></section>
+            <section class="ov-card" aria-labelledby="ov-auto-title"><h2 id="ov-auto-title">构建后自动做的事</h2><div id="ov-auto" class="ov-body">读取中…</div><button class="text-btn" type="button" data-go="settings">在设置里改 →</button></section>
+          </div>
         </section>
         <section class="metrics" aria-label="Build metrics">
-          <article class="metric"><div class="metric-label">TOTAL BUILDS <span>↗</span></div><div class="metric-number" id="metric-total">–</div><div class="metric-foot">All-time tasks</div></article>
-          <article class="metric"><div class="metric-label">IN PROGRESS <span class="aqua">◉</span></div><div class="metric-number" id="metric-running">–</div><div class="metric-foot">Currently running</div></article>
-          <article class="metric"><div class="metric-label">COMPLETED <span class="green">✓</span></div><div class="metric-number" id="metric-success">–</div><div class="metric-foot">Successful builds</div></article>
-          <article class="metric"><div class="metric-label">NEEDS ATTENTION <span class="amber">!</span></div><div class="metric-number" id="metric-attention">–</div><div class="metric-foot">Failed / interrupted</div></article>
+          <article class="metric"><div class="metric-label">全部构建 <span>↗</span></div><div class="metric-number" id="metric-total">–</div></article>
+          <article class="metric"><div class="metric-label">进行中 <span class="aqua">◉</span></div><div class="metric-number" id="metric-running">–</div></article>
+          <article class="metric"><div class="metric-label">成功 <span class="green">✓</span></div><div class="metric-number" id="metric-success">–</div></article>
+          <article class="metric"><div class="metric-label">失败 / 中断 <span class="amber">!</span></div><div class="metric-number" id="metric-attention">–</div></article>
         </section>
         <section class="main-grid">
           <article class="panel build-form" id="new-build">
-            <div class="panel-head"><div><span class="section-tag">CREATE NEW</span><h2>New build</h2><p>设置参数，然后启动自动化构建。</p></div><div class="panel-icon">◇</div></div>
+            <div class="panel-head"><div><span class="section-tag">CREATE NEW</span><h2>新建构建</h2><p>设置参数，然后启动自动化构建。</p></div><div class="panel-icon">◇</div></div>
             <form id="build-form" autocomplete="off">
 <div class="group-head"><span>00</span> Jenkins 登录</div><div class="form-grid"><label class="field-toggle span-2">用工号 + API Token 访问 Jenkins · jenkins_api<input type="checkbox" data-build name="jenkins_api" checked><small class="label-help">默认开启。Plugin 构建、GMX 构建、取 App 链接都直接调用 Jenkins 接口，不打开浏览器、不怕 SSO 过期。没保存 Token 或 Jenkins 拒绝时，该步骤自动改用浏览器。关闭则全部回到浏览器方式。工号和 Token 在左侧「设置」里保存。</small></label></div><div class="group-divider"></div><div class="group-head"><span>01</span> Plugin</div><div class="form-grid"><div class="branch-field"><label class=" ">Plugin 来源分支 · plugin_branch<input data-build name="plugin_branch" placeholder="develop" required maxlength="200" list="plugin-branches"><small class="label-help">从列表搜索选择，或填完整分支名；默认 develop，作为新 Plugin 分支的代码来源。</small></label><datalist id="plugin-branches"></datalist><button type="button" class="subtle-btn branch-refresh" data-kind="plugin">↻ 刷新全部分支</button><small id="plugin-branch-status" class="label-help" role="status">读取全部分页后可搜索选择，也可直接填写分支。</small></div><label class=" ">Plugin 版本 · plugin_version<input data-build name="plugin_version" placeholder="1.3" required maxlength="50"><small class="label-help">填 1.3 使用时间戳版本，或填 1.3.1 使用固定版本；不带 v。目标分支为 release/v版本。依赖版本以正式 Jenkins 成功产物的完整版本为准。</small></label>
 </div>
@@ -118,7 +125,7 @@
 </form>
           </article>
           <article class="panel activity-panel" id="activity">
-            <div class="panel-head"><div><span class="section-tag">REAL-TIME MONITOR</span><h2>Live activity</h2><p id="selected-subtitle">从任务列表选择一个构建。</p></div><div class="live-indicator"><span class="pulse"></span> LIVE</div></div>
+            <div class="panel-head"><div><span class="section-tag">REAL-TIME MONITOR</span><h2>实时进度</h2><p id="selected-subtitle">从任务列表选择一个构建。</p></div><div class="live-indicator"><span class="pulse"></span> LIVE</div></div>
             <div class="active-summary" id="active-summary"><div class="icon-circle">⌁</div><div><strong>No build selected</strong><small>选择任务查看完整构建过程</small></div></div>
             <div class="jenkins-links" id="jenkins-links" aria-label="关联 Jenkins Job 和 Build"></div>
             <div class="stage-strip" id="stage-strip"><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div></div>
@@ -128,7 +135,7 @@
             <div class="panel-bottom"><span>● Auto-refresh every 3 seconds</span><button class="text-btn" type="button" id="resume-build" hidden>↻ Resume task</button></div>
           </article>
         </section>
-        <section class="panel table-panel" id="history"><div class="panel-head history-head"><div><span class="section-tag">BUILD HISTORY</span><h2>Recent builds</h2></div><button class="ghost-button" id="refresh-tasks">↻ Refresh</button></div><div class="table-wrap"><table><thead><tr><th>BUILD / PROJECT</th><th>VERSION</th><th>PIPELINE STAGE</th><th>CREATED</th><th>STATUS</th><th></th></tr></thead><tbody id="tasks-body"><tr><td class="empty-row" colspan="6">Loading tasks...</td></tr></tbody></table></div></section>
+        <section class="panel table-panel" id="history"><div class="panel-head history-head"><div><span class="section-tag">BUILD HISTORY</span><h2>运行记录</h2></div><button class="ghost-button" id="refresh-tasks">↻ Refresh</button></div><div class="table-wrap"><table><thead><tr><th>BUILD / PROJECT</th><th>VERSION</th><th>PIPELINE STAGE</th><th>CREATED</th><th>STATUS</th><th></th></tr></thead><tbody id="tasks-body"><tr><td class="empty-row" colspan="6">Loading tasks...</td></tr></tbody></table></div></section>
 <section class="panel diagnose-panel delivery-panel" id="delivery"><div class="panel-head"><div><span class="section-tag">给测试交付了什么</span><h2>交付记录</h2><p>哪些 Jira 拿到了哪个 App 链接，发了哪些邮件。按 Jira 编号搜，就能知道某张单在哪个包里。</p></div></div>
 <div class="delivery-bar"><div class="tool-tabs" role="tablist" aria-label="记录类型"><button type="button" role="tab" class="tool-tab active" data-delivery="tickets" aria-selected="true">Jira 更新</button><button type="button" role="tab" class="tool-tab" data-delivery="mails" aria-selected="false">邮件</button></div>
 <label class="delivery-search">搜索<input id="delivery-search" type="search" maxlength="100" placeholder="Jira 编号、标题、任务编号或邮件主题"><small class="label-help">例如输入 TRANSACT-210861，看这张单收到过哪些包。</small></label></div>
@@ -136,7 +143,7 @@
 <div class="table-wrap"><table id="delivery-table"><thead id="delivery-head"></thead><tbody id="delivery-body"></tbody></table></div>
 </section>
         <section class="panel diagnose-panel schedules-panel" id="schedules">
-          <div class="panel-head"><div><span class="section-tag">RECURRING BUILDS</span><h2>Schedules</h2><p>输入 cron，由独立调度器按时自动创建构建。错过的时间只补跑最近一次；并发已满时排队等待，不会丢弃。账号密码使用 Mac Keychain，定时任务不保存任何密码。</p></div><div class="panel-icon">⏱</div></div>
+          <div class="panel-head"><div><span class="section-tag">RECURRING BUILDS</span><h2>定时任务</h2><p>输入 cron，由独立调度器按时自动创建构建。错过的时间只补跑最近一次；并发已满时排队等待，不会丢弃。账号密码使用 Mac Keychain，定时任务不保存任何密码。</p></div><div class="panel-icon">⏱</div></div>
           <div id="scheduler-status" class="diagnose-verdict unknown">调度器状态读取中…</div>
           <button type="button" class="btn btn-primary" id="new-schedule">＋ 在 New build 创建定时任务</button><p class="diag-note">构建字段、默认值、Chrome 显示选项均在 New build 共用表单维护；点击列表「编辑」可完整修改。最近 20 次记录包含计划时间、状态、构建与日志；离线或休眠错过时只补最近一次，并发满时排队。</p>
           <div class="table-wrap"><table><thead><tr><th>NAME</th><th>CRON</th><th>NEXT RUN</th><th>LAST RUN</th><th>ENABLED</th><th>ACTIONS</th></tr></thead><tbody id="schedules-body"><tr><td class="empty-row" colspan="6">Loading schedules...</td></tr></tbody></table></div>
