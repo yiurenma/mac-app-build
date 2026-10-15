@@ -10,6 +10,7 @@ import os
 import re
 from urllib.parse import urlsplit
 from . import jira_notify as J
+from . import jira_mail as M
 from .config import load_config
 from .telemetry import safe_text
 
@@ -38,7 +39,7 @@ def _clean(body):
             continue
         value = body[key]
         if kind is str:
-            limit = 2000 if key == 'transition_fields' else 512
+            limit = 2000 if key in ('transition_fields', 'mail_users') else 512
             if not isinstance(value, str) or len(value) > limit:
                 raise ValueError(f'{key} 必须是文本（不超过 {limit} 字符）')
             value = value.strip()
@@ -59,6 +60,10 @@ def _clean(body):
             raise ValueError('Jira 编号识别规则不是有效的正则表达式') from None
     if 'transition_fields' in out:
         J.parse_field_rules(out['transition_fields'])      # raises ValueError naming the bad line
+    if 'mail_issue' in out:
+        out['mail_issue'] = M.check_issue(out['mail_issue'])
+    if 'mail_users' in out:
+        M.parse_users(out['mail_users'])                     # raises ValueError naming the bad names
     if 'transition_name' in out and not out['transition_name']:
         raise ValueError('流转名称不能为空')
     if 'first_run_commits' in out and not 0 <= out['first_run_commits'] <= 200:
@@ -173,6 +178,8 @@ def handle_post(path, body):
             return 200, lookup_ticket(body.get('key'))
         if path == '/api/jira/preview':
             return 200, preview(body.get('task_id'), body.get('recent', 10))
+        if path == '/api/jira/mail-test':
+            return 200, M.test_email(body)
     except ValueError as exc:
         return 400, {'error': safe_text(str(exc))}
     return None

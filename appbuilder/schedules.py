@@ -38,7 +38,7 @@ CREATE TABLE IF NOT EXISTS schedule_runs (
 '''
 
 BASIC_KEYS = ('plugin_branch', 'gmx_branch', 'plugin_version', 'country', 'project_name')
-OPTIONAL_TEXT = ('outlook_recipients', 'outlook_account', 'testfairy_login_url', 'testfairy_folder_path', 'gmx_issue_key', 'plugin_url', 'gmx_url', 'plugin_parent', 'gmx_parent', 'browser_channel',
+OPTIONAL_TEXT = ('testfairy_login_url', 'testfairy_folder_path', 'gmx_issue_key', 'plugin_url', 'gmx_url', 'plugin_parent', 'gmx_parent', 'browser_channel',
                  'gmx_build_type', 'gmx_signing_repo_branch', 'gmx_custom_folder',
                  'upload_success_pattern',
                  'selector_entities', 'selector_sync_upload', 'selector_custom_folder',
@@ -47,7 +47,9 @@ OPTIONAL_TEXT = ('outlook_recipients', 'outlook_account', 'testfairy_login_url',
 OPTIONAL_INT = ('discover_poll_seconds', 'poll_seconds', 'result_poll_seconds',
                 'console_settle_seconds', 'discover_timeout_minutes', 'build_timeout_minutes',
                 'callback_timeout_minutes', 'max_changed_lines')
-OPTIONAL_BOOL = ('outlook_auto_send', 'testfairy_enabled', 'jenkins_api', 'testfairy_save_credentials', 'visible', 'verbose', 'gmx_sync_upload', 'gmx_skip_test', 'gmx_force', 'gmx_keep_alive')
+OPTIONAL_BOOL = ('testfairy_enabled', 'jenkins_api', 'testfairy_save_credentials', 'visible', 'verbose', 'gmx_sync_upload', 'gmx_skip_test', 'gmx_force', 'gmx_keep_alive')
+# Removed Outlook options: still accepted from schedules saved by older versions, then dropped.
+LEGACY_IGNORED = ('outlook_auto_send', 'outlook_recipients', 'outlook_account')
 SECRET_KEYS = ('testfairy_user', 'testfairy_password', 'jenkins_user', 'jenkins_password', 'github_token', 'jira_token', 'jenkins_api_token')
 
 
@@ -90,6 +92,7 @@ def validate_template(body, config=None):
     if any(key in body for key in SECRET_KEYS):
         raise ValueError('定时任务不保存账号、密码或 Token；请使用已保存在 Mac Keychain 的凭据')
     config = config if config is not None else load_config()
+    body = {key: value for key, value in body.items() if key not in LEGACY_IGNORED}
     allowed = set(BASIC_KEYS + OPTIONAL_TEXT + OPTIONAL_INT + OPTIONAL_BOOL)
     unknown = sorted(set(body) - allowed)
     if unknown:

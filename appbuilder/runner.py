@@ -146,15 +146,15 @@ def run(task_id, transient_credentials=None):
         finally:
             # Notification errors must never replace the build result/exception.
             try:
-                from .outlook import notify_outcome
-                notify_outcome(task_id)
-            except Exception:
-                log('[MAIL] 通知处理失败；原构建结果保留，请查看本机任务状态')
-            try:
                 from .jira_notify import notify_jira
                 notify_jira(task_id)
             except Exception as exc:
                 log(safe_text(f'[JIRA] 处理失败；原构建结果保留: {type(exc).__name__}: {exc}'))
+            try:
+                from .jira_mail import notify_team      # after Jira, so the email lists the updated tickets
+                notify_team(task_id)
+            except Exception as exc:
+                log(safe_text(f'[MAIL] 邮件处理失败；原构建结果保留: {type(exc).__name__}: {exc}'))
 
 
 def effective_task_config(config, params):

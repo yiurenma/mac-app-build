@@ -19,8 +19,7 @@ class CopyScenarios(shared.SharedBuildUIFixture):
         template = {**web.form_defaults(web.load_config()), 'country':'ALL', 'project_name':'CopiedApp',
                     'plugin_parent':PLUGIN_FEATURE_PARENT,
                     'gmx_issue_key':'UKPBB-77','plugin_branch':'feature/source','visible':False,
-                    'testfairy_enabled':True,
-                    'outlook_auto_send':True,'outlook_recipients':'fixture@example.com'}
+                    'testfairy_enabled':True}
         allowed = set(schedules.BASIC_KEYS+schedules.OPTIONAL_TEXT+schedules.OPTIONAL_INT+schedules.OPTIONAL_BOOL)
         template = {k:v for k,v in template.items() if k in allowed}
         self.source = schedules.create_schedule('source', '0 9 * * 1-5', template, stop_after_success=False, enabled=False,
@@ -49,7 +48,6 @@ class CopyScenarios(shared.SharedBuildUIFixture):
         self.assertTrue(self.field('schedule_stop_after_success').is_checked())
         self.assertFalse(self.field('schedule_enabled').is_checked())
         self.assertTrue(self.field('testfairy_enabled').is_checked())
-        self.assertEqual(self.field('outlook_recipients').input_value(),'fixture@example.com')
         self.page.locator('#submit-build').click()
         expect(self.page.locator('#form-message')).to_contain_text('不同名称')
         self.assertEqual(len(schedules.list_schedules()),1)

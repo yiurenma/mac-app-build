@@ -37,7 +37,7 @@ function renderSelection(){const row=state.tasks.find(t=>t.id===state.selected);
       const a=create('a','jenkins-link','↗ APP 链接'+(row.delivery.app.app_version?' '+row.delivery.app.app_version:''));a.href=url.href;a.target='_blank';a.rel='noopener noreferrer';links.append(a);
     }}catch(e){}
   }
-  if(row.delivery?.mail_preview){const details=create('details'),title=create('summary','',row.delivery.mail_delivery?.status==='SUBMITTED'?'邮件预览 · 已提交 Outlook（非送达确认）':row.delivery.mail_delivery?.status==='UNKNOWN'?'邮件预览 · 提交结果不明，禁止自动重发':row.delivery.mail_delivery?.status==='BLOCKED'?'邮件预览 · 发送受阻：'+row.delivery.mail_delivery.reason:'邮件预览 · 尚未发送'),text=create('pre','','To: '+row.delivery.mail_preview.to.join(', ')+'\nFrom: '+(row.delivery.mail_delivery?.account||row.delivery.mail_preview.account||'待本机核验')+'\n'+row.delivery.mail_preview.subject+'\n\n'+row.delivery.mail_preview.body);details.append(title,text);box.append(details);}
+  if(row.delivery?.jira_mail){const m=row.delivery.jira_mail;box.append(create('p','diag-note',m.status==='SENT'?'邮件通知 · 已通过 Jira 发给 '+m.to.length+' 人（'+m.to.join('、')+'）':'邮件通知 · 未发送：'+(m.reason||m.status)));}
   const phases=['PLUGIN_CHECKOUT','PLUGIN_EDIT','PLUGIN_PUSH','PLUGIN_JENKINS','GMX_CHECKOUT','GMX_EDIT','GMX_LOCK','GMX_PUSH','GMX_JENKINS'];const idx=row.stage==='PLUGIN_PREPARE'?0:phases.indexOf(row.stage);
   $('stage-strip').querySelectorAll('div').forEach((e,i)=>{e.className='';if(row.status==='SUCCESS'||(idx>=0&&i<idx))e.className='done';else if(i===idx)e.className='current';});
   $('resume-build').hidden=['SUCCESS','RUNNING','QUEUED'].includes(row.status);
@@ -75,7 +75,7 @@ async function submitBuild(evt){evt.preventDefault();
 async function resumeTask(){const id=state.selected;if(!id)return;if(!confirm(`恢复任务 ${id}？\n将复用既有分支和 Jenkins Build，不重新创建任务。`))return;
  try{await api(`/api/tasks/${encodeURIComponent(id)}/resume`,{method:'POST',body:JSON.stringify({visible:true,verbose:true})});toast('已请求恢复任务');state.offset=0;await loadTasks();await loadLog(true);}catch(e){toast(e.message,true);}}
 async function refreshDoctor(){try{const r=await api('/api/doctor');const badge=$('doctor-badge');badge.className=r.ready?'dot-label':'dot-label bad';badge.textContent=r.ready?'● Environment ready':'● Setup required';badge.title=(r.messages||[]).join('\n');if(!r.ready)toast('环境检查：'+(r.messages||[]).slice(-1)[0],true);}catch(e){toast(e.message,true);}}
-const FOLD=['schedules','diagnostics','live-tests','testfairy-tests','mail-tests','jira-tests'];
+const FOLD=['schedules','diagnostics','live-tests','testfairy-tests','jira-tests'];
 FOLD.forEach(id=>{const e=document.getElementById(id);if(e)e.classList.add('fold','collapsed');});
 function nav(target,keepOpen){const el=document.getElementById(target);
  if(FOLD.includes(target)){const opening=keepOpen||el.classList.contains('collapsed');
@@ -220,10 +220,9 @@ $('clear-log').addEventListener('click',()=>loadLog(true));
 setInterval(async()=>{if(!state.csrf)return;await loadTasks();await loadLog();if(state.selected)await loadScreens();},3000);
 init();
 
-$('check-outlook').addEventListener('click',async()=>{const out=$('outlook-status');out.textContent='正在只读检查…';try{const r=await api('/api/outlook');out.textContent='Outlook '+r.version+' · '+r.accounts.map(a=>a.email).join(', ');if(r.accounts.length===1)$('build-form').elements.outlook_account.value=r.accounts[0].email;}catch(e){out.textContent=e.message;}});
 
 function renderTestTasks(){
- for(const prefix of ['tf','mail']){
+ for(const prefix of ['tf']){
   const f=$(prefix+'-test-form').elements,select=f[prefix+'_test_task'],selected=select.value;
   const query=f[prefix+'_test_search'].value.trim().toLowerCase();
   const rows=state.tasks.filter(t=>t.id===selected||[t.id,t.project,t.country,t.status,t.plugin_version].join(' ').toLowerCase().includes(query));
@@ -235,7 +234,7 @@ function renderTestTasks(){
   select.value=selected;
  }
 }
-for(const prefix of ['tf','mail'])$(prefix+'-test-form').elements[prefix+'_test_search'].addEventListener('input',renderTestTasks);
+for(const prefix of ['tf'])$(prefix+'-test-form').elements[prefix+'_test_search'].addEventListener('input',renderTestTasks);
 
 function deliveryDiagnostics(result){
  const d=result.diagnostics||{},first=d.first_error;
@@ -248,21 +247,19 @@ function deliveryDiagnostics(result){
 }
 
 async function runDeliveryTest(kind){
- const f=$(kind==='testfairy'?'tf-test-form':'mail-test-form').elements,button=$(kind==='testfairy'?'test-testfairy':'test-outlook-send'),out=$(kind==='testfairy'?'tf-test-result':'mail-test-result');
+ const f=$('tf-test-form').elements,button=$('test-testfairy'),out=$('tf-test-result');
  const body={kind,request_id:crypto.randomUUID()};
- if(kind==='testfairy')Object.assign(body,{task_id:f.tf_test_task.value,expected_share_url:f.tf_test_expected.value});
- else {Object.assign(body,{task_id:f.mail_test_task.value,recipients:f.mail_test_to.value,account:$('build-form').elements.outlook_account.value,confirm_send:true,allow_repeat_test:f.mail_test_allow_repeat.checked});f.mail_test_allow_repeat.checked=false;}
+ Object.assign(body,{task_id:f.tf_test_task.value,expected_share_url:f.tf_test_expected.value});
  if(!body.task_id){out.textContent='请在本测试区选择历史构建。';return;}
  button.disabled=true;out.textContent='正在执行独立测试…';
  try{const r=await api('/api/delivery-tests/start',{method:'POST',body:JSON.stringify(body)});
-   for(let i=0;i<360;i++){const result=await api('/api/delivery-tests/'+encodeURIComponent(r.id));out.textContent=result.status+' · '+(result.result.message||'执行中')+(result.result.final_url?'\n实际地址（已去除敏感查询参数）：'+result.result.final_url:'')+(result.result.expected_share_url?'\n预期链接：'+result.result.expected_share_url:'')+(result.result.actual_share_url?'\nAPP 链接：'+result.result.actual_share_url:'')+(result.result.source_build_url?'\n来源 GMX Build：'+result.result.source_build_url:'')+(result.result.downstream_build_url?'\n上传 Build：'+result.result.downstream_build_url:'')+(result.result.account?'\n发件账号：'+result.result.account:'')+(result.result.stage?'\n阶段：'+result.result.stage+' · send 调用：'+(result.result.send_attempted===true?'已调用':result.result.send_attempted===false?'未调用':'无法确认'):'')+(result.result.error_number!=null?'\n原生错误号：'+result.result.error_number:'')+(result.result.returncode!=null?'\n退出码：'+result.result.returncode:'')+deliveryDiagnostics(result.result);if(!['RUNNING','SUBMITTING'].includes(result.status))return;await new Promise(resolve=>setTimeout(resolve,1000));}
-   out.textContent+='\n等待结果超时；不会自动再次发送，请核对原测试结果。';
+   for(let i=0;i<360;i++){const result=await api('/api/delivery-tests/'+encodeURIComponent(r.id));out.textContent=result.status+' · '+(result.result.message||'执行中')+(result.result.final_url?'\n实际地址（已去除敏感查询参数）：'+result.result.final_url:'')+(result.result.expected_share_url?'\n预期链接：'+result.result.expected_share_url:'')+(result.result.actual_share_url?'\nAPP 链接：'+result.result.actual_share_url:'')+(result.result.source_build_url?'\n来源 GMX Build：'+result.result.source_build_url:'')+(result.result.downstream_build_url?'\n上传 Build：'+result.result.downstream_build_url:'')+deliveryDiagnostics(result.result);if(!['RUNNING','SUBMITTING'].includes(result.status))return;await new Promise(resolve=>setTimeout(resolve,1000));}
+   out.textContent+='\n等待结果超时，请稍后查看。';
  }catch(e){out.textContent=e.message;}finally{button.disabled=false;}
 }
 $('test-testfairy').addEventListener('click',()=>runDeliveryTest('testfairy'));
-$('test-outlook-send').addEventListener('click',()=>runDeliveryTest('outlook'));
 
-for(const id of ['tf-test-form','mail-test-form'])$(id).addEventListener('submit',e=>e.preventDefault());
+for(const id of ['tf-test-form'])$(id).addEventListener('submit',e=>e.preventDefault());
 
 // Each open owns a request generation; late responses cannot replace another task.
 let runtimeGeneration=0,runtimeSnapshot=null,runtimeOpener=null;
