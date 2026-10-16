@@ -182,16 +182,35 @@ class ApiJenkins:
                            f'请确认 Jenkins 已扫描新分支、Job URL 正确且有访问权限: {job_url}')
 
     def _job(self, job_url):
-        fields = 'name,type,choices,defaultParameterValue[value]'
-        status, job = self.http.get_json(
-            job_url, tree=f'buildable,property[parameterDefinitions[{fields}]],actions[parameterDefinitions[{fields}]]')
-        if status != 200 or not isinstance(job, dict):
-            raise NeedsAttention(f'{self.site} Job 读取失败（HTTP {status}）')
-        defs = {}
-        for holder in (job.get('property') or []) + (job.get('actions') or []):
-            for d in (holder or {}).get('parameterDefinitions') or []:
-                if isinstance(d, dict) and isinstance(d.get('name'), str):
-                    defs.setdefault(d['name'], d)
+        """(job, {name: definition}). Several queries, simplest last: on the GMX Jenkins the
+        rich query came back with NO parameterDefinitions while the page already showed
+        'Build with Parameters' and a minimal query (property[_class,parameterDefinitions[name]])
+        listed all of them. One parameter type there (ValidatingString) seems to break the
+        richer fields, so a definition missing details is still a definition."""
+        queries = ('buildable,property[parameterDefinitions[_class,name,type,choices,defaultParameterValue[value]]]',
+                   'buildable,property[_class,parameterDefinitions[_class,name,type,choices]]',
+                   'buildable,property[_class,parameterDefinitions[_class,name]]')
+        job, defs, seen = None, {}, []
+        for tree in queries:
+            status, got = self.http.get_json(job_url, tree=tree)
+            if status != 200 or not isinstance(got, dict):
+                if job is None:
+                    raise NeedsAttention(f'{self.site} Job 读取失败（HTTP {status}）')
+                continue
+            job = job or got
+            for holder in got.get('property') or []:
+                if not isinstance(holder, dict):
+                    continue
+                seen.append(str(holder.get('_class', '?')).rsplit('.', 1)[-1])
+                for d in holder.get('parameterDefinitions') or []:
+                    if isinstance(d, dict) and isinstance(d.get('name'), str):
+                        d = dict(d)
+                        d.setdefault('type', str(d.get('_class', '')).rsplit('.', 1)[-1])
+                        defs.setdefault(d['name'], d)
+            if defs:
+                break
+        if not defs and seen:
+            action('JENKINS', f'{self.site} Job 属性里没有参数定义；属性类型：{", ".join(dict.fromkeys(seen))}')
         return job, defs
 
     def mode(self, job_url):
