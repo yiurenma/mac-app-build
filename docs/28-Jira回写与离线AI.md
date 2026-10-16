@@ -2,7 +2,7 @@
 
 ## 做什么
 任务 `SUCCESS` 后：找出自上次处理以来合入来源分支（如 develop）的提交，找 Jira 号时以 PR 为主要来源（先 PR 标题和分支名，再 PR 描述，找不到再退回提交标题/正文），对每个 ticket：
-1. 写 comment（含 App 链接，带 `[app-build:<构建号>]` 标记，重复运行不会重复评论）；
+1. 写 comment（含 App 链接，带 `[app-build:<任务编号>]` 标记：同一个构建任务重复运行不会重复评论；不同构建各写一条，GMX 构建号不作为判断依据，因为每个新分支都从 #2 开始）；
 2. assign 给 Reporter；
 3. 状态流转到 `In Test`（已在该状态则跳过）。
 
@@ -98,7 +98,7 @@ Token 优先在页面里填写（存入 Mac 钥匙串，不写入配置、日志
 发到 Jira 和邮件里的内容全部是英文。评论示例：
 
 ```
-[app-build:42] New test build is ready: https://…/join/…
+[app-build:202610161800-72a546] New test build is ready (GMX build #2): https://…/join/…
 
 This ticket is included because of:
 - PR #123 "TRANSACT-1 fix login" by alice https://github…/pull/123
@@ -107,8 +107,12 @@ This ticket is included because of:
 Change: …
 
 Note: the status was not changed to 'In Test' automatically: there is no 'In Test' transition from the current status 'Development' (available: Ready for Test, No Longer Required). Please update it manually.
+
+cc [~44065253] [~43123456]
 ```
 
 - PR 标题、分支名、PR 描述、提交标题、提交正文里**提到的每一张单**都会处理，只有 Jira 里不存在的单会跳过；不再按数量截断（超过“每轮最多处理 ticket 数”只在日志里提醒）。
 - 不管单子当前是什么状态、经办人是谁，都会写评论并转给 Reporter；只有状态改不了时留给人处理，并在评论里写明原因。
 - 失败邮件只引用英文内容：工具自己的中文原因和日志行不放进邮件，完整原因在 APP Builder 的任务里看。
+
+- 「评论里 @ 的人」：在设置里填 Jira 用户名（通常是工号），每条回填评论末尾会 `cc [~用户名]`，这些人会收到 Jira 通知；留空就不 @。

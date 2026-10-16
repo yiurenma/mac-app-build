@@ -256,10 +256,27 @@ class GitAndFlowTests(unittest.TestCase):
         self.assertEqual(jira.calls, [])
         self.assertEqual(ledger['develop']['last_sha'], self.shas[0])
 
-    def test_rerun_is_idempotent_for_comment_and_status(self):
-        jira = FakeJira(status='In Test', existing_comments=['[app-build:7] old'])
+    def test_rerun_of_the_same_task_is_idempotent_for_comment_and_status(self):
+        jira = FakeJira(status='In Test', existing_comments=['[app-build:T1] old'])
         report, _ = self.run_notify({'dry_run': False}, ledger={'develop': {'last_sha': self.shas[0]}}, client=jira)
         self.assertEqual([c[0] for c in jira.calls], ['assign'])
+
+    def test_configured_people_are_mentioned_in_every_comment(self):
+        jira = FakeJira()
+        self.run_notify({'dry_run': False, 'comment_mentions': '44065253, 43123456'},
+                        ledger={'develop': {'last_sha': self.shas[0]}}, client=jira)
+        self.assertTrue(jira.calls[0][2].endswith('\n\ncc [~44065253] [~43123456]'))
+        self.assertEqual(J.mention_line(''), '')
+        self.assertEqual(J.mention_line('abc', 'cloud'), 'cc [~accountid:abc]')
+        self.assertEqual(J.mention_line('George <g@x>'), '')          # invalid list: mention nobody
+
+    def test_another_build_with_the_same_gmx_number_still_comments(self):
+        # Every new upload branch starts at GMX #2, so the build number alone must not
+        # suppress the comment of a different build task.
+        jira = FakeJira(status='In Test', existing_comments=['[app-build:7] old', '[app-build:OTHER-TASK] older'])
+        report, _ = self.run_notify({'dry_run': False}, ledger={'develop': {'last_sha': self.shas[0]}}, client=jira)
+        self.assertEqual([c[0] for c in jira.calls], ['comment', 'assign'])
+        self.assertTrue(jira.calls[0][2].startswith('[app-build:T1] New test build is ready (GMX build #7): '))
 
     def test_failed_build_or_disabled_does_nothing(self):
         jira = FakeJira()

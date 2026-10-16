@@ -305,6 +305,10 @@ class SettingsTests(unittest.TestCase):
         for p in (patch.object(J, 'SETTINGS_FILE', self.file), patch.object(A, 'load_config', return_value={})):
             p.start(); self.addCleanup(p.stop)
 
+    def test_comment_mentions_are_saved_from_the_page(self):
+        out = A.save_settings({'comment_mentions': '44065253 43123456'})
+        self.assertEqual(out['settings']['comment_mentions'], '44065253 43123456')
+
     def test_mail_settings_are_saved_from_the_page(self):
         out = A.save_settings({'mail_enabled': True, 'mail_issue': 'transact-9', 'mail_users': '44065253,\n43123456'})
         s = out['settings']
@@ -312,7 +316,8 @@ class SettingsTests(unittest.TestCase):
         self.assertFalse(A.public_settings()['settings']['enabled'])     # email does not switch Jira write-back on
 
     def test_bad_mail_settings_are_rejected(self):
-        for bad in ({'mail_issue': 'nope'}, {'mail_users': 'George <g@x.com>'}, {'mail_enabled': 'yes'}):
+        for bad in ({'mail_issue': 'nope'}, {'mail_users': 'George <g@x.com>'}, {'mail_enabled': 'yes'},
+                    {'comment_mentions': 'George <g@x.com>'}):
             with self.subTest(bad=bad), self.assertRaises(ValueError):
                 A.save_settings(bad)
         self.assertFalse(self.file.exists())

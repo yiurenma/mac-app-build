@@ -169,6 +169,7 @@
 <label class="span-2">流转到的状态名称<input name="transition_name" maxlength="128"><small class="label-help">必须与 Jira 工作流里的流转名称一致，例如 In Test。</small></label>
 <label class="field-toggle span-2">转给 Reporter<input type="checkbox" name="assign_to_reporter"><small class="label-help">把 ticket 的经办人改为它的 Reporter。</small></label>
 <label class="field-toggle span-2">优先从 PR 里找 Jira 号<input type="checkbox" name="use_pr_lookup"><small class="label-help">先看 PR 的标题、分支名、描述，找不到再看提交信息；GitHub 查询失败会自动退回提交信息。</small></label>
+<label class="span-2">评论里 @ 的人（Jira 用户名）<textarea name="comment_mentions" rows="2" maxlength="2000" placeholder="44065253, 43123456"></textarea><small class="label-help">每条回填评论末尾加上 cc @这些人，他们会收到 Jira 通知。填 Jira 用户名（通常是工号），逗号、空格或换行分隔；留空就不 @ 任何人。</small></label>
 </div><div class="group-head jira-mail-head"><span>✉</span> 邮件通知（通过 Jira 发送）</div><div class="form-grid">
 <label class="field-toggle span-2">构建结束后给团队发邮件<input type="checkbox" name="mail_enabled"><small class="label-help">成功并拿到 App 链接：发 App 链接、分支、构建号和本次更新的 Jira。失败：发失败在哪一步、原因、Jenkins 链接和日志最后几行。由公司 Jira 服务器发出，不需要 Outlook。发件人是 Jira Token 的主人，他自己收不到。</small></label><label class="field-toggle span-2">同一原因连续失败只发一次<input type="checkbox" name="mail_failure_once"><small class="label-help">定时任务每 6 小时跑一次，同一个问题没修好时只通知一次；恢复成功的那封邮件会写明“之前的失败已恢复”。</small></label>
 <label class="span-2">公告单号<input name="mail_issue" maxlength="40" placeholder="TRANSACT-123456"><small class="label-help">Jira 的发邮件接口必须挂在一张单上，建一张长期开着的单专门用来发通知即可。</small></label>
