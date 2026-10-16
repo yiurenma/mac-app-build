@@ -8,15 +8,25 @@ VERSION_INPUT_RE = re.compile(r"^[0-9]+\.[0-9]+(?:\.[0-9]+)?$")
 BRANCH_RE = re.compile(r"^[A-Za-z0-9_./-]+$")
 ARTIFACTS = ("PayByBankDomainModelPluginKit", "PayByBankJourneyPluginKit")
 
-# Only normalize the shipped feature default when creating a new release task.
+# Only normalize the shipped defaults when creating a new task; explicit custom paths stay.
+# The Plugin repo is registered under the GB EIM (12579065): GitHub callbacks only reach
+# release builds in that folder. The old Global EIM (12824743) folder never gets a callback.
 PLUGIN_RELEASE_PARENT = ('https://mobile-premier01-jenkins.build-mobile.iwpb.euw2.prod.aws.cloud.hsbc/'
-                         'job/IWPB_Transaction_Banking/job/Domestic_Payment_and_Transfer_Mobile_Global_12824743/'
+                         'job/IWPB_Transaction_Banking/job/Domestic_Payment_and_Transfer_Mobile_GB_12579065/'
                          'job/Lib/job/mobile_paybybank-ios-plugin/job/release-build/job/')
 PLUGIN_FEATURE_PARENT = PLUGIN_RELEASE_PARENT.replace('/release-build/', '/feature-build/')
+OLD_PLUGIN_RELEASE_PARENT = PLUGIN_RELEASE_PARENT.replace('_GB_12579065/', '_Global_12824743/')
+OLD_PLUGIN_FEATURE_PARENT = PLUGIN_FEATURE_PARENT.replace('_GB_12579065/', '_Global_12824743/')
+SHIPPED_PARENTS = (PLUGIN_RELEASE_PARENT, PLUGIN_FEATURE_PARENT, OLD_PLUGIN_RELEASE_PARENT, OLD_PLUGIN_FEATURE_PARENT)
 
 
 def plugin_parent_for_branch(parent, branch):
-    if branch.startswith('release/') and parent.rstrip('/') + '/' == PLUGIN_FEATURE_PARENT:
+    """Saved schedules and old forms may still carry an old shipped default: move those to
+    the current release folder. A path the user typed themselves is never changed."""
+    normal = parent.rstrip('/') + '/'
+    if normal in (OLD_PLUGIN_RELEASE_PARENT, OLD_PLUGIN_FEATURE_PARENT):
+        return PLUGIN_RELEASE_PARENT if branch.startswith('release/') or normal == OLD_PLUGIN_RELEASE_PARENT else PLUGIN_FEATURE_PARENT
+    if branch.startswith('release/') and normal == PLUGIN_FEATURE_PARENT:
         return PLUGIN_RELEASE_PARENT
     return parent
 
