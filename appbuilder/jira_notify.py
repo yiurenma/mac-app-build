@@ -27,7 +27,8 @@ SETTINGS_FILE = DATA / 'jira_settings.json'
 EDITABLE = {'enabled': bool, 'dry_run': bool, 'base_url': str, 'transition_name': str, 'assign_to_reporter': bool,
             'use_pr_lookup': bool, 'key_pattern': str, 'first_run_commits': int, 'max_tickets_per_run': int,
             'flavor': str, 'transition_fields': str,
-            'mail_enabled': bool, 'mail_issue': str, 'mail_users': str, 'mail_failure_once': bool}
+            'mail_enabled': bool, 'mail_issue': str, 'mail_users': str, 'mail_failure_once': bool,
+            'comment_mentions': str}
 
 
 def _type_ok(key, value):
@@ -62,6 +63,7 @@ def settings(config):
     j.setdefault('mail_issue', '')              # 用来发邮件的固定公告单
     j.setdefault('mail_users', '')              # 收件人 Jira 用户名，逗号/空格/换行分隔
     j.setdefault('mail_failure_once', True)     # 同一原因连续失败只发一次，恢复成功时再发
+    j.setdefault('comment_mentions', '')        # 评论里 @ 的 Jira 用户名，逗号/空格/换行分隔
     return j
 
 
@@ -440,6 +442,19 @@ def _manual_reason(exc_or_plan, status, name):
     return f"the '{name}' transition could not be checked ({type(exc_or_plan).__name__})"
 
 
+def mention_line(text, flavor='server'):
+    """'cc [~a] [~b]' for the configured Jira users (Server/DC wiki markup; Cloud uses
+    [~accountid:...]). Mentioned users get Jira's own notification."""
+    from .jira_mail import parse_users
+    try:
+        users = parse_users(text or '')
+    except ValueError:
+        return ''
+    if not users:
+        return ''
+    return 'cc ' + ' '.join(f'[~accountid:{u}]' if flavor == 'cloud' else f'[~{u}]' for u in users)
+
+
 def process_ticket(client, key, info, link, build_label, conf, llm, dry_run, gmx_build=None):
     # The marker identifies THIS build task, so a ticket gets one comment per build it is in.
     # (The GMX build number alone is not unique: every new upload branch starts at #2.)
@@ -477,6 +492,9 @@ def process_ticket(client, key, info, link, build_label, conf, llm, dry_run, gmx
     text += f'\n\nChange: {summary}'
     if result.get('manual'):
         text += f"\n\nNote: the status was not changed to '{name}' automatically: {result['manual']}. Please update it manually."
+    mentions = mention_line(conf.get('comment_mentions', ''), conf.get('flavor', 'server'))
+    if mentions:
+        text += '\n\n' + mentions
     if dry_run:
         step = (f'transition -> {name} (当前 {status}, 类型 {issue_type or "?"})' if need_move
                 else f'已在 {name}，不需要流转')
