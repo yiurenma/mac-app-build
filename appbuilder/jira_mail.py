@@ -31,10 +31,17 @@ MAX_USERS = 50
 MAIL_LOG = DATA / 'mail_log.jsonl'
 MAIL_STATE = DATA / 'mail_state.json'
 FAILED = ('FAILED', 'NEEDS_ATTENTION', 'TIMEOUT')
-STAGE_NAMES = {'INIT': '启动', 'PLUGIN_PREPARE': 'Plugin 代码准备', 'PLUGIN_CHECKOUT': 'Plugin 代码准备',
-               'PLUGIN_EDIT': 'Plugin 代码准备', 'PLUGIN_PUSH': 'Plugin 推送', 'PLUGIN_JENKINS': 'Plugin 构建',
-               'GMX_CHECKOUT': 'GMX 代码准备', 'GMX_EDIT': 'GMX 代码准备', 'GMX_LOCK': 'GMX 代码准备',
-               'GMX_PUSH': 'GMX 推送', 'GMX_JENKINS': 'GMX 构建', 'TESTFAIRY_LOOKUP': '取 App 链接'}
+# Emails and Jira comments are read by the whole team: English only.
+STAGE_NAMES = {'INIT': 'start', 'PLUGIN_PREPARE': 'Plugin preparation', 'PLUGIN_CHECKOUT': 'Plugin preparation',
+               'PLUGIN_EDIT': 'Plugin preparation', 'PLUGIN_PUSH': 'Plugin push', 'PLUGIN_JENKINS': 'Plugin build',
+               'GMX_CHECKOUT': 'GMX preparation', 'GMX_EDIT': 'GMX preparation', 'GMX_LOCK': 'GMX preparation',
+               'GMX_PUSH': 'GMX push', 'GMX_JENKINS': 'GMX build', 'TESTFAIRY_LOOKUP': 'App link lookup'}
+CJK = re.compile(r'[\u3000-\u303f\u4e00-\u9fff\uff00-\uffef]')
+
+
+def english_only(text):
+    """True when the text has no Chinese characters (internal log lines are Chinese)."""
+    return not CJK.search(text or '')
 
 
 def parse_users(text):
@@ -61,44 +68,45 @@ def check_issue(key):
 
 
 def compose(row, params, runtime, base_url, test=False):
-    """Subject and plain-text body for one successful build."""
+    """Subject and plain-text body (English) for one successful build."""
     app = runtime.get('testfairy_app') or {}
     link = app.get('share_url', '')
     build = runtime.get('gmx_build_number', runtime.get('gmx_formal_number', ''))
     country, project = params.get('country', ''), params.get('project', '')
-    subject = f'{"[TEST] " if test else ""}[新测试包] {country} {project} · GMX #{build}'.replace('  ', ' ')
+    subject = f'{"[TEST] " if test else ""}[New test build] {country} {project} - GMX #{build}'.replace('  ', ' ')
     lines = []
     if test:
-        lines += ['这是一封测试邮件（内容取自一次已成功的历史构建），不代表有新包。', '']
-    lines += ['新的测试包已构建完成。', '',
-              f'App 链接：{link}',
-              f'Plugin 分支：{params.get("plugin_source", "")} → {params.get("plugin_branch", "")}',
-              f'GMX 构建：#{build}' + (f'  {app["build_url"]}' if app.get('build_url') else ''),
-              f'构建任务：{row["id"]}', '']
+        lines += ['This is a test email (content from an earlier successful build). It is not a new build.', '']
+    lines += ['A new test build is ready.', '',
+              f'App link: {link}',
+              f'Plugin branch: {params.get("plugin_source", "")} -> {params.get("plugin_branch", "")}',
+              f'GMX build: #{build}' + (f'  {app["build_url"]}' if app.get('build_url') else ''),
+              f'Build task: {row["id"]}', '']
     report = runtime.get('jira_report') or {}
     status = report.get('status')
     browse = (base_url or '').rstrip('/') + '/browse/'
     if status in ('DONE', 'PARTIAL', 'DRY_RUN'):
         tickets = report.get('tickets') or []
-        head = '本次更新的 Jira' + ('（演练模式，实际未修改）' if status == 'DRY_RUN' else '') + '：'
-        lines.append(head if tickets else '本次没有需要更新的 Jira。')
+        head = 'Jira tickets in this build' + (' (rehearsal mode: not changed in Jira)' if status == 'DRY_RUN' else '') + ':'
+        lines.append(head if tickets else 'No Jira tickets in this build.')
+        manual = {m['key'] for m in report.get('needs_manual') or []}
         for t in tickets:
             title = f' {t["summary"]}' if t.get('summary') else ''
-            lines.append(f'- {t["key"]}{title}  {browse}{t["key"]}')
+            note = '  (status needs a manual update)' if t['key'] in manual else ''
+            lines.append(f'- {t["key"]}{title}  {browse}{t["key"]}{note}')
+            lines += [f'    {ref[2:]}' for ref in t.get('refs') or []]
         for e in report.get('errors') or []:
-            lines.append(f'- {e["key"]}（自动更新失败，请手动处理）  {browse}{e["key"]}')
-        for m in report.get('needs_manual') or []:
-            lines.append(f'  注意：{m["key"]} 状态需手动修改')
+            lines.append(f'- {e["key"]}  {browse}{e["key"]}  (could not be updated automatically, please check)')
     elif status == 'BASELINE':
-        lines.append('Jira：首次运行，只记录起点，下次构建开始自动更新。')
+        lines.append('Jira: first run, only the starting point was recorded; tickets are updated from the next build.')
     else:
-        lines.append('Jira：本次未自动更新。')
-    lines += ['', '—— 由 APP Builder 自动发送']
+        lines.append('Jira: not updated for this build.')
+    lines += ['', '-- sent automatically by APP Builder']
     return safe_text(subject)[:250], '\n'.join(lines)
 
 
 def stage_name(stage):
-    return STAGE_NAMES.get(stage or '', stage or '未知步骤')
+    return STAGE_NAMES.get(stage or '', stage or 'unknown step')
 
 
 def _log_tail(task_id, keep=8):
@@ -116,25 +124,28 @@ def _log_tail(task_id, keep=8):
 
 
 def compose_failure(row, params, runtime, links=None, test=False):
-    """Subject and plain-text body for a failed build: where, why, and where to look."""
+    """Subject and plain-text body (English) for a failed build: where, and where to look.
+    The tool's own reason and log lines are Chinese, so only English lines are quoted."""
     country, project = params.get('country', ''), params.get('project', '')
     where = stage_name(row.get('stage'))
-    subject = f'{"[TEST] " if test else ""}[构建失败] {country} {project} · 失败在 {where}'.replace('  ', ' ')
-    lines = (['这是一封测试邮件（内容取自一次失败的历史构建）。', ''] if test else []) + [
-        '构建没有完成，需要处理。', '',
-        f'失败步骤：{where}',
-        f'结果：{row.get("status", "")}',
-        f'原因：{safe_text(row.get("note") or "未记录")[:500]}',
-        f'Plugin 分支：{params.get("plugin_source", "")} → {params.get("plugin_branch", "")}',
-        f'构建任务：{row["id"]}']
+    subject = f'{"[TEST] " if test else ""}[Build failed] {country} {project} - failed at {where}'.replace('  ', ' ')
+    note = safe_text(row.get('note') or '')[:500]
+    lines = (['This is a test email (content from an earlier failed build).', ''] if test else []) + [
+        'The build did not finish and needs attention.', '',
+        f'Failed at: {where}',
+        f'Result: {row.get("status", "")}']
+    if note and english_only(note):
+        lines.append(f'Reason: {note}')
+    lines += [f'Plugin branch: {params.get("plugin_source", "")} -> {params.get("plugin_branch", "")}',
+              f'Build task: {row["id"]}']
     links = links or []
     if links:
-        lines += ['', 'Jenkins：'] + [f'- {item["label"]}  {item["url"]}' for item in links]
-    tail = _log_tail(row['id'])
+        lines += ['', 'Jenkins:'] + [f'- {item["label"]}  {item["url"]}' for item in links]
+    tail = [line for line in _log_tail(row['id']) if english_only(line)]
     if tail:
-        lines += ['', '日志最后几行：'] + [f'  {line}' for line in tail]
-    lines += ['', '处理后可在 App Builder 的运行记录里点「从失败处继续」；定时任务下次也会再跑。',
-              '', '—— 由 APP Builder 自动发送']
+        lines += ['', 'Last log lines:'] + [f'  {line}' for line in tail]
+    lines += ['', 'The full reason is on the build task in APP Builder. After fixing it, use "Resume" there; '
+              'scheduled builds will also run again.', '', '-- sent automatically by APP Builder']
     return safe_text(subject)[:250], '\n'.join(lines)
 
 
@@ -283,7 +294,7 @@ def notify_team(task_id, client=None, config=None):
         subject, body = compose(row, params, runtime, conf['base_url'])
         recovered = bool(_mail_state().get(key))
         if recovered:
-            body = '之前的构建失败已恢复。\n\n' + body
+            body = 'The earlier build failure has recovered.\n\n' + body
     else:
         signature = _signature(row)
         if conf.get('mail_failure_once', True) and _mail_state().get(key) == signature:
@@ -345,8 +356,9 @@ def test_email(body, client=None, config=None):
         subject, text = compose(row, json.loads(row['params']), read_state(task_id).get('runtime', {}),
                                 conf['base_url'], test=True)
     else:
-        subject = '[TEST] APP Builder 邮件测试'
-        text = '这是一封测试邮件。还没有带 App 链接的成功构建，所以没有附构建内容。\n\n—— 由 APP Builder 自动发送'
+        subject = '[TEST] APP Builder email test'
+        text = ('This is a test email. There is no successful build with an App link yet, so no build '
+                'details are included.\n\n-- sent automatically by APP Builder')
     request = describe_request(conf['base_url'], issue, users, subject, text, conf['flavor'])
     entry = {'kind': 'test', 'task_id': task_id, 'issue': issue, 'to': users, 'subject': subject, 'body': text}
     try:

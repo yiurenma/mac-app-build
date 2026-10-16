@@ -66,7 +66,7 @@ class ExtractionTests(unittest.TestCase):
              {'sha': '2', 'subject': 'chore: bump', 'body': ''},
              {'sha': '3', 'subject': 'fix', 'body': 'Refs: ABC-7'}]
         found, amb = J.tickets_from_commits(c, PATTERN)
-        self.assertEqual(sorted(found), ['ABC-7', 'PBB-12'])
+        self.assertEqual(sorted(found), ['ABC-7', 'PBB-12', 'PBB-99'])   # every mentioned ticket
         self.assertEqual(amb, [])
 
     def test_every_key_in_the_winning_tier_is_updated(self):
@@ -77,7 +77,7 @@ class ExtractionTests(unittest.TestCase):
     def test_keys_in_a_lower_tier_are_not_mixed_in(self):
         c = [{'sha': '1', 'subject': 'PBB-1 and PBB-2 fix', 'body': 'also mentions PBB-99'}]
         found, _ = J.tickets_from_commits(c, PATTERN)
-        self.assertEqual(sorted(found), ['PBB-1', 'PBB-2'])
+        self.assertEqual(sorted(found), ['PBB-1', 'PBB-2', 'PBB-99'])   # every mentioned ticket
 
     def test_summary_falls_back_when_model_missing_or_returns_junk(self):
         self.assertEqual(L.tester_summary(None, 'PBB-1 fix'), 'PBB-1 fix')
@@ -176,7 +176,7 @@ class GitAndFlowTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, '单向前进'):
             api.between('a', 'b')
         rows = J.GitHubCommits(lambda path: [{'sha': 's', 'commit': {'message': 'T-1 x\ny'}}]).recent('b', 3)
-        self.assertEqual(rows, [{'sha': 's', 'subject': 'T-1 x', 'body': 'y'}])
+        self.assertEqual(rows, [{'sha': 's', 'author': '', 'subject': 'T-1 x', 'body': 'y'}])
 
     def test_first_run_only_records_baseline_and_touches_nothing(self):
         jira = FakeJira()
@@ -217,13 +217,20 @@ class GitAndFlowTests(unittest.TestCase):
         # transition. That used to fail the whole ticket (no comment either).
         class NoInTest(FakeJira):
             def plan_transition(self, key, name, issue_type='', rules=()):
-                raise J.NoSuchTransition('当前状态下没有名为 In Test 的流转: Ready for Test, No Longer Required')
+                error = J.NoSuchTransition('no In Test')
+                error.available = ['Ready for Test', 'No Longer Required']
+                raise error
         jira = NoInTest(status='Development')
         report, ledger = self.run_notify({'dry_run': False}, ledger={'develop': {'last_sha': self.shas[0]}}, client=jira)
         self.assertEqual([c[0] for c in jira.calls], ['comment', 'assign'])
-        self.assertIn('请手动处理', jira.calls[0][2])
+        self.assertIn('Please update it manually', jira.calls[0][2])
         self.assertEqual(report['errors'], [])
         self.assertIn('Ready for Test', report['needs_manual'][0]['reason'])
+        comment = jira.calls[0][2]
+        self.assertIn("there is no 'In Test' transition from the current status 'Development'", comment)
+        self.assertFalse(any('\u4e00' <= ch <= '\u9fff' for ch in comment))       # English only
+        self.assertIn('This ticket is included because of:', comment)
+        self.assertIn('/commit/', comment)
         self.assertEqual(report['status'], 'DONE')
 
     def test_required_text_field_without_rule_is_commented_and_assigned_but_not_moved(self):
@@ -231,7 +238,7 @@ class GitAndFlowTests(unittest.TestCase):
         jira = FakeJira(issue_type='Bug', required=text)
         report, ledger = self.run_notify({'dry_run': False}, ledger={'develop': {'last_sha': self.shas[0]}}, client=jira)
         self.assertEqual([c[0] for c in jira.calls], ['comment', 'assign'])
-        self.assertIn('请手动处理', jira.calls[0][2])
+        self.assertIn('Please update it manually', jira.calls[0][2])
         self.assertIn('Fix Note', report['needs_manual'][0]['reason'])
         self.assertEqual(report['status'], 'DONE')
 
@@ -344,7 +351,7 @@ class PRFirstTests(unittest.TestCase):
     def test_pr_title_and_branch_win_over_commit_text(self):
         c = [{'sha': 'a', 'subject': 'TRANSACT-1 wrong in commit', 'body': ''}]
         found, _ = J.tickets_from_commits(c, PATTERN, None, FakePRs({'a': pr('TRANSACT-2 right', '', 'feature/x')}))
-        self.assertEqual(list(found), ['TRANSACT-2'])
+        self.assertEqual(list(found), ['TRANSACT-2', 'TRANSACT-1'])   # the commit text's key is included too
         self.assertEqual(found['TRANSACT-2']['source'], 'PR标题/分支')
 
     def test_key_only_in_pr_description_is_found_when_commit_has_none(self):
@@ -352,6 +359,18 @@ class PRFirstTests(unittest.TestCase):
         found, _ = J.tickets_from_commits(c, PATTERN, None, FakePRs({'a': pr('fix layout', 'Jira: TRANSACT-210390\nbefore/after attached')}))
         self.assertEqual(list(found), ['TRANSACT-210390'])
         self.assertEqual(found['TRANSACT-210390']['source'], 'PR描述')
+
+    def test_every_pr_and_commit_that_mentions_a_ticket_is_recorded_with_its_author(self):
+        c = [{'sha': 'a1', 'author': 'Alice', 'subject': 'TRANSACT-9 part one', 'body': ''},
+             {'sha': 'b2', 'author': 'Bob', 'subject': 'more work', 'body': ''}]
+        prs = FakePRs({'a1': None, 'b2': {**pr('TRANSACT-9 part two', '', 'feature/x'), 'number': 42,
+                                          'url': 'https://gh.example.com/org/repo/pull/42', 'author': 'bob-gh'}})
+        found, _ = J.tickets_from_commits(c, PATTERN, None, prs)
+        info = {**found['TRANSACT-9'], 'repo_url': 'https://gh.example.com/org/repo'}
+        lines = J.describe_refs(info)
+        self.assertEqual(lines[0], '- Commit a1 "TRANSACT-9 part one" by Alice https://gh.example.com/org/repo/commit/a1')
+        self.assertEqual(lines[1], '- PR #42 "TRANSACT-9 part two" by bob-gh https://gh.example.com/org/repo/pull/42')
+        self.assertEqual(J.repo_web_url('https://gh.example.com/org/repo.git'), 'https://gh.example.com/org/repo')
 
     def test_branch_name_counts_as_pr_title_tier(self):
         c = [{'sha': 'a', 'subject': 'fix', 'body': ''}]

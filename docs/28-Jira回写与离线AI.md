@@ -92,3 +92,23 @@ Token 优先在页面里填写（存入 Mac 钥匙串，不写入配置、日志
 - **邮件**：每封一行：时间、类型（新包 / 构建失败 / 测试）、主题（可展开正文）、收件人、来自哪次构建、结果。记录保存在 `.appbuilder/mail_log.jsonl`，从这个版本开始记录。
 
 右上角可按 Jira 编号、标题、任务编号或邮件主题搜索。
+
+## Jira 评论和邮件内容（英文）
+
+发到 Jira 和邮件里的内容全部是英文。评论示例：
+
+```
+[app-build:42] New test build is ready: https://…/join/…
+
+This ticket is included because of:
+- PR #123 "TRANSACT-1 fix login" by alice https://github…/pull/123
+- Commit 1a2b3c4d5e "TRANSACT-1 follow-up" by Bob https://github…/commit/…
+
+Change: …
+
+Note: the status was not changed to 'In Test' automatically: there is no 'In Test' transition from the current status 'Development' (available: Ready for Test, No Longer Required). Please update it manually.
+```
+
+- PR 标题、分支名、PR 描述、提交标题、提交正文里**提到的每一张单**都会处理，只有 Jira 里不存在的单会跳过；不再按数量截断（超过“每轮最多处理 ticket 数”只在日志里提醒）。
+- 不管单子当前是什么状态、经办人是谁，都会写评论并转给 Reporter；只有状态改不了时留给人处理，并在评论里写明原因。
+- 失败邮件只引用英文内容：工具自己的中文原因和日志行不放进邮件，完整原因在 APP Builder 的任务里看。

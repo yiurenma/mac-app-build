@@ -84,7 +84,7 @@ def commits_between(repo, old, new, limit=500):
     if not old:
         return []
     out = subprocess.run(['git', '-C', str(repo), 'log', f'-n{int(limit)}', '--no-color',
-                          '--format=%H%x1f%s%x1f%b%x1e', f'{old}..{new}'],
+                          '--format=%H%x1f%an%x1f%s%x1f%b%x1e', f'{old}..{new}'],
                          capture_output=True, text=True, timeout=60)
     if out.returncode != 0:
         raise RuntimeError('git log 失败（基线提交可能已不在本仓库）: ' + out.stderr.strip()[:200])
@@ -93,27 +93,33 @@ def commits_between(repo, old, new, limit=500):
         record = record.strip('\n')
         if not record.strip():
             continue
-        sha, subject, body = (record.split('\x1f') + ['', ''])[:3]
-        rows.append({'sha': sha.strip(), 'subject': subject.strip(), 'body': body.strip()})
+        sha, author, subject, body = (record.split('\x1f') + ['', '', ''])[:4]
+        rows.append({'sha': sha.strip(), 'author': author.strip(), 'subject': subject.strip(), 'body': body.strip()})
     return rows
 
 
 def recent_commits(repo, new, count):
     out = subprocess.run(['git', '-C', str(repo), 'log', f'-n{int(count)}', '--no-color',
-                          '--format=%H%x1f%s%x1f%b%x1e', new], capture_output=True, text=True, timeout=60)
+                          '--format=%H%x1f%an%x1f%s%x1f%b%x1e', new], capture_output=True, text=True, timeout=60)
     if out.returncode != 0:
         return []
     rows = []
     for record in out.stdout.split('\x1e'):
         if record.strip():
-            sha, subject, body = (record.strip('\n').split('\x1f') + ['', ''])[:3]
-            rows.append({'sha': sha.strip(), 'subject': subject.strip(), 'body': body.strip()})
+            sha, author, subject, body = (record.strip('\n').split('\x1f') + ['', '', ''])[:4]
+            rows.append({'sha': sha.strip(), 'author': author.strip(), 'subject': subject.strip(), 'body': body.strip()})
     return rows
 
 
-def _split_message(sha, message):
+def _split_message(sha, message, author=''):
     subject, _, body = (message or '').partition('\n')
-    return {'sha': sha, 'subject': subject.strip(), 'body': body.strip()}
+    return {'sha': sha, 'author': author, 'subject': subject.strip(), 'body': body.strip()}
+
+
+def _from_api(c):
+    commit = c.get('commit') or {}
+    who = (c.get('author') or {}).get('login') or (commit.get('author') or {}).get('name') or ''
+    return _split_message(c.get('sha', ''), commit.get('message', ''), who)
 
 
 class GitHubCommits:
@@ -130,12 +136,12 @@ class GitHubCommits:
         commits = data.get('commits') or []
         if data.get('status') not in ('ahead', 'identical'):
             raise RuntimeError('GitHub 比较结果不是单向前进（基线可能已不在来源分支）')
-        rows = [_split_message(c.get('sha', ''), (c.get('commit') or {}).get('message', '')) for c in commits]
+        rows = [_from_api(c) for c in commits]
         return list(reversed(rows))[:limit]                    # newest first, like git log
 
     def recent(self, new, count):
         data = self._get(f'/commits?sha={quote(new)}&per_page={int(count)}')
-        return [_split_message(c.get('sha', ''), (c.get('commit') or {}).get('message', '')) for c in data or []]
+        return [_from_api(c) for c in data or []]
 
 
 def github_api_base(plugin_url):
@@ -190,38 +196,35 @@ class PRLookup:
             return None
         pr = next((p for p in prs if p.get('merged_at')), prs[0])
         info = {'number': pr.get('number'), 'title': pr.get('title') or '', 'body': pr.get('body') or '',
-                'head': (pr.get('head') or {}).get('ref', '')}
+                'head': (pr.get('head') or {}).get('ref', ''), 'url': pr.get('html_url') or '',
+                'author': (pr.get('user') or {}).get('login') or ''}
         self.cache[sha] = info
         return info
 
 
 def tickets_from_commits(commits, pattern, llm=None, prs=None):
-    """Return ({key: {'subject','body','sha','source'}}, [ambiguous commit subjects]).
-
-    The PR is the source of truth (the team rule is about the PR). Tiers, first hit wins:
-    PR title + PR branch, then PR description, then commit subject, then commit body.
-    Several different keys inside the winning tier: all of them are updated (a key Jira does
-    not know is ignored later). `llm` is kept for compatibility and no longer used here."""
+    """Return ({key: info}, []). Every ticket key mentioned anywhere - PR title, PR branch,
+    PR description, commit subject or commit body - is included. info keeps the first
+    commit's fields (sha, subject, body, author, source) and `refs`: every PR / commit that
+    mentioned the key, so the Jira comment can say why the ticket was picked up and by whom.
+    `llm` is kept for compatibility and no longer used here."""
     regex = re.compile(pattern)
-    found, ambiguous = {}, []
+    found = {}
     for c in commits:
         pr = prs.for_commit(c['sha']) if prs else None
-        tiers = []
+        places = []
         if pr:
-            tiers += [('PR标题/分支', pr['title'] + '\n' + pr['head']), ('PR描述', pr['body'])]
-        tiers += [('提交标题', c['subject']), ('提交正文', c['body'])]
-        keys, source = [], ''
-        for name, text in tiers:
-            keys = list(dict.fromkeys(regex.findall(text)))
-            if keys:
-                source = name
-                break
-        if not keys:
-            continue
-        for key in keys:  # every key in the winning tier is updated
-            found.setdefault(key, {**c, 'subject': (pr['title'] if pr and pr['title'] else c['subject']),
-                                   'source': source})
-    return found, ambiguous
+            places += [('PR标题/分支', pr['title'] + '\n' + pr['head']), ('PR描述', pr['body'])]
+        places += [('提交标题', c['subject']), ('提交正文', c['body'])]
+        ref = {'sha': c['sha'], 'subject': c['subject'], 'author': c.get('author', ''),
+               'pr': ({k: pr.get(k) for k in ('number', 'title', 'url', 'author')} if pr else None)}
+        for name, text in places:
+            for key in dict.fromkeys(regex.findall(text or '')):
+                info = found.setdefault(key, {**c, 'subject': (pr['title'] if pr and pr['title'] else c['subject']),
+                                              'source': name, 'refs': []})
+                if all(r['sha'] != ref['sha'] for r in info['refs']):
+                    info['refs'].append(ref)
+    return found, []
 
 
 def parse_field_rules(text):
@@ -377,7 +380,9 @@ class JiraClient:
         options = self.transitions(key, expand=True)
         wanted = [t for t in options if t.get('name', '').strip().lower() == name.strip().lower()]
         if not wanted:
-            raise NoSuchTransition('当前状态下没有名为 ' + name + ' 的流转: ' + ', '.join(t.get('name', '?') for t in options))
+            error = NoSuchTransition('当前状态下没有名为 ' + name + ' 的流转: ' + ', '.join(t.get('name', '?') for t in options))
+            error.available = [t.get('name', '?') for t in options]
+            raise error
         payload, missing, bad, auto = plan_fields(wanted[0].get('fields'), issue_type, rules)
         return {'id': wanted[0]['id'], 'fields': payload, 'missing': missing, 'bad': bad, 'auto': auto}
 
@@ -388,8 +393,56 @@ class JiraClient:
         return self._call('POST', f'/rest/api/2/issue/{quote(key)}/transitions', body)
 
 
+def repo_web_url(plugin_url):
+    """https://host/org/repo(.git) -> https://host/org/repo, or '' when it is not like that."""
+    parts = urlsplit(plugin_url or '')
+    path = parts.path.strip('/').removesuffix('.git')
+    if parts.scheme != 'https' or not parts.netloc or path.count('/') != 1:
+        return ''
+    return f'https://{parts.netloc}/{path}'
+
+
+def describe_refs(info):
+    """English lines naming each PR / commit that pulled the ticket in, and who made it."""
+    repo = info.get('repo_url', '')
+    refs = info.get('refs') or [{'sha': info.get('sha', ''), 'subject': info.get('subject', ''),
+                                 'author': info.get('author', ''), 'pr': None}]
+    lines, seen_prs = [], set()
+    for ref in refs:
+        pr = ref.get('pr')
+        if pr and pr.get('number') is not None:
+            if pr['number'] in seen_prs:
+                continue
+            seen_prs.add(pr['number'])
+            url = pr.get('url') or (f'{repo}/pull/{pr["number"]}' if repo else '')
+            who = f' by {pr["author"]}' if pr.get('author') else ''
+            lines.append(f'- PR #{pr["number"]} "{pr.get("title") or ""}"{who}' + (f' {url}' if url else ''))
+        else:
+            sha = ref.get('sha') or ''
+            url = f'{repo}/commit/{sha}' if repo and sha else ''
+            who = f' by {ref["author"]}' if ref.get('author') else ''
+            lines.append(f'- Commit {sha[:10]} "{ref.get("subject") or ""}"{who}' + (f' {url}' if url else ''))
+    return lines
+
+
+def _manual_reason(exc_or_plan, status, name):
+    """Plain English for the Jira comment (Jira readers do not see this tool's Chinese UI)."""
+    if isinstance(exc_or_plan, NoSuchTransition):
+        available = ', '.join(getattr(exc_or_plan, 'available', [])) or 'none'
+        return f"there is no '{name}' transition from the current status '{status}' (available: {available})"
+    if isinstance(exc_or_plan, dict):
+        parts = []
+        if exc_or_plan.get('missing'):
+            parts.append('required field(s) without a configured value: ' + ', '.join(exc_or_plan['missing']))
+        if exc_or_plan.get('bad'):
+            parts.append('configured value not allowed for: ' + ', '.join(b.split(':', 1)[0] for b in exc_or_plan['bad']))
+        return '; '.join(parts)
+    return f"the '{name}' transition could not be checked ({type(exc_or_plan).__name__})"
+
+
 def process_ticket(client, key, info, link, build_label, conf, llm, dry_run):
     marker = f'[app-build:{build_label}]'
+    name = conf['transition_name']
     result = {'key': key, 'steps': []}
     try:
         issue = client.issue(key)
@@ -401,34 +454,32 @@ def process_ticket(client, key, info, link, build_label, conf, llm, dry_run):
     status = (fields.get('status') or {}).get('name', '')
     issue_type = (fields.get('issuetype') or {}).get('name', '')
     summary = tester_summary(llm, info['subject'], info.get('body', ''))
-    need_move = status.strip().lower() != conf['transition_name'].strip().lower()
-    plan, problem = None, ''
+    refs = describe_refs(info)
+    result['refs'] = refs
+    need_move = status.strip().lower() != name.strip().lower()
+    plan = None
     if need_move:
+        # Whatever the status, the ticket still gets the comment and the assignment; only the
+        # status change is left to a person when it cannot be done automatically.
         try:
-            plan = client.plan_transition(key, conf['transition_name'], issue_type, parse_field_rules(conf.get('transition_fields')))
+            plan = client.plan_transition(key, name, issue_type, parse_field_rules(conf.get('transition_fields')))
+            if plan['missing'] or plan['bad']:
+                result['manual'] = _manual_reason(plan, status, name)
         except UnknownTicket:
             raise
-        except NoSuchTransition as exc:
-            # e.g. still in Development: comment and assign anyway, leave the status to a person.
-            problem = safe_text(str(exc))[:200]
-            result['manual'] = problem
         except Exception as exc:
-            if not dry_run:
-                raise
-            problem = safe_text(str(exc))[:160]
-        if plan and (plan['missing'] or plan['bad']):
-            problem = '；'.join(([('必填字段未配置值：' + '、'.join(plan['missing']))] if plan['missing'] else []) + plan['bad'])
-            result['manual'] = problem
-    text = f'{marker} 新测试包已构建：{link}\n改动：{summary}'
+            result['manual'] = _manual_reason(exc, status, name)
+    text = f'{marker} New test build is ready: {link}'
+    if refs:
+        text += '\n\nThis ticket is included because of:\n' + '\n'.join(refs)
+    text += f'\n\nChange: {summary}'
     if result.get('manual'):
-        text += f'\n（状态未自动改为 {conf["transition_name"]}，请手动处理：{problem}）'
+        text += f"\n\nNote: the status was not changed to '{name}' automatically: {result['manual']}. Please update it manually."
     if dry_run:
-        step = (f'transition -> {conf["transition_name"]} (当前 {status}, 类型 {issue_type or "?"})' if need_move
-                else f'已在 {conf["transition_name"]}，不需要流转')
+        step = (f'transition -> {name} (当前 {status}, 类型 {issue_type or "?"})' if need_move
+                else f'已在 {name}，不需要流转')
         if result.get('manual'):
-            step += f'；需手动：{problem}'
-        elif problem:
-            step += f'；无法预检：{problem}'
+            step += f'；需手动：{result["manual"]}'
         elif plan and plan.get('auto'):
             step += '；自动选第一个可选值：' + '、'.join(plan['auto'])
         elif plan and plan['fields']:
@@ -442,8 +493,11 @@ def process_ticket(client, key, info, link, build_label, conf, llm, dry_run):
         client.assign(key, reporter)
         result['steps'].append('assign')
     if need_move and not result.get('manual'):
-        client.do_transition(key, plan)
-        result['steps'].append('transition' + (' (自动选: ' + '、'.join(plan['auto']) + ')' if plan.get('auto') else ''))
+        try:
+            client.do_transition(key, plan)
+            result['steps'].append('transition' + (' (自动选: ' + '、'.join(plan['auto']) + ')' if plan.get('auto') else ''))
+        except Exception as exc:
+            result['manual'] = f"moving to '{name}' failed ({safe_text(str(exc))[:120]})"
     return result
 
 
@@ -549,7 +603,12 @@ def _notify_jira(task_id, client=None, llm=None, config=None, preview=None):
         except Exception as exc:
             action('JIRA', safe_text(f'PR 查询不可用，改用提交信息: {exc}'))
     found, ambiguous = tickets_from_commits(commits, conf['key_pattern'], llm, prs)
-    keys = list(found)[:conf['max_tickets_per_run']]
+    repo_url = repo_web_url(params.get('plugin_url') or (config.get('github') or {}).get('plugin_url', ''))
+    for info in found.values():
+        info['repo_url'] = repo_url
+    keys = list(found)                       # every mentioned ticket; only unknown keys are skipped
+    if len(keys) > conf['max_tickets_per_run']:
+        action('JIRA', f'本次提到 {len(keys)} 张 ticket，超过提醒值 {conf["max_tickets_per_run"]}；仍全部处理')
     dry = bool(conf['dry_run'])
     results, errors, ignored = [], [], []
     if keys:
