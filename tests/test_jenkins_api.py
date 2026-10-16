@@ -245,6 +245,42 @@ class QueueIdentityTests(unittest.TestCase):
         with self.assertRaisesRegex(NeedsAttention, 'OTHER.*本次'):
             api(self.http(item)).resolve_queue_build(BRANCH_JOB, 77)
 
+    def test_queue_record_refusing_the_token_after_start_uses_the_builds_queue_id(self):
+        # Real case (GB folder): 200 while queued, then 403 once the build started; the token
+        # can still read the job. Must not drop to a fresh browser and stop.
+        http = FakeHttp(routes={BRANCH_JOB + 'api/json': (200, {'builds': [{'number': 1, 'queueId': 77}]})})
+        answers = [(200, {'id': 77, 'task': {'url': BRANCH_JOB}}), (403, {})]
+        base = http.request
+        def request(method, url, data=None, accept='application/json'):
+            if url.split('?')[0] == HOST + '/queue/item/77/api/json':
+                status, body = answers.pop(0) if len(answers) > 1 else answers[0]
+                http.calls.append((method, url, data))
+                return status, url, {'Content-Type': 'application/json'}, json.dumps(body).encode()
+            return base(method, url, data, accept)
+        http.request = request
+        found = api(http).resolve_queue_build(BRANCH_JOB, 77)
+        self.assertEqual(found['build_url'], BRANCH_JOB + '1/')
+        self.assertFalse(any(c[0] == 'POST' for c in http.calls))
+
+    def test_queue_refused_and_job_refused_means_the_token_is_unusable(self):
+        http = FakeHttp(routes={HOST + '/queue/item/77/api/json': (403, {}), BRANCH_JOB + 'api/json': (403, {})})
+        with self.assertRaises(TokenUnavailable):
+            api(http).resolve_queue_build(BRANCH_JOB, 77)
+
+    def test_queue_refused_and_build_not_there_yet_keeps_waiting_then_finds_it(self):
+        jobs = [{'builds': []}, {'builds': [{'number': 2, 'queueId': 77}]}]
+        http = FakeHttp(routes={HOST + '/queue/item/77/api/json': (403, {})})
+        base = http.request
+        def request(method, url, data=None, accept='application/json'):
+            if url.split('?')[0] == BRANCH_JOB + 'api/json':
+                body = jobs.pop(0) if len(jobs) > 1 else jobs[0]
+                return 200, url, {'Content-Type': 'application/json'}, json.dumps(body).encode()
+            return base(method, url, data, accept)
+        http.request = request
+        with patch('appbuilder.jenkins_api.time.sleep'):
+            found = api(http).resolve_queue_build(BRANCH_JOB, 77)
+        self.assertEqual(found['build_url'], BRANCH_JOB + '2/')
+
     def test_expired_queue_item_is_linked_by_the_builds_own_queue_id(self):
         state = {'runtime': {'gmx_formal_dispatch': {
             'job_url': BRANCH_JOB, 'attempt_id': 'a1', 'state': 'ACCEPTED', 'policy': 'receipt-v1',

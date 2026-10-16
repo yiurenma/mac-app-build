@@ -319,7 +319,19 @@ class ApiJenkins:
             raise NeedsAttention('队列查询目标或排队编号无效')
         deadline = time.monotonic() + 60 * max(0.001, min(180, float(self.conf.get('queue_timeout_minutes', 12))))
         while time.monotonic() < deadline:
-            status, item = self.http.get_json(url, tree='id,cancelled,task[url],executable[number,url]')
+            try:
+                status, item = self.http.get_json(url, tree='id,cancelled,task[url],executable[number,url]')
+            except TokenUnavailable:
+                # Seen on the GB folder: the queue record answers 200 while waiting and 403 once
+                # the build has started, although the token can read the job. The build carries
+                # our queue id, so look it up there with the same token. Only if the job itself is
+                # refused does the token count as unusable.
+                found = self.find_build_by_queue_id(job_url, queue_id, strict=True)
+                if found:
+                    return found
+                action('QUEUE', f'{self.site} 队列记录拒绝了 Token；Job 里还没有 queueId={queue_id} 的 Build，继续等待')
+                time.sleep(min(max(0.01, self.poll), max(0, deadline - time.monotonic())))
+                continue
             if status in (404, 410):
                 raise NeedsAttention('本次队列记录已消失，无法确定 Build；保留回执，不猜编号或重新提交')
             if status != 200 or not isinstance(item, dict):
@@ -344,9 +356,15 @@ class ApiJenkins:
             time.sleep(min(max(0.01, self.poll), max(0, deadline - time.monotonic())))
         raise NeedsAttention('等待本次队列对应 Build 超时；保留回执，Resume 继续同一队列，不重新提交')
 
-    def find_build_by_queue_id(self, job_url, queue_id):
-        """The build of THIS job whose recorded queueId is ours, or None. Read-only."""
-        status, job = self.http.get_json(job_url, tree='builds[number,queueId]{0,100}')
+    def find_build_by_queue_id(self, job_url, queue_id, strict=False):
+        """The build of THIS job whose recorded queueId is ours, or None. Read-only.
+        strict: an authentication refusal on the job is raised (TokenUnavailable)."""
+        try:
+            status, job = self.http.get_json(job_url, tree='builds[number,queueId]{0,100}')
+        except TokenUnavailable:
+            if strict:
+                raise
+            return None
         if status != 200 or not isinstance(job, dict):
             return None
         hits = [b['number'] for b in job.get('builds') or []
