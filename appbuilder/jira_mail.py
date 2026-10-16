@@ -254,10 +254,14 @@ def notify_team(task_id, client=None, config=None):
     if not conf.get('mail_enabled'):
         return
     runtime = read_state(task_id).get('runtime', {})
-    if (runtime.get('jira_mail') or {}).get('status') in ('SENT', 'SUPPRESSED'):
-        return
     params = json.loads(row['params'])
     kind = 'success' if status == 'SUCCESS' else 'failure'
+    previous = runtime.get('jira_mail') or {}
+    # One email per OUTCOME of this task: a failure email must not block the success email
+    # after Resume, and a resumed task failing for a new reason is reported again.
+    if previous.get('status') in ('SENT', 'SUPPRESSED') and previous.get('kind', 'failure') == kind \
+            and (kind == 'success' or previous.get('signature') == _signature(row)):
+        return
 
     def record(value):
         patch_runtime(task_id, jira_mail=value)
@@ -283,7 +287,7 @@ def notify_team(task_id, client=None, config=None):
     else:
         signature = _signature(row)
         if conf.get('mail_failure_once', True) and _mail_state().get(key) == signature:
-            return record({'status': 'SUPPRESSED', 'kind': kind,
+            return record({'status': 'SUPPRESSED', 'kind': kind, 'signature': signature,
                            'reason': '同一原因的失败已经通知过，恢复成功前不再重复发'})
         from .web import _jenkins_links
         try:
@@ -304,7 +308,8 @@ def notify_team(task_id, client=None, config=None):
     elif recovered:
         _mail_state(lambda data: {k: v for k, v in data.items() if k != key})
     log_mail({**entry, 'status': 'SENT'})
-    record({'status': 'SENT', 'kind': kind, 'issue': issue, 'to': users, 'subject': subject})
+    record({'status': 'SENT', 'kind': kind, 'issue': issue, 'to': users, 'subject': subject,
+            'signature': _signature(row) if kind == 'failure' else None})
 
 
 def latest_success():

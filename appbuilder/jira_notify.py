@@ -284,6 +284,10 @@ def plan_fields(required, issue_type, rules):
     return payload, missing, bad, auto
 
 
+class NoSuchTransition(RuntimeError):
+    """The ticket's current status has no transition with the configured name."""
+
+
 class JiraNotFound(RuntimeError):
     """HTTP 404 from Jira (no such issue, or not visible to this token)."""
 
@@ -373,7 +377,7 @@ class JiraClient:
         options = self.transitions(key, expand=True)
         wanted = [t for t in options if t.get('name', '').strip().lower() == name.strip().lower()]
         if not wanted:
-            raise RuntimeError('当前状态下没有名为 ' + name + ' 的流转: ' + ', '.join(t.get('name', '?') for t in options))
+            raise NoSuchTransition('当前状态下没有名为 ' + name + ' 的流转: ' + ', '.join(t.get('name', '?') for t in options))
         payload, missing, bad, auto = plan_fields(wanted[0].get('fields'), issue_type, rules)
         return {'id': wanted[0]['id'], 'fields': payload, 'missing': missing, 'bad': bad, 'auto': auto}
 
@@ -404,6 +408,10 @@ def process_ticket(client, key, info, link, build_label, conf, llm, dry_run):
             plan = client.plan_transition(key, conf['transition_name'], issue_type, parse_field_rules(conf.get('transition_fields')))
         except UnknownTicket:
             raise
+        except NoSuchTransition as exc:
+            # e.g. still in Development: comment and assign anyway, leave the status to a person.
+            problem = safe_text(str(exc))[:200]
+            result['manual'] = problem
         except Exception as exc:
             if not dry_run:
                 raise

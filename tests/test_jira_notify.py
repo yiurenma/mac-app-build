@@ -212,6 +212,20 @@ class GitAndFlowTests(unittest.TestCase):
         self.assertIn('Root Cause=Code', report['tickets'][0]['steps'][-1])
         self.assertEqual(ledger['develop']['last_sha'], self.shas[2])
 
+    def test_status_without_an_in_test_transition_is_commented_and_assigned_but_not_moved(self):
+        # Real case: tickets still in Development / Ready for Development have no 'In Test'
+        # transition. That used to fail the whole ticket (no comment either).
+        class NoInTest(FakeJira):
+            def plan_transition(self, key, name, issue_type='', rules=()):
+                raise J.NoSuchTransition('当前状态下没有名为 In Test 的流转: Ready for Test, No Longer Required')
+        jira = NoInTest(status='Development')
+        report, ledger = self.run_notify({'dry_run': False}, ledger={'develop': {'last_sha': self.shas[0]}}, client=jira)
+        self.assertEqual([c[0] for c in jira.calls], ['comment', 'assign'])
+        self.assertIn('请手动处理', jira.calls[0][2])
+        self.assertEqual(report['errors'], [])
+        self.assertIn('Ready for Test', report['needs_manual'][0]['reason'])
+        self.assertEqual(report['status'], 'DONE')
+
     def test_required_text_field_without_rule_is_commented_and_assigned_but_not_moved(self):
         text = {'customfield_7': {'required': True, 'name': 'Fix Note', 'schema': {'type': 'string'}}}
         jira = FakeJira(issue_type='Bug', required=text)

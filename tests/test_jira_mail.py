@@ -201,6 +201,32 @@ class NotifyTeamTests(Fixture):
             M.notify_team(self.row['id'], client=jira)
         self.assertEqual(len(jira.calls), 4)
 
+    def test_resumed_task_that_succeeds_still_gets_the_success_email(self):
+        # Real case: NEEDS_ATTENTION sent a failure email; after Resume the same task succeeded
+        # but the old 'SENT' record blocked the new-package email.
+        self.save(mail_enabled=True, mail_issue='TRANSACT-9', mail_users='a', base_url=BASE)
+        jira = FakeJira()
+        with patch('appbuilder.web._jenkins_links', return_value=[]):
+            self.failed('202610150900-aaaaaa')
+            M.notify_team(self.row['id'], client=jira)
+        self.row = {**self.row, 'status': 'SUCCESS'}
+        self.state['runtime'].update(runtime())
+        M.notify_team(self.row['id'], client=jira)
+        M.notify_team(self.row['id'], client=jira)               # still only once per outcome
+        self.assertEqual([c[2]['subject'].split(']')[0] for c in jira.calls], ['[构建失败', '[新测试包'])
+        self.assertEqual(self.state['runtime']['jira_mail']['kind'], 'success')
+
+    def test_resumed_task_failing_for_a_new_reason_is_reported_again(self):
+        self.save(mail_enabled=True, mail_issue='TRANSACT-9', mail_users='a', base_url=BASE)
+        jira = FakeJira()
+        with patch('appbuilder.web._jenkins_links', return_value=[]):
+            self.failed('202610150900-aaaaaa', stage='PLUGIN_JENKINS', note='Plugin 失败')
+            M.notify_team(self.row['id'], client=jira)
+            M.notify_team(self.row['id'], client=jira)           # same failure: once
+            self.row = {**self.row, 'stage': 'GMX_JENKINS', 'note': 'GMX 失败'}
+            M.notify_team(self.row['id'], client=jira)
+        self.assertEqual(len(jira.calls), 2)
+
     def test_dedupe_can_be_switched_off(self):
         self.save(mail_enabled=True, mail_issue='TRANSACT-9', mail_users='a', base_url=BASE, mail_failure_once=False)
         jira = FakeJira()
