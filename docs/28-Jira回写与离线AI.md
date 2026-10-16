@@ -2,7 +2,7 @@
 
 ## 做什么
 任务 `SUCCESS` 后：找出自上次处理以来合入来源分支（如 develop）的提交，找 Jira 号时以 PR 为主要来源（先 PR 标题和分支名，再 PR 描述，找不到再退回提交标题/正文），对每个 ticket：
-1. 写 comment（含 App 链接，带 `[app-build:<构建号>]` 标记，重复运行不会重复评论）；
+1. 写 comment（含 App 链接，带 `[app-build:<任务编号>]` 标记：同一个构建任务重复运行不会重复评论；不同构建各写一条，GMX 构建号不作为判断依据，因为每个新分支都从 #2 开始）；
 2. assign 给 Reporter；
 3. 状态流转到 `In Test`（已在该状态则跳过）。
 
@@ -98,7 +98,7 @@ Token 优先在页面里填写（存入 Mac 钥匙串，不写入配置、日志
 发到 Jira 和邮件里的内容全部是英文。评论示例：
 
 ```
-[app-build:42] New test build is ready: https://…/join/…
+[app-build:202610161800-72a546] New test build is ready (GMX build #2): https://…/join/…
 
 This ticket is included because of:
 - PR #123 "TRANSACT-1 fix login" by alice https://github…/pull/123

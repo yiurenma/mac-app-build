@@ -440,7 +440,9 @@ def _manual_reason(exc_or_plan, status, name):
     return f"the '{name}' transition could not be checked ({type(exc_or_plan).__name__})"
 
 
-def process_ticket(client, key, info, link, build_label, conf, llm, dry_run):
+def process_ticket(client, key, info, link, build_label, conf, llm, dry_run, gmx_build=None):
+    # The marker identifies THIS build task, so a ticket gets one comment per build it is in.
+    # (The GMX build number alone is not unique: every new upload branch starts at #2.)
     marker = f'[app-build:{build_label}]'
     name = conf['transition_name']
     result = {'key': key, 'steps': []}
@@ -469,7 +471,7 @@ def process_ticket(client, key, info, link, build_label, conf, llm, dry_run):
             raise
         except Exception as exc:
             result['manual'] = _manual_reason(exc, status, name)
-    text = f'{marker} New test build is ready: {link}'
+    text = f'{marker} New test build is ready' + (f' (GMX build #{gmx_build})' if gmx_build else '') + f': {link}'
     if refs:
         text += '\n\nThis ticket is included because of:\n' + '\n'.join(refs)
     text += f'\n\nChange: {summary}'
@@ -616,7 +618,7 @@ def _notify_jira(task_id, client=None, llm=None, config=None, preview=None):
                                       timeout=conf['timeout_seconds'], ca_bundle=conf.get('ca_bundle'))
     for key in keys:
         try:
-            results.append(process_ticket(client, key, found[key], link, build, conf, llm, dry))
+            results.append(process_ticket(client, key, found[key], link, task_id, conf, llm, dry, gmx_build=build))
         except UnknownTicket:
             ignored.append(key)
             action('JIRA', f'{key} 在 Jira 中查不到，已忽略')
