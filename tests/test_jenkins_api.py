@@ -224,6 +224,45 @@ class TokenEndpointTests(unittest.TestCase):
 BRANCH_JOB = HOST + '/job/uploads/job/upload%2FAUTO-1/'
 
 
+class ParameterDetectionTests(unittest.TestCase):
+    def test_minimal_query_finds_parameters_the_rich_query_missed(self):
+        # Real GMX Jenkins: rich tree -> no parameterDefinitions; minimal tree -> all of them.
+        rich = {'buildable': True, 'property': [{'_class': 'x.BranchJobProperty'}]}
+        minimal = {'buildable': True, 'property': [
+            {'_class': 'org.jenkinsci.plugins.workflow.multibranch.BranchJobProperty'},
+            {'_class': 'hudson.model.ParametersDefinitionProperty', 'parameterDefinitions': [
+                {'_class': 'hudson.plugins.validating_string_parameter.ValidatingStringParameterDefinition', 'name': 'ENTITIES'},
+                {'_class': 'hudson.model.BooleanParameterDefinition', 'name': 'SYNC_UPLOAD'},
+                {'_class': 'hudson.model.StringParameterDefinition', 'name': 'CUSTOM_FOLDER'},
+                {'_class': 'hudson.model.BooleanParameterDefinition', 'name': 'SKIP_TEST'},
+                {'_class': 'hudson.model.BooleanParameterDefinition', 'name': 'FORCE'},
+                {'_class': 'hudson.model.BooleanParameterDefinition', 'name': 'KEEP_ALIVE'},
+                {'_class': 'hudson.model.ChoiceParameterDefinition', 'name': 'BUILD_TYPE'},
+                {'_class': 'hudson.model.StringParameterDefinition', 'name': 'SIGNING_REPO_BRANCH'}]}]}
+        http = FakeHttp()
+        trees = []
+        def request(method, url, data=None, accept='application/json'):
+            from urllib.parse import parse_qs, urlsplit
+            tree = parse_qs(urlsplit(url).query).get('tree', [''])[0]
+            trees.append(tree)
+            body = minimal if tree.endswith('parameterDefinitions[_class,name]]') else rich
+            return 200, url, {'Content-Type': 'application/json'}, json.dumps(body).encode()
+        http.request = request
+        jenkins = api(http)
+        self.assertEqual(jenkins.mode(JOB), 'parameters')
+        self.assertEqual(len(trees), 3)
+        _, defs = jenkins._job(JOB)
+        self.assertEqual(defs['SYNC_UPLOAD']['type'], 'BooleanParameterDefinition')    # type from _class
+        values = jenkins._gmx_values(defs, 'UK', 'PayByBank')
+        self.assertEqual((values['ENTITIES'], values['SYNC_UPLOAD']), ('UK', 'true'))
+
+    def test_really_no_parameters_says_which_properties_were_there(self):
+        http = FakeHttp(routes={JOB + 'api/json': (200, {'buildable': True, 'property': [{'_class': 'a.BranchJobProperty'}]})})
+        with patch('appbuilder.jenkins_api.action') as log:
+            self.assertEqual(api(http).mode(JOB), 'build')
+        self.assertTrue(any('BranchJobProperty' in str(c) for c in log.call_args_list))
+
+
 class QueueIdentityTests(unittest.TestCase):
     def http(self, queue_item=None, builds=None):
         routes = {}
