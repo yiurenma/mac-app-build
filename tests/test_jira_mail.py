@@ -91,25 +91,26 @@ class ComposeTests(unittest.TestCase):
         report = {'status': 'DONE', 'tickets': [{'key': 'TRANSACT-1', 'summary': 'Fix login'}],
                   'errors': [{'key': 'TRANSACT-2', 'error': 'x'}], 'needs_manual': [{'key': 'TRANSACT-1', 'reason': 'r'}]}
         subject, body = M.compose(self.row, PARAMS, runtime(report), BASE)
-        self.assertEqual(subject, '[新测试包] UK PayByBank · GMX #42')
-        for text in (LINK, 'develop → release/v1.3.1', '#42', 'TRANSACT-1 Fix login  https://jira.example.com/browse/TRANSACT-1',
-                     'TRANSACT-2（自动更新失败', '状态需手动修改'):
+        self.assertEqual(subject, '[New test build] UK PayByBank - GMX #42')
+        for text in (LINK, 'develop -> release/v1.3.1', '#42', 'TRANSACT-1 Fix login  https://jira.example.com/browse/TRANSACT-1',
+                     'TRANSACT-2  https://jira.example.com/browse/TRANSACT-2  (could not be updated automatically',
+                     '(status needs a manual update)'):
             self.assertIn(text, body)
 
     def test_dry_run_baseline_and_no_jira_are_said_plainly(self):
         _, body = M.compose(self.row, PARAMS, runtime({'status': 'DRY_RUN', 'tickets': []}), BASE)
-        self.assertIn('本次没有需要更新的 Jira', body)
+        self.assertIn('No Jira tickets in this build', body)
         _, body = M.compose(self.row, PARAMS, runtime({'status': 'DRY_RUN', 'tickets': [{'key': 'A-1'}]}), BASE)
-        self.assertIn('演练模式', body)
+        self.assertIn('rehearsal mode', body)
         _, body = M.compose(self.row, PARAMS, runtime({'status': 'BASELINE'}), BASE)
-        self.assertIn('首次运行', body)
+        self.assertIn('first run', body)
         _, body = M.compose(self.row, PARAMS, runtime(), BASE)
-        self.assertIn('本次未自动更新', body)
+        self.assertIn('not updated for this build', body)
 
     def test_test_mail_is_marked(self):
         subject, body = M.compose(self.row, PARAMS, runtime(), BASE, test=True)
         self.assertTrue(subject.startswith('[TEST]'))
-        self.assertIn('测试邮件', body)
+        self.assertIn('This is a test email', body)
 
 
 class NotifyTeamTests(Fixture):
@@ -152,7 +153,7 @@ class NotifyTeamTests(Fixture):
         self.assertEqual(jira.calls, [])
         self.assertEqual(self.state['runtime']['jira_mail']['status'], 'SKIPPED')
 
-    def failed(self, task_id, stage='GMX_JENKINS', note='GMX Build #41 失败'):
+    def failed(self, task_id, stage='GMX_JENKINS', note='GMX Build #41 failed'):
         self.row = {**self.row, 'id': task_id, 'status': 'FAILED', 'stage': stage, 'note': note}
         self.state = {'runtime': {}}
 
@@ -160,7 +161,7 @@ class NotifyTeamTests(Fixture):
         self.save(mail_enabled=True, mail_issue='TRANSACT-9', mail_users='a', base_url=BASE)
         task_dir = Path(self.tmp.name) / 'task'
         task_dir.mkdir()
-        (task_dir / 'run.log').write_text('ok\n[FAILED] GMX 构建失败 password=SECRET\nfinal\n')
+        (task_dir / 'run.log').write_text('ok\n[FAILED] GMX build failed password=SECRET\n[FAILED] 中文日志行\nfinal\n')
         self.failed('202610150900-aaaaaa')
         jira = FakeJira()
         links = [{'label': 'GMX Build #41', 'url': 'https://jenkins.example.com/job/x/41/'},
@@ -168,9 +169,10 @@ class NotifyTeamTests(Fixture):
         with patch('appbuilder.web._jenkins_links', return_value=links):
             M.notify_team(self.row['id'], client=jira)
         body = jira.calls[0][2]
-        self.assertEqual(body['subject'], '[构建失败] UK PayByBank · 失败在 GMX 构建')
-        for text in ('失败步骤：GMX 构建', '原因：GMX Build #41 失败',
-                     'GMX Build #41  https://jenkins.example.com/job/x/41/', '[FAILED] GMX 构建失败'):
+        self.assertEqual(body['subject'], '[Build failed] UK PayByBank - failed at GMX build')
+        self.assertFalse(M.CJK.search(body['textBody']))              # English only, Chinese log lines left out
+        for text in ('Failed at: GMX build', 'Reason: GMX Build #41 failed',
+                     'GMX Build #41  https://jenkins.example.com/job/x/41/', '[FAILED] GMX build failed'):
             self.assertIn(text, body['textBody'])
         self.assertNotIn('GMX Job', body['textBody'])           # only concrete builds, not the job page
         self.assertNotIn('SECRET', body['textBody'])
@@ -182,9 +184,9 @@ class NotifyTeamTests(Fixture):
         self.save(mail_enabled=True, mail_issue='TRANSACT-9', mail_users='a', base_url=BASE)
         jira = FakeJira()
         with patch('appbuilder.web._jenkins_links', return_value=[]):
-            self.failed('202610150900-aaaaaa', note='GMX Build #41 失败')
+            self.failed('202610150900-aaaaaa', note='GMX Build #41 failed')
             M.notify_team(self.row['id'], client=jira)
-            self.failed('202610150900-bbbbbb', note='GMX Build #42 失败')     # same reason, other build number
+            self.failed('202610150900-bbbbbb', note='GMX Build #42 failed')     # same reason, other build number
             M.notify_team(self.row['id'], client=jira)
             self.assertEqual(len(jira.calls), 1)
             self.assertEqual(self.state['runtime']['jira_mail']['status'], 'SUPPRESSED')
@@ -195,7 +197,7 @@ class NotifyTeamTests(Fixture):
         self.row = {'id': '202610150900-dddddd', 'status': 'SUCCESS', 'params': json.dumps(PARAMS)}
         self.state = {'runtime': runtime()}
         M.notify_team(self.row['id'], client=jira)
-        self.assertTrue(jira.calls[2][2]['textBody'].startswith('之前的构建失败已恢复'))
+        self.assertTrue(jira.calls[2][2]['textBody'].startswith('The earlier build failure has recovered'))
         with patch('appbuilder.web._jenkins_links', return_value=[]):
             self.failed('202610150900-eeeeee', stage='PLUGIN_JENKINS', note='Plugin 失败')
             M.notify_team(self.row['id'], client=jira)
@@ -213,7 +215,7 @@ class NotifyTeamTests(Fixture):
         self.state['runtime'].update(runtime())
         M.notify_team(self.row['id'], client=jira)
         M.notify_team(self.row['id'], client=jira)               # still only once per outcome
-        self.assertEqual([c[2]['subject'].split(']')[0] for c in jira.calls], ['[构建失败', '[新测试包'])
+        self.assertEqual([c[2]['subject'].split(']')[0] for c in jira.calls], ['[Build failed', '[New test build'])
         self.assertEqual(self.state['runtime']['jira_mail']['kind'], 'success')
 
     def test_resumed_task_failing_for_a_new_reason_is_reported_again(self):

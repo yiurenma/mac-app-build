@@ -107,9 +107,10 @@ def tester_summary(llm, subject, body=''):
     if not llm:
         return fallback
     data = llm.ask_json(
-        '你把一条提交说明改写成给测试人员看的一两句中文，说明改了什么、需要重点验证什么。'
-        '不得添加提交说明里没有的信息。只输出 JSON：{"summary": "<文字>"}。',
-        f'提交标题: {subject}\n提交正文:\n{body[:2000]}')
+        'Rewrite a commit message as one or two plain English sentences for testers: what changed '
+        'and what to verify. Do not add anything that is not in the message. Output only JSON: '
+        '{"summary": "<text>"}.',
+        f'Commit subject: {subject}\nCommit body:\n{body[:2000]}')
     text = (data or {}).get('summary')
     if isinstance(text, str) and 3 <= len(text.strip()) <= 400:
         return text.strip()
