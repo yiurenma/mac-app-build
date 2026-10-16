@@ -26,7 +26,7 @@ class PluginReleaseRollbackTests(unittest.TestCase):
     def test_exact_release_job_urls_use_branch_child_not_folder(self):
         config = load_config()
         parent = ('https://mobile-premier01-jenkins.build-mobile.iwpb.euw2.prod.aws.cloud.hsbc/'
-                  'job/IWPB_Transaction_Banking/job/Domestic_Payment_and_Transfer_Mobile_Global_12824743/'
+                  'job/IWPB_Transaction_Banking/job/Domestic_Payment_and_Transfer_Mobile_GB_12579065/'
                   'job/Lib/job/mobile_paybybank-ios-plugin/job/release-build/job/')
         self.assertEqual(config['jenkins']['plugin_parent'], parent)
         for branch, job in [('release/2.4.202610120930', 'release_2_4_202610120930'),
@@ -48,6 +48,22 @@ class PluginReleaseRollbackTests(unittest.TestCase):
                 self.assertEqual(params['gmx_branch'], 'upload/UKPBB-123-auto' + params['stamp'])
                 if override == PLUGIN_FEATURE_PARENT:
                     self.assertEqual(effective_task_config(config, params)['jenkins']['plugin_parent'], PLUGIN_RELEASE_PARENT)
+
+    def test_saved_old_global_folder_moves_to_gb_but_custom_paths_stay(self):
+        # Schedules saved before the EIM move carry the old Global folder; GitHub callbacks
+        # only reach the GB folder, so new tasks must use it.
+        from appbuilder.versions import OLD_PLUGIN_RELEASE_PARENT, OLD_PLUGIN_FEATURE_PARENT, plugin_parent_for_branch
+        self.assertIn('Global_12824743', OLD_PLUGIN_RELEASE_PARENT)
+        self.assertIn('GB_12579065', PLUGIN_RELEASE_PARENT)
+        for old in (OLD_PLUGIN_RELEASE_PARENT, OLD_PLUGIN_FEATURE_PARENT, OLD_PLUGIN_RELEASE_PARENT.rstrip('/')):
+            self.assertEqual(plugin_parent_for_branch(old, 'release/v1.3.1'), PLUGIN_RELEASE_PARENT)
+        self.assertEqual(plugin_parent_for_branch(OLD_PLUGIN_FEATURE_PARENT, 'feature/x'), PLUGIN_FEATURE_PARENT)
+        custom = 'https://ci.fixture.invalid/job/custom/job/'
+        self.assertEqual(plugin_parent_for_branch(custom, 'release/v1.3.1'), custom)
+        with tempfile.TemporaryDirectory() as tmp, patch.object(store, 'DATA', Path(tmp)):
+            params = store.create_task(load_config(), {'plugin_version_input': '1.3', 'gmx_source': 'develop',
+                                                       'jenkins_settings': {'plugin_parent': OLD_PLUGIN_RELEASE_PARENT}})
+        self.assertTrue(params['plugin_job'].startswith(PLUGIN_RELEASE_PARENT))
 
     def test_diagnosis_accepts_exact_current_and_historical_project_only(self):
         config = load_config()
