@@ -3,10 +3,14 @@
 George updates by renaming the old folder to `<name>-old` and unzipping the new version as
 `<name>`. Starting the new Web Console therefore:
 
-1. copies `<name>-old/.appbuilder` (tasks, schedules, settings, logs) when this folder has no
-   data yet - copy only, the old folder is never changed;
-2. stops this tool's Web Console and scheduler processes that run from ANY other folder, so
-   an old scheduler cannot keep dispatching with old code. Build workers are never touched;
+1. stops this tool's Web Console and scheduler processes that run from ANY other folder, so
+   an old scheduler cannot keep dispatching with old code. Build workers are never touched.
+   This comes first: an old process still running from the renamed folder keeps the old
+   PATH, so it writes into THIS folder's .appbuilder (seen in practice: an empty
+   tasks.sqlite appeared here and blocked the copy);
+2. copies `<name>-old/.appbuilder` (tasks, schedules, settings, logs) when this folder has no
+   real data yet - copy only, the old folder is never changed. Stray files written here by
+   an old process (no tasks at all) are moved aside, not deleted;
 3. points the optional login LaunchAgent at this folder if it still points at another one.
 """
 from __future__ import annotations
@@ -17,7 +21,9 @@ import re
 import signal
 import subprocess
 import sys
+import sqlite3
 import time
+from datetime import datetime
 from pathlib import Path
 
 from .config import DATA, ROOT
@@ -29,14 +35,44 @@ def say(message):
     print('[UPDATE] ' + message, flush=True)
 
 
+def _task_count(data):
+    """Number of build tasks in a data folder; 0 when there is no usable task database."""
+    path = Path(data) / 'tasks.sqlite'
+    if not path.exists():
+        return 0
+    try:
+        db = sqlite3.connect(f'file:{path}?mode=ro', uri=True, timeout=5)
+        try:
+            return db.execute('SELECT COUNT(*) FROM tasks').fetchone()[0]
+        finally:
+            db.close()
+    except sqlite3.Error:
+        return 0
+
+
+def previous_folder(root=ROOT):
+    """The previous version: <name>-old, or when macOS named it '<name>-old 2' and so on,
+    the one whose data was changed most recently."""
+    candidates = [p for p in root.parent.glob(root.name + '-old*')
+                  if p.is_dir() and (p / '.appbuilder').is_dir() and p.resolve() != Path(root).resolve()]
+    if not candidates:
+        return None
+    return max(candidates, key=lambda p: (p / '.appbuilder').stat().st_mtime)
+
+
 def carry_data(root=ROOT, data=DATA):
-    previous = root.parent / (root.name + '-old')
-    if (data / 'tasks.sqlite').exists() or not (previous / '.appbuilder').is_dir():
+    previous = previous_folder(root)
+    if previous is None:
         return None
     if data.exists() and any(data.iterdir()):
-        say(f'本文件夹已有部分数据，未自动复制旧版本数据；如需要请运行 python3 -m appbuilder.migrate {previous}')
-        return None
-    if data.exists():
+        if _task_count(data) > 0:
+            return None                              # this folder already has its own builds
+        if _task_count(previous / '.appbuilder') == 0:
+            return None                              # nothing worth bringing over either
+        aside = data.with_name(f'.appbuilder-before-update-{datetime.now():%Y%m%d%H%M%S}')
+        data.rename(aside)
+        say(f'本文件夹的数据目录里没有任何任务（多半是旧进程写进来的），已挪到 {aside.name}，改为复制上一个版本的数据')
+    elif data.exists():
         data.rmdir()
     from .migrate import import_state
     copied = import_state(previous, root)
@@ -59,18 +95,20 @@ def _processes():
 
 
 def _folder(pid, command):
-    """The project folder a service runs from: its venv python path, else its working directory."""
-    match = re.search(r'(/\S+?)/\.venv/bin/python', command)
-    if match:
-        return Path(match[1]).resolve()
+    """The project folder a service runs from. Its working directory comes first: it follows
+    the folder when the old version was renamed to <name>-old, while the command line still
+    shows the old name (which is now the NEW folder). The venv path is the fallback."""
     try:
         out = subprocess.run(['lsof', '-a', '-p', str(pid), '-d', 'cwd', '-Fn'], capture_output=True,
                              text=True, timeout=10).stdout
     except (OSError, subprocess.SubprocessError):
-        return None
+        out = ''
     for line in out.splitlines():
         if line.startswith('n/'):
             return Path(line[1:]).resolve()
+    match = re.search(r'(/\S+?)/\.venv/bin/python', command)
+    if match:
+        return Path(match[1]).resolve()
     return None
 
 
@@ -128,7 +166,7 @@ def repoint_launch_agent(root=ROOT):
 
 
 def hand_over():
-    for step in (carry_data, stop_other_folders, repoint_launch_agent):
+    for step in (stop_other_folders, carry_data, repoint_launch_agent):
         try:
             step()
         except Exception as exc:                     # never block starting the page
