@@ -372,6 +372,39 @@ class SharedBuildUITests(SharedBuildUIFixture, unittest.TestCase):
         self.assertNotIn('github_token',p.evaluate('buildBody()'))
         self.assertFalse(self.errors,self.errors)
 
+    def test_offline_ai_card_installs_switches_and_tries(self):
+        p=self.page;posts=[]
+        models={'phi4-mini':{'label':'Phi-4-mini-instruct · Q4_K_M · 约 2.5 GB','licence':'MIT（Microsoft）','source':'https://huggingface.co/microsoft/Phi-4-mini-instruct'},
+                'qwen3-4b':{'label':'Qwen3-4B · Q4_K_M · 约 2.5 GB','licence':'Apache 2.0','source':'https://huggingface.co/Qwen/Qwen3-4B'}}
+        st={'enabled':False,'model':'','model_path':'','model_ok':False,'model_note':'','runtime':'','features':{'tester_note':True,'failure_hint':True},
+            'models':models,'model_dir':'/Users/g/.app-builder/models','job':{'running':False,'log':[]}}
+        def handle(route):
+            path=route.request.url.split('/api/ai/')[1]
+            if route.request.method=='POST':
+                body=json.loads(route.request.post_data or '{}');posts.append((path,body))
+                if path=='install':
+                    st['job']={'running':True,'step':'下载模型','progress':42.5,'log':['10:00:00 下载模型 m.gguf（2.5 GB）']}
+                elif path=='settings':
+                    st['features'].update({k:v for k,v in body.items() if k in st['features']})
+                elif path=='try':
+                    return route.fulfill(json={'tester_note':'Check the consent screen sends the account id.',
+                                               'failure_hint':{'cause':'Signing certificate missing.','fix':'Reinstall it.'}})
+            return route.fulfill(json=st)
+        p.route('**/api/ai/**',handle)
+        p.reload();expect(p.locator('#plugin-branches option')).to_have_count(101)
+        self.show('settings')
+        expect(p.locator('#ai-status')).to_contain_text('运行库：未安装')
+        expect(p.locator('#ai-model option')).to_have_count(2)
+        p.locator('#ai-model').select_option('qwen3-4b')
+        p.locator('#ai-install').click()
+        expect(p.locator('#ai-log')).to_contain_text('进行中：下载模型 42.5%')
+        self.assertTrue(p.locator('#ai-install').is_disabled())
+        p.locator('#ai-form [name=failure_hint]').uncheck()
+        p.locator('#ai-try').click()
+        expect(p.locator('#ai-log')).to_contain_text('Try: Reinstall it.')
+        self.assertEqual(posts[:2],[('install',{'model':'qwen3-4b'}),('settings',{'failure_hint':False})])
+        self.assertFalse(self.errors,self.errors)
+
     def test_jira_panel_saves_mail_settings_and_sends_a_test_email(self):
         p=self.page;posts={}
         settings={'settings':{'enabled':True,'dry_run':True,'base_url':'https://jira.example.com','transition_name':'In Test',

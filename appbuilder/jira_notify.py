@@ -240,6 +240,7 @@ def tickets_from_commits(commits, pattern, llm=None, prs=None):
         for name, text in places:
             for key in dict.fromkeys(regex.findall(text or '')):
                 info = found.setdefault(key, {**c, 'subject': (pr['title'] if pr and pr['title'] else c['subject']),
+                                              'pr_body': (pr.get('body') or '') if pr else '',
                                               'source': name, 'refs': []})
                 if all(r['sha'] != ref['sha'] for r in info['refs']):
                     info['refs'].append(ref)
@@ -467,13 +468,15 @@ def wiki_text(text):
     return WIKI_SPECIAL.sub(r'\\\1', (text or '').replace('\n', ' '))
 
 
-def comment_text(marker, link, gmx_build, branch, items, manual, mentions):
+def comment_text(marker, link, gmx_build, branch, items, manual, mentions, note=None):
     """The Jira comment (wiki markup). One highlighted box with the state and the install
     link, then why the ticket is here, then anything a person must do. The marker goes
     last in grey: it is how a re-run knows this build already commented."""
     head = '*Ready to test*' + (f' · GMX #{gmx_build}' if gmx_build else '') + (f' · {wiki_text(branch)}' if branch else '')
     lines = ['{panel:bgColor=#E9F5EE|borderColor=#B7DCC4}', head,
              f'*[Install from TestFairy|{link}]*', '{panel}']
+    if note:
+        lines.append('*For testers:* ' + wiki_text(note))
     if items:
         lines.append('*Included because of*')
         for i in items:
@@ -550,8 +553,17 @@ def process_ticket(client, key, info, link, build_label, conf, llm, dry_run, gmx
             if isinstance(exc, NoSuchTransition):
                 result['available'] = getattr(exc, 'available', [])
     result['status'] = status
+    note = None
+    if conf.get('ai_tester_note') and llm:
+        from .local_llm import tester_note
+        try:
+            note = tester_note(llm, _without_key(info.get('subject', ''), key), info.get('pr_body') or info.get('body', ''))
+        except Exception:
+            note = None
+    if note:
+        result['tester_note'] = note
     mentions = mention_line(conf.get('comment_mentions', ''), conf.get('flavor', 'server'))
-    text = comment_text(marker, link, gmx_build, branch, items, result.get('manual'), mentions)
+    text = comment_text(marker, link, gmx_build, branch, items, result.get('manual'), mentions, note)
     if dry_run:
         step = (f'transition -> {name} (当前 {status}, 类型 {issue_type or "?"})' if need_move
                 else f'已在 {name}，不需要流转')
@@ -631,6 +643,8 @@ def _notify_jira(task_id, client=None, llm=None, config=None, preview=None):
     ledger = _read_ledger()
     old = (ledger.get(branch) or {}).get('last_sha')
     llm = llm if llm is not None else get_llm(config)
+    from .ai_setup import feature_on
+    conf = {**conf, 'ai_tester_note': bool(llm) and (feature_on(config, 'tester_note') or preview is not None)}
     github = None
 
     def remote():

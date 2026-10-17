@@ -44,6 +44,38 @@ def english_only(text):
     return not CJK.search(text or '')
 
 
+# The tool's own failure reasons are Chinese (for the page). The email needs English, so the
+# common kinds of reason are mapped to a plain English sentence; numbers and Jenkins results
+# are carried over. Order matters: the first match wins.
+REASONS = [
+    (r'(?:正式构建|Build) #(\d+) 失败: ([A-Z_]+)', 'Jenkins build #{0} finished with result {1}.'),
+    (r'Callback #(\d+) 失败: ([A-Z_]+)', 'The Plugin callback build #{0} finished with result {1}.'),
+    (r'exit=(\d+)', 'A local step failed (exit code {0}); see the task log in APP Builder.'),
+    (r'TestFairy', 'The App link could not be found on TestFairy (session expired or the upload is not there yet).'),
+    (r'登录|SSO|MFA|认证|会话已过期|密码', 'Jenkins sign-in is needed (the session expired or SSO was not completed).'),
+    (r'必填|校验未通过|BUILD_TYPE|参数', 'Jenkins did not accept the build parameters, so nothing was started.'),
+    (r'队列|Build Number|新 Build|排队|回执', 'APP Builder could not confirm which Jenkins build belongs to this run, so it did not submit again.'),
+    (r'超时', 'Timed out waiting for Jenkins; the build may still be running.'),
+    (r'冲突|合并|未暂存|工作区|外部提交|外部修改|远端|基线|分支', 'The Plugin branch changed or has conflicts and needs a manual check before building.'),
+    (r'lock', 'Updating the GMX lock file produced unexpected changes, so nothing was pushed.'),
+    (r'Worker|进程', 'APP Builder stopped before the build finished (for example the Mac slept or restarted).'),
+]
+
+
+def english_reason(note):
+    """English for a failure note: as is when already English, else the matching sentence."""
+    note = safe_text(note or '')[:500]
+    if not note:
+        return ''
+    if english_only(note):
+        return note
+    for pattern, text in REASONS:
+        m = re.search(pattern, note)
+        if m:
+            return text.format(*m.groups())
+    return ''
+
+
 def parse_users(text):
     """'a, b; c' or one per line -> ['a', 'b', 'c'] (order kept, duplicates dropped)."""
     if not isinstance(text, str):
@@ -109,9 +141,9 @@ def _ticket_rows(runtime, base_url):
             chip = (f'Move to {name} manually', 'warn')
         else:
             chip = (t.get('status') or name, 'ok')
-        rows.append((t['key'], browse + t['key'], t.get('summary') or '', why, *chip))
+        rows.append((t['key'], browse + t['key'], t.get('summary') or '', why, *chip, t.get('tester_note') or ''))
     for e in report.get('errors') or []:
-        rows.append((e['key'], browse + e['key'], '', 'Could not be updated automatically', 'Please check', 'bad'))
+        rows.append((e['key'], browse + e['key'], '', 'Could not be updated automatically', 'Please check', 'bad', ''))
     return rows
 
 
@@ -146,8 +178,10 @@ def compose(row, params, runtime, base_url, test=False, recovered=False):
         lines.append(line)
     else:
         lines.append(f'Tickets in this build ({len(rows)}):')
-        for key, url, summary, why, chip, _ in rows:
+        for key, url, summary, why, chip, _, note in rows:
             lines.append(f'- {key} {summary}  [{chip}]  {url}')
+            if note:
+                lines.append(f'    For testers: {note}')
             if why:
                 lines.append(f'    {why}')
     lines += ['', f'Plugin {params.get("plugin_source", "")} -> {branch}'
@@ -225,13 +259,14 @@ def success_html(row, params, runtime, base_url, test=False, recovered=False):
     else:
         rows = _ticket_rows(runtime, base_url)
         cells = []
-        for i, (key, url, summary, why, chip, kind) in enumerate(rows):
+        for i, (key, url, summary, why, chip, kind, note) in enumerate(rows):
             border = f'border-top:1px solid {LINE};' if i else ''
             # Two rows per ticket (key + state, then the text) so it also reads on a phone.
             cells.append(
                 f'<tr><td valign="top" style="{border}padding:10px 8px 2px 0;font-weight:600">{_a(url, key)}</td>'
                 f'<td valign="top" align="right" style="{border}padding:10px 0 2px">{_chip(chip, kind)}</td></tr>'
                 f'<tr><td colspan="2" style="padding:0 0 10px">{_e(summary)}'
+                + (f'<div style="margin-top:3px;font-size:13.5px"><b>For testers:</b> {_e(note)}</div>' if note else '')
                 + (f'<div style="font-size:12.5px;color:{GREY};margin-top:2px">{_e(why)}</div>' if why else '')
                 + '</td></tr>')
         table = ('<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" '
@@ -264,13 +299,25 @@ def _log_tail(task_id, keep=8):
 
 
 def _failure_parts(row, links):
-    note = safe_text(row.get('note') or '')[:500]
-    reason = note if note and english_only(note) else ''
+    reason = english_reason(row.get('note'))
     tail = [line for line in _log_tail(row['id']) if english_only(line)]
     return reason, tail, links or []
 
 
-def compose_failure(row, params, runtime, links=None, test=False):
+def _hint(row, reason, tail):
+    """Optional offline-AI suggestion (cause + next action). Never blocks the email."""
+    try:
+        from .ai_setup import feature_on
+        config = load_config()
+        if not feature_on(config, 'failure_hint'):
+            return None
+        from .local_llm import get_llm, failure_hint
+        return failure_hint(get_llm(config), stage_name(row.get('stage')), reason, tail)
+    except Exception:
+        return None
+
+
+def compose_failure(row, params, runtime, links=None, test=False, hint=None):
     """Subject and plain-text body (English) for a failed build: where, and where to look.
     The tool's own reason and log lines are Chinese, so only English lines are quoted."""
     where = stage_name(row.get('stage'))
@@ -281,6 +328,8 @@ def compose_failure(row, params, runtime, links=None, test=False):
         f'Build failed: stopped at {where} ({row.get("status", "")})', f'{_title(params)} · {branch}']
     if reason:
         lines.append(f'Reason: {reason}')
+    if hint:
+        lines += [f'Likely cause (offline AI suggestion): {hint["cause"]}', f'Try: {hint["fix"]}']
     if links:
         lines += [''] + [f'{item["label"]}: {item["url"]}' for item in links]
     if tail:
@@ -291,7 +340,7 @@ def compose_failure(row, params, runtime, links=None, test=False):
     return safe_text(' '.join(subject.split()))[:250], '\n'.join(lines)
 
 
-def failure_html(row, params, runtime, links=None, test=False):
+def failure_html(row, params, runtime, links=None, test=False, hint=None):
     where = stage_name(row.get('stage'))
     branch = params.get('plugin_branch', '')
     reason, tail, links = _failure_parts(row, links)
@@ -299,6 +348,9 @@ def failure_html(row, params, runtime, links=None, test=False):
     out = [_band(False, 'Build failed', f'Stopped at {where}', f'{_title(params)} · {branch} · {_when()}', button)]
     if reason:
         out.append(_section(_e(reason), 'Reason'))
+    if hint:
+        out.append(_section(f'{_e(hint["cause"])}<div style="margin-top:4px"><b>Try:</b> {_e(hint["fix"])}</div>',
+                            'Likely cause · offline AI suggestion'))
     if tail:
         box = (f'<div style="background:{GREY_BG};border:1px solid {LINE};border-radius:4px;padding:8px 10px;'
                f"font-family:Menlo,Consolas,monospace;font-size:12px;white-space:pre-wrap;word-break:break-word\">"
@@ -471,8 +523,10 @@ def notify_team(task_id, client=None, config=None):
             links = [item for item in _jenkins_links(row, params) if '#' in item['label']]
         except Exception:
             links = []
-        subject, body = compose_failure(row, params, runtime, links)
-        html = failure_html(row, params, runtime, links)
+        reason, tail, _ = _failure_parts(row, links)
+        hint = _hint(row, reason, tail)
+        subject, body = compose_failure(row, params, runtime, links, hint=hint)
+        html = failure_html(row, params, runtime, links, hint=hint)
     to = users + [f'group:{g}' for g in groups]
     entry = {'kind': kind, 'task_id': task_id, 'issue': issue, 'to': to, 'subject': subject, 'body': body}
     try:
