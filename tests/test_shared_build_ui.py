@@ -401,7 +401,7 @@ class SharedBuildUITests(SharedBuildUIFixture, unittest.TestCase):
         p.locator('#jira-mail-test').click()
         expect(p.locator('#jira-settings-result')).to_contain_text('收件人：44065253、43123456')
         expect(p.locator('#jira-settings-result')).to_contain_text('POST https://jira.example.com/rest/api/2/issue/TRANSACT-9/notify')
-        self.assertEqual(posts['mail-test'],{'mail_issue':'TRANSACT-9','mail_users':'44065253, 43123456'})
+        self.assertEqual(posts['mail-test'],{'mail_issue':'TRANSACT-9','mail_users':'44065253, 43123456','mail_groups':''})
         self.assertFalse(self.errors,self.errors)
 
     def test_delivery_history_search_and_choices_are_independent(self):

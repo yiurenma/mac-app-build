@@ -39,7 +39,7 @@ def _clean(body):
             continue
         value = body[key]
         if kind is str:
-            limit = 2000 if key in ('transition_fields', 'mail_users', 'comment_mentions') else 512
+            limit = 2000 if key in ('transition_fields', 'mail_users', 'comment_mentions', 'mail_groups') else 512
             if not isinstance(value, str) or len(value) > limit:
                 raise ValueError(f'{key} 必须是文本（不超过 {limit} 字符）')
             value = value.strip()
@@ -66,6 +66,8 @@ def _clean(body):
         M.parse_users(out['comment_mentions'])               # same rule: Jira user names only
     if 'mail_users' in out:
         M.parse_users(out['mail_users'])                     # raises ValueError naming the bad names
+    if 'mail_groups' in out:
+        M.parse_groups(out['mail_groups'])
     if 'transition_name' in out and not out['transition_name']:
         raise ValueError('流转名称不能为空')
     if 'first_run_commits' in out and not 0 <= out['first_run_commits'] <= 200:
