@@ -11,6 +11,7 @@
   <script defer src="/jira.js"></script>
   <script defer src="/jenkins-token.js"></script>
   <script defer src="/settings.js"></script>
+  <script defer src="/ai.js"></script>
   <script defer src="/delivery.js"></script>
   <script defer src="/overview.js"></script>
 </head>
@@ -183,6 +184,22 @@
 <label>Jira 类型<select name="flavor"><option value="server">公司自建（Server / Data Center）</option><option value="cloud">Atlassian 云版</option></select><small class="label-help">公司自建版按用户名转给 Reporter；云版按账号 ID。</small></label>
 </div></div></details>
 <div class="jira-actions"><button type="button" class="btn btn-primary" id="jira-save">保存设置</button><button type="button" class="ghost-button" id="jira-test-connection">测试连接（只读）</button></div></form><pre id="jira-settings-result" class="terminal diagnose-terminal settings-result" role="status">尚未执行</pre></section>
+<section class="settings-card settings-wide" aria-labelledby="set-ai"><h3 id="set-ai">离线 AI（可选）</h3>
+<p class="diag-note">模型在这台 Mac 上运行，不联网、不调任何外部接口。只用来写两句英文：评论里给测试的一句说明、失败邮件里的可能原因。生成的内容先检查（只能是英文、不能太长、不能带链接或原文没有的单号），不合格就不用，退回原来的写法。关掉或没装时一切照旧。</p>
+<p id="ai-status" class="diag-note" role="status">读取中…</p>
+<form id="ai-form" class="diagnose-form" autocomplete="off"><div class="form-grid">
+<label class="span-2">模型<select name="model" id="ai-model"></select><small class="label-help" id="ai-model-help">点“一键安装”会装运行库、下载模型、核对校验值并试运行。模型放在本机 ~/.app-builder/models，更新工具不会丢。</small></label>
+</div><div class="jira-actions"><button type="button" class="btn btn-primary" id="ai-install">一键安装</button></div>
+<details class="advanced-panel"><summary>下载不了？用已经下载好的文件</summary><div class="advanced-body"><div class="form-grid">
+<label class="span-2">模型文件位置（.gguf）<input name="path" id="ai-path" maxlength="1024" placeholder="/Users/你/Downloads/microsoft_Phi-4-mini-instruct-Q4_K_M.gguf"><small class="label-help">公司网络打不开下载网站时，换个网络下载上面所选模型的 Q4_K_M.gguf 文件（链接见模型说明），然后把完整路径粘贴到这里。在访达里选中文件，按 ⌥⌘C 可以复制路径。</small></label>
+</div><div class="jira-actions"><button type="button" class="ghost-button" id="ai-use-file">使用这个文件</button></div></div></details>
+<div class="form-grid">
+<label class="field-toggle span-2">启用离线 AI<input type="checkbox" name="enabled"><small class="label-help">装好后自动打开。</small></label>
+<label class="field-toggle span-2">评论里写一句给测试的说明<input type="checkbox" name="tester_note"><small class="label-help">根据 PR 标题和描述写 “For testers: …”，邮件里也会显示。</small></label>
+<label class="field-toggle span-2">失败邮件里写可能原因和建议<input type="checkbox" name="failure_hint"><small class="label-help">根据失败步骤、原因和英文日志写一句 “Likely cause” 和 “Try”，标明是 AI 建议。</small></label>
+</div><div class="jira-actions"><button type="button" class="ghost-button" id="ai-try">试一下效果</button></div></form>
+<progress id="ai-progress" max="100" hidden></progress>
+<pre id="ai-log" class="terminal diagnose-terminal settings-result" role="status">尚未执行</pre></section>
 </section>
 <section class="panel diagnose-panel tools-panel" id="tools"><div class="panel-head"><div><span class="section-tag">出问题时用</span><h2>测试工具</h2><p>除「GMX 实测」（会真的触发构建）和设置里的测试邮件外，其余都只读。</p></div></div>
 <div class="tool-tabs" role="tablist" aria-label="测试工具">

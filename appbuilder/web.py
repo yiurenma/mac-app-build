@@ -564,7 +564,7 @@ def make_handler(csrf_token):
             try:
                 if p == '/':
                     return self._asset('index.html')
-                if p in ('/app.css', '/app.js', '/schedules.js', '/jira.js', '/jenkins-token.js', '/settings.js', '/delivery.js', '/overview.js'):
+                if p in ('/app.css', '/app.js', '/schedules.js', '/jira.js', '/jenkins-token.js', '/settings.js', '/delivery.js', '/overview.js', '/ai.js'):
                     return self._asset(p[1:])
                 if p == '/api/health':
                     return self._send({'app': 'mac-app-builder', 'service': 'web-console', 'version': __version__})
@@ -615,6 +615,10 @@ def make_handler(csrf_token):
                     return self._send(handled[1], status=handled[0])
                 from .credentials_api import handle_get as credentials_get
                 handled = credentials_get(p, parse_qs(u.query))
+                if handled is not None:
+                    return self._send(handled[1], status=handled[0])
+                from .ai_api import handle_get as ai_get
+                handled = ai_get(p, parse_qs(u.query))
                 if handled is not None:
                     return self._send(handled[1], status=handled[0])
                 from .delivery_api import handle_get as delivery_get
@@ -714,6 +718,10 @@ def make_handler(csrf_token):
                     return self._send(handled[1], status=handled[0])
                 from .credentials_api import handle_post as credentials_post
                 handled = credentials_post(self.path, body)
+                if handled is not None:
+                    return self._send(handled[1], status=handled[0])
+                from .ai_api import handle_post as ai_post
+                handled = ai_post(self.path, body)
                 if handled is not None:
                     return self._send(handled[1], status=handled[0])
                 from .jira_api import handle_post as jira_post

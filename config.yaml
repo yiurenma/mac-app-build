@@ -72,6 +72,6 @@ jira:
 # 模型文件不存在或没装 llama-cpp-python 时自动降级为纯规则。
 ai:
   enabled: false
-  model_path: ""            # 例如 ~/models/qwen2.5-7b-instruct-q4_k_m.gguf （由公司批准的渠道提供）
+  model_path: ""            # 通常不用改：在 设置 → 离线 AI 一键安装后自动填写（页面设置优先）
   n_ctx: 4096
   n_gpu_layers: -1          # Apple Silicon 使用 Metal；-1=尽量全部放 GPU
