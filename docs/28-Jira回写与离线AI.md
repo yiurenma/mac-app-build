@@ -95,21 +95,36 @@ Token 优先在页面里填写（存入 Mac 钥匙串，不写入配置、日志
 
 ## Jira 评论和邮件内容（英文）
 
-发到 Jira 和邮件里的内容全部是英文。评论示例：
+发到 Jira 和邮件里的内容全部是英文。
+
+评论用 Jira 自带格式（Server/DC 的 wiki 标记），写进去的内容如下：
 
 ```
-[app-build:202610161800-72a546] New test build is ready (GMX build #2): https://…/join/…
+{panel:bgColor=#E9F5EE|borderColor=#B7DCC4}
+*Ready to test* · GMX #2 · release/v1.3.1
+*[Install from TestFairy|https://…/join/…]*
+{panel}
+*Included because of*
+* [PR #180|https://github…/pull/180] Fixed payment-consent api param for UK bank transfer · Glenn Li
+* [Commit 1a2b3c4d5e|https://github…/commit/…] follow-up · Bob
 
-This ticket is included because of:
-- PR #123 "TRANSACT-1 fix login" by alice https://github…/pull/123
-- Commit 1a2b3c4d5e "TRANSACT-1 follow-up" by Bob https://github…/commit/…
-
-Change: …
-
-Note: the status was not changed to 'In Test' automatically: there is no 'In Test' transition from the current status 'Development' (available: Ready for Test, No Longer Required). Please update it manually.
+{color:#9A5B00}*Status not changed:* 'Ready for Development' cannot move to 'In Test' directly. Please move it to 'In Test' manually.{color}
 
 cc [~44065253] [~43123456]
+{color:#97A0AF}[app-build:202610170000-0de2b9]{color}
 ```
+
+- 绿色框里只放状态和安装链接；PR / 提交用编号做链接文字，标题里本单的编号会去掉。
+- PR 作者显示 GitHub 上的姓名，查不到时显示登录名（通常是工号）。
+- 状态提醒只在需要手动处理时出现；可选的流转列表不写进评论，在「交付记录」里能看到。
+- 最后一行灰字是去重标记，同一个构建任务重复运行不会重复评论，请勿删除。
+
+邮件是 HTML 卡片（只用内联样式，Outlook / BlackBerry Work 都能显示）：
+
+- 成功：主题 `Ready to test: UK PayByBank release/v1.3.1 · GMX #2 · 2 tickets`。顶部绿色块写状态和「Install from TestFairy」按钮；下面每张单一行：单号、标题、因为哪个 PR、状态标签（已到 In Test / 需手动改状态 / 未能更新）；最底下一行灰字是 Plugin 分支、Jenkins 链接和任务号。
+- 失败：主题 `Build failed: … · at GMX build`。顶部红色块写失败在哪一步和「Open Jenkins log」按钮，下面是原因、日志最后几行和处理办法。
+- Jira 外层（主题前的 `[WPB Jira]`、“has a message for you”、底部的单子卡片）是 Jira 自己加的，改不了。
+- Jira 没有抄送（CC），每人单独收一封。除了收件人，还可以填「也发给这些 Jira 用户组」，组里的人都会收到。
 
 - PR 标题、分支名、PR 描述、提交标题、提交正文里**提到的每一张单**都会处理，只有 Jira 里不存在的单会跳过；不再按数量截断（超过“每轮最多处理 ticket 数”只在日志里提醒）。
 - 不管单子当前是什么状态、经办人是谁，都会写评论并转给 Reporter；只有状态改不了时留给人处理，并在评论里写明原因。

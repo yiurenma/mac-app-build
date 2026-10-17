@@ -77,6 +77,22 @@ class ParsingTests(unittest.TestCase):
                 M.check_issue(bad)
 
 
+class GroupTests(Fixture):
+    def test_groups_are_parsed_by_line_or_comma_and_keep_spaces(self):
+        self.assertEqual(M.parse_groups('pbb testers, ios-dev\npbb testers'), ['pbb testers', 'ios-dev'])
+        for bad in ('a<b>', 5, ','.join(f'g{i}' for i in range(11))):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                M.parse_groups(bad)
+
+    def test_mail_goes_to_groups_too_and_groups_alone_are_enough(self):
+        self.save(mail_enabled=True, mail_issue='TRANSACT-9', mail_users='', mail_groups='pbb testers', base_url=BASE)
+        jira = FakeJira()
+        M.notify_team(self.row['id'], client=jira)
+        to = jira.calls[0][2]['to']
+        self.assertEqual((to['users'], to['groups']), ([], [{'name': 'pbb testers'}]))
+        self.assertEqual(self.state['runtime']['jira_mail']['to'], ['group:pbb testers'])
+
+
 class HtmlBodyTests(unittest.TestCase):
     def test_text_is_escaped_and_links_with_query_stay_whole(self):
         out = M.html_body('a <b> & c\nhttps://x.example/join/a?id=1&v=2 next')
@@ -91,17 +107,38 @@ class ComposeTests(unittest.TestCase):
         report = {'status': 'DONE', 'tickets': [{'key': 'TRANSACT-1', 'summary': 'Fix login'}],
                   'errors': [{'key': 'TRANSACT-2', 'error': 'x'}], 'needs_manual': [{'key': 'TRANSACT-1', 'reason': 'r'}]}
         subject, body = M.compose(self.row, PARAMS, runtime(report), BASE)
-        self.assertEqual(subject, '[New test build] UK PayByBank - GMX #42')
-        for text in (LINK, 'develop -> release/v1.3.1', '#42', 'TRANSACT-1 Fix login  https://jira.example.com/browse/TRANSACT-1',
-                     'TRANSACT-2  https://jira.example.com/browse/TRANSACT-2  (could not be updated automatically',
-                     '(status needs a manual update)'):
+        self.assertEqual(subject, 'Ready to test: UK PayByBank release/v1.3.1 · GMX #42 · 2 tickets')
+        for text in ('Install from TestFairy: ' + LINK, 'develop -> release/v1.3.1', 'GMX #42',
+                     'TRANSACT-1 Fix login  [Move to In Test manually]  https://jira.example.com/browse/TRANSACT-1',
+                     'TRANSACT-2   [Please check]  https://jira.example.com/browse/TRANSACT-2',
+                     'Could not be updated automatically'):
             self.assertIn(text, body)
+
+    def test_html_puts_state_and_install_button_first_then_one_row_per_ticket(self):
+        report = {'status': 'DONE', 'transition': 'In Test', 'tickets': [
+            {'key': 'TRANSACT-1', 'summary': 'Fix <login>', 'status': 'In Test', 'assignee': 'Carey Chen',
+             'ref_items': [{'label': 'PR #180', 'author': 'Glenn Li', 'title': 'x', 'url': 'https://g/pull/180'}]},
+            {'key': 'TRANSACT-3', 'summary': 'Other', 'status': 'Ready for Development'}],
+            'errors': [], 'needs_manual': [{'key': 'TRANSACT-3', 'reason': 'r'}]}
+        html = M.success_html(self.row, PARAMS, runtime(report), BASE)
+        self.assertLess(html.index('Ready to test'), html.index('Install from TestFairy'))
+        self.assertLess(html.index('Install from TestFairy'), html.index('TRANSACT-1'))
+        self.assertIn(f'<a href="{LINK.replace("&", "&amp;")}"', html)
+        self.assertIn('Tickets in this build (2)', html)
+        self.assertIn('Fix &lt;login&gt;', html)                       # summaries are escaped
+        self.assertIn('PR #180 · Glenn Li · assigned to Carey Chen', html)
+        self.assertIn('Move to In Test manually', html)
+        self.assertIn('>Jenkins GMX #42</a>', html)                    # no raw Jenkins URL as text
+        self.assertNotIn('>https://jenkins', html)
+        self.assertNotIn('<style', html)                               # inline styles only (Outlook)
+        quiet = M.success_html(self.row, PARAMS, runtime({'status': 'DONE', 'tickets': []}), BASE)
+        self.assertIn('No new tickets since the last build.', quiet)
 
     def test_dry_run_baseline_and_no_jira_are_said_plainly(self):
         _, body = M.compose(self.row, PARAMS, runtime({'status': 'DRY_RUN', 'tickets': []}), BASE)
-        self.assertIn('No Jira tickets in this build', body)
+        self.assertIn('No new tickets since the last build.', body)
         _, body = M.compose(self.row, PARAMS, runtime({'status': 'DRY_RUN', 'tickets': [{'key': 'A-1'}]}), BASE)
-        self.assertIn('rehearsal mode', body)
+        self.assertIn('[Rehearsal, not changed]', body)
         _, body = M.compose(self.row, PARAMS, runtime({'status': 'BASELINE'}), BASE)
         self.assertIn('first run', body)
         _, body = M.compose(self.row, PARAMS, runtime(), BASE)
@@ -127,9 +164,10 @@ class NotifyTeamTests(Fixture):
         self.assertIn(LINK, body['textBody'])
         self.assertIn('TRANSACT-1 Fix login', body['textBody'])
         # HTML recipients see htmlBody only: same content, links clickable, text escaped.
-        self.assertIn(f'<a href="{LINK}">', body['htmlBody'])
-        self.assertIn('TRANSACT-1 Fix login', body['htmlBody'])
-        self.assertIn('<br>', body['htmlBody'])
+        self.assertIn(f'<a href="{LINK}"', body['htmlBody'])
+        self.assertIn('Install from TestFairy', body['htmlBody'])
+        self.assertIn('>TRANSACT-1</a>', body['htmlBody'])
+        self.assertIn('Fix login', body['htmlBody'])
         self.assertEqual(self.state['runtime']['jira_mail']['status'], 'SENT')
 
     def test_cloud_uses_account_ids(self):
@@ -169,11 +207,15 @@ class NotifyTeamTests(Fixture):
         with patch('appbuilder.web._jenkins_links', return_value=links):
             M.notify_team(self.row['id'], client=jira)
         body = jira.calls[0][2]
-        self.assertEqual(body['subject'], '[Build failed] UK PayByBank - failed at GMX build')
+        self.assertEqual(body['subject'], 'Build failed: UK PayByBank release/v1.3.1 · at GMX build')
         self.assertFalse(M.CJK.search(body['textBody']))              # English only, Chinese log lines left out
-        for text in ('Failed at: GMX build', 'Reason: GMX Build #41 failed',
-                     'GMX Build #41  https://jenkins.example.com/job/x/41/', '[FAILED] GMX build failed'):
+        self.assertFalse(M.CJK.search(body['htmlBody']))
+        for text in ('stopped at GMX build', 'Reason: GMX Build #41 failed',
+                     'GMX Build #41: https://jenkins.example.com/job/x/41/', '[FAILED] GMX build failed'):
             self.assertIn(text, body['textBody'])
+        for text in ('Build failed', 'Stopped at GMX build', 'href="https://jenkins.example.com/job/x/41/"',
+                     'Open Jenkins log', 'Last log lines', '<b>Resume</b>'):
+            self.assertIn(text, body['htmlBody'])
         self.assertNotIn('GMX Job', body['textBody'])           # only concrete builds, not the job page
         self.assertNotIn('SECRET', body['textBody'])
         self.assertEqual(self.state['runtime']['jira_mail']['kind'], 'failure')
@@ -215,7 +257,7 @@ class NotifyTeamTests(Fixture):
         self.state['runtime'].update(runtime())
         M.notify_team(self.row['id'], client=jira)
         M.notify_team(self.row['id'], client=jira)               # still only once per outcome
-        self.assertEqual([c[2]['subject'].split(']')[0] for c in jira.calls], ['[Build failed', '[New test build'])
+        self.assertEqual([c[2]['subject'].split(':')[0] for c in jira.calls], ['Build failed', 'Ready to test'])
         self.assertEqual(self.state['runtime']['jira_mail']['kind'], 'success')
 
     def test_resumed_task_failing_for_a_new_reason_is_reported_again(self):
@@ -283,7 +325,7 @@ class TestEmailTests(Fixture):
             self.assertIn('至少再加一位同事', str(caught.exception))
             self.assertIn('本次请求（不含 Token）', str(caught.exception))
             self.assertIn('/rest/api/2/issue/TRANSACT-9/notify', str(caught.exception))
-            for code, hint in ((400, '用户名不存在'), (403, '不允许'), (404, '公告单不存在')):
+            for code, hint in ((400, '用户名或用户组不存在'), (403, '不允许'), (404, '公告单不存在')):
                 jira = FakeJira(RuntimeError(f'Jira POST /x -> HTTP {code}'))
                 with self.subTest(code=code), self.assertRaisesRegex(ValueError, hint):
                     M.test_email({'mail_issue': 'TRANSACT-9', 'mail_users': 'a'}, client=jira)

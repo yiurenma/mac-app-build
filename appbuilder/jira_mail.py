@@ -67,42 +67,182 @@ def check_issue(key):
     return key
 
 
-def compose(row, params, runtime, base_url, test=False):
+def parse_groups(text):
+    """Jira group names, one per line or comma separated (group names may contain spaces)."""
+    if not isinstance(text, str):
+        raise ValueError('用户组必须是文本')
+    names = [n.strip() for n in re.split(r'[\n,;，；]+', text) if n.strip()]
+    bad = [n for n in names if len(n) > 255 or re.search(r'[<>"\\]', n)]
+    if bad:
+        raise ValueError('用户组名称格式不对：' + '、'.join(bad[:5]))
+    names = list(dict.fromkeys(names))
+    if len(names) > 10:
+        raise ValueError('用户组最多 10 个')
+    return names
+
+
+def _when(row=None):
+    return datetime.now().strftime('%d %b %Y, %H:%M')
+
+
+def _title(params):
+    return ' '.join(x for x in (params.get('country', ''), params.get('project', '')) if x)
+
+
+def _ticket_rows(runtime, base_url):
+    """[(key, url, summary, why, chip_text, chip_kind)] for the tickets this build touched."""
+    report = runtime.get('jira_report') or {}
+    browse = (base_url or '').rstrip('/') + '/browse/'
+    name = report.get('transition') or 'In Test'
+    manual = {m['key'] for m in report.get('needs_manual') or []}
+    rows = []
+    for t in report.get('tickets') or []:
+        items = t.get('ref_items')
+        if items is None:                                      # reports written before ref_items
+            items = [{'label': re.sub(r'^- ', '', r).split(' "')[0], 'author': ''} for r in t.get('refs') or []]
+        why = '; '.join(i['label'] + (f' · {i["author"]}' if i.get('author') else '') for i in items)
+        if t.get('assignee'):
+            why += (' · ' if why else '') + 'assigned to ' + t['assignee']
+        if report.get('status') == 'DRY_RUN':
+            chip = ('Rehearsal, not changed', 'grey')
+        elif t['key'] in manual:
+            chip = (f'Move to {name} manually', 'warn')
+        else:
+            chip = (t.get('status') or name, 'ok')
+        rows.append((t['key'], browse + t['key'], t.get('summary') or '', why, *chip))
+    for e in report.get('errors') or []:
+        rows.append((e['key'], browse + e['key'], '', 'Could not be updated automatically', 'Please check', 'bad'))
+    return rows
+
+
+def _jira_line(runtime):
+    """One sentence when there is no ticket list to show (or None when there is one)."""
+    report = runtime.get('jira_report') or {}
+    status = report.get('status')
+    if status in ('DONE', 'PARTIAL', 'DRY_RUN'):
+        return None if (report.get('tickets') or report.get('errors')) else 'No new tickets since the last build.'
+    if status == 'BASELINE':
+        return 'Jira: first run, only the starting point was recorded. Tickets are updated from the next build.'
+    return 'Jira was not updated for this build.'
+
+
+def compose(row, params, runtime, base_url, test=False, recovered=False):
     """Subject and plain-text body (English) for one successful build."""
     app = runtime.get('testfairy_app') or {}
     link = app.get('share_url', '')
     build = runtime.get('gmx_build_number', runtime.get('gmx_formal_number', ''))
-    country, project = params.get('country', ''), params.get('project', '')
-    subject = f'{"[TEST] " if test else ""}[New test build] {country} {project} - GMX #{build}'.replace('  ', ' ')
+    branch = params.get('plugin_branch', '')
+    rows = _ticket_rows(runtime, base_url)
+    count = f' · {len(rows)} ticket' + ('s' if len(rows) != 1 else '') if rows else ''
+    subject = f'{"[TEST] " if test else ""}Ready to test: {_title(params)} {branch} · GMX #{build}{count}'
     lines = []
     if test:
         lines += ['This is a test email (content from an earlier successful build). It is not a new build.', '']
-    lines += ['A new test build is ready.', '',
-              f'App link: {link}',
-              f'Plugin branch: {params.get("plugin_source", "")} -> {params.get("plugin_branch", "")}',
-              f'GMX build: #{build}' + (f'  {app["build_url"]}' if app.get('build_url') else ''),
-              f'Build task: {row["id"]}', '']
-    report = runtime.get('jira_report') or {}
-    status = report.get('status')
-    browse = (base_url or '').rstrip('/') + '/browse/'
-    if status in ('DONE', 'PARTIAL', 'DRY_RUN'):
-        tickets = report.get('tickets') or []
-        head = 'Jira tickets in this build' + (' (rehearsal mode: not changed in Jira)' if status == 'DRY_RUN' else '') + ':'
-        lines.append(head if tickets else 'No Jira tickets in this build.')
-        manual = {m['key'] for m in report.get('needs_manual') or []}
-        for t in tickets:
-            title = f' {t["summary"]}' if t.get('summary') else ''
-            note = '  (status needs a manual update)' if t['key'] in manual else ''
-            lines.append(f'- {t["key"]}{title}  {browse}{t["key"]}{note}')
-            lines += [f'    {ref[2:]}' for ref in t.get('refs') or []]
-        for e in report.get('errors') or []:
-            lines.append(f'- {e["key"]}  {browse}{e["key"]}  (could not be updated automatically, please check)')
-    elif status == 'BASELINE':
-        lines.append('Jira: first run, only the starting point was recorded; tickets are updated from the next build.')
+    if recovered:
+        lines += ['The earlier build failure has recovered.', '']
+    lines += [f'Ready to test: {_title(params)} · {branch} · GMX #{build}', f'Install from TestFairy: {link}', '']
+    line = _jira_line(runtime)
+    if line:
+        lines.append(line)
     else:
-        lines.append('Jira: not updated for this build.')
-    lines += ['', '-- sent automatically by APP Builder']
-    return safe_text(subject)[:250], '\n'.join(lines)
+        lines.append(f'Tickets in this build ({len(rows)}):')
+        for key, url, summary, why, chip, _ in rows:
+            lines.append(f'- {key} {summary}  [{chip}]  {url}')
+            if why:
+                lines.append(f'    {why}')
+    lines += ['', f'Plugin {params.get("plugin_source", "")} -> {branch}'
+              + (f' · Jenkins GMX #{build} {app["build_url"]}' if app.get('build_url') else '')
+              + f' · task {row["id"]}', '', '-- sent automatically by APP Builder']
+    return safe_text(' '.join(subject.split()))[:250], '\n'.join(lines)
+
+
+# ---- HTML email -------------------------------------------------------------------------
+# Inline styles and tables only: Outlook and BlackBerry Work drop <style> blocks.
+GREEN, GREEN_BG, RED, RED_BG = '#1f7a45', '#e9f5ee', '#b42318', '#fdecea'
+AMBER, AMBER_BG, GREY, GREY_BG, INK, LINE, LINK = '#9a5b00', '#fff4e0', '#6b778c', '#f4f5f7', '#172b4d', '#dfe1e6', '#0052cc'
+FONT = "-apple-system,'Segoe UI',Helvetica,Arial,sans-serif"
+
+
+def _e(text):
+    import html
+    return html.escape(str(text or ''), quote=True)
+
+
+def _a(url, text, style=''):
+    if not (isinstance(url, str) and url.startswith('https://')):
+        return _e(text)
+    return f'<a href="{_e(url)}" style="color:{LINK};text-decoration:none;{style}">{_e(text)}</a>'
+
+
+def _button(url, text, color):
+    return (f'<a href="{_e(url)}" style="display:inline-block;margin-top:12px;padding:9px 16px;border-radius:4px;'
+            f'background:{color};color:#ffffff;font-weight:600;font-size:14px;text-decoration:none">{_e(text)}</a>')
+
+
+def _band(ok, state, title, meta, button):
+    color, bg = (GREEN, GREEN_BG) if ok else (RED, RED_BG)
+    return (f'<tr><td style="background:{bg};padding:14px 16px;border-bottom:1px solid {LINE}">'
+            f'<div style="font-size:12px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:{color}">{_e(state)}</div>'
+            f'<div style="font-size:18px;font-weight:600;color:{INK};margin-top:2px">{_e(title)}</div>'
+            f'<div style="font-size:13px;color:{GREY};margin-top:2px">{_e(meta)}</div>{button}</td></tr>')
+
+
+def _section(inner, head=''):
+    h = (f'<div style="font-size:12px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:{GREY};'
+         f'margin-bottom:6px">{_e(head)}</div>') if head else ''
+    return f'<tr><td style="padding:12px 16px;border-top:1px solid {LINE}">{h}{inner}</td></tr>'
+
+
+def _footer(parts):
+    return (f'<tr><td style="padding:10px 16px;border-top:1px solid {LINE};font-size:12px;color:{GREY}">'
+            + ' · '.join(parts) + '</td></tr>')
+
+
+def _frame(rows, note=''):
+    top = (f'<p style="margin:0 0 10px;font-family:{FONT};font-size:13px;color:{GREY}">{_e(note)}</p>') if note else ''
+    return (f'<div style="font-family:{FONT};color:{INK};font-size:14px;line-height:1.5">{top}'
+            f'<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" '
+            f'style="max-width:640px;border:1px solid {LINE};border-radius:6px;border-collapse:separate;font-family:{FONT}">'
+            + ''.join(rows) + '</table></div>')
+
+
+def _chip(text, kind):
+    color, bg = {'ok': (GREEN, GREEN_BG), 'warn': (AMBER, AMBER_BG), 'bad': (RED, RED_BG)}.get(kind, (GREY, GREY_BG))
+    return (f'<span style="display:inline-block;padding:1px 8px;border-radius:10px;font-size:12px;font-weight:600;'
+            f'white-space:nowrap;background:{bg};color:{color}">{_e(text)}</span>')
+
+
+def success_html(row, params, runtime, base_url, test=False, recovered=False):
+    app = runtime.get('testfairy_app') or {}
+    build = runtime.get('gmx_build_number', runtime.get('gmx_formal_number', ''))
+    branch = params.get('plugin_branch', '')
+    meta = f'GMX #{build} · {_when()}' + (' · recovered from the earlier failure' if recovered else '')
+    out = [_band(True, 'Ready to test', f'{_title(params)} · {branch}', meta,
+                 _button(app.get('share_url', ''), 'Install from TestFairy', GREEN))]
+    line = _jira_line(runtime)
+    if line:
+        out.append(_section(f'<span style="color:{GREY}">{_e(line)}</span>'))
+    else:
+        rows = _ticket_rows(runtime, base_url)
+        cells = []
+        for i, (key, url, summary, why, chip, kind) in enumerate(rows):
+            border = f'border-top:1px solid {LINE};' if i else ''
+            # Two rows per ticket (key + state, then the text) so it also reads on a phone.
+            cells.append(
+                f'<tr><td valign="top" style="{border}padding:10px 8px 2px 0;font-weight:600">{_a(url, key)}</td>'
+                f'<td valign="top" align="right" style="{border}padding:10px 0 2px">{_chip(chip, kind)}</td></tr>'
+                f'<tr><td colspan="2" style="padding:0 0 10px">{_e(summary)}'
+                + (f'<div style="font-size:12.5px;color:{GREY};margin-top:2px">{_e(why)}</div>' if why else '')
+                + '</td></tr>')
+        table = ('<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" '
+                 f'style="border-collapse:collapse;font-size:14px">' + ''.join(cells) + '</table>')
+        out.append(_section(table, f'Tickets in this build ({len(rows)})'))
+    foot = [f'Plugin {_e(params.get("plugin_source", ""))} → {_e(branch)}']
+    if app.get('build_url'):
+        foot.append(_a(app['build_url'], f'Jenkins GMX #{build}'))
+    foot.append(f'task {_e(row["id"])}')
+    out.append(_footer(foot))
+    return _frame(out, 'This is a test email (content from an earlier successful build). It is not a new build.' if test else '')
 
 
 def stage_name(stage):
@@ -123,30 +263,54 @@ def _log_tail(task_id, keep=8):
     return [safe_text(line)[:300] for line in hits[-keep:]]
 
 
+def _failure_parts(row, links):
+    note = safe_text(row.get('note') or '')[:500]
+    reason = note if note and english_only(note) else ''
+    tail = [line for line in _log_tail(row['id']) if english_only(line)]
+    return reason, tail, links or []
+
+
 def compose_failure(row, params, runtime, links=None, test=False):
     """Subject and plain-text body (English) for a failed build: where, and where to look.
     The tool's own reason and log lines are Chinese, so only English lines are quoted."""
-    country, project = params.get('country', ''), params.get('project', '')
     where = stage_name(row.get('stage'))
-    subject = f'{"[TEST] " if test else ""}[Build failed] {country} {project} - failed at {where}'.replace('  ', ' ')
-    note = safe_text(row.get('note') or '')[:500]
+    branch = params.get('plugin_branch', '')
+    subject = f'{"[TEST] " if test else ""}Build failed: {_title(params)} {branch} · at {where}'
+    reason, tail, links = _failure_parts(row, links)
     lines = (['This is a test email (content from an earlier failed build).', ''] if test else []) + [
-        'The build did not finish and needs attention.', '',
-        f'Failed at: {where}',
-        f'Result: {row.get("status", "")}']
-    if note and english_only(note):
-        lines.append(f'Reason: {note}')
-    lines += [f'Plugin branch: {params.get("plugin_source", "")} -> {params.get("plugin_branch", "")}',
-              f'Build task: {row["id"]}']
-    links = links or []
+        f'Build failed: stopped at {where} ({row.get("status", "")})', f'{_title(params)} · {branch}']
+    if reason:
+        lines.append(f'Reason: {reason}')
     if links:
-        lines += ['', 'Jenkins:'] + [f'- {item["label"]}  {item["url"]}' for item in links]
-    tail = [line for line in _log_tail(row['id']) if english_only(line)]
+        lines += [''] + [f'{item["label"]}: {item["url"]}' for item in links]
     if tail:
         lines += ['', 'Last log lines:'] + [f'  {line}' for line in tail]
-    lines += ['', 'The full reason is on the build task in APP Builder. After fixing it, use "Resume" there; '
-              'scheduled builds will also run again.', '', '-- sent automatically by APP Builder']
-    return safe_text(subject)[:250], '\n'.join(lines)
+    lines += ['', 'After fixing it, press Resume on the task in APP Builder. The next scheduled build will also try again.',
+              '', f'Plugin {params.get("plugin_source", "")} -> {branch} · task {row["id"]}',
+              '', '-- sent automatically by APP Builder']
+    return safe_text(' '.join(subject.split()))[:250], '\n'.join(lines)
+
+
+def failure_html(row, params, runtime, links=None, test=False):
+    where = stage_name(row.get('stage'))
+    branch = params.get('plugin_branch', '')
+    reason, tail, links = _failure_parts(row, links)
+    button = _button(links[0]['url'], 'Open Jenkins log', RED) if links else ''
+    out = [_band(False, 'Build failed', f'Stopped at {where}', f'{_title(params)} · {branch} · {_when()}', button)]
+    if reason:
+        out.append(_section(_e(reason), 'Reason'))
+    if tail:
+        box = (f'<div style="background:{GREY_BG};border:1px solid {LINE};border-radius:4px;padding:8px 10px;'
+               f"font-family:Menlo,Consolas,monospace;font-size:12px;white-space:pre-wrap;word-break:break-word\">"
+               + '<br>'.join(_e(t) for t in tail) + '</div>')
+        out.append(_section(box, 'Last log lines'))
+    out.append(_section('After fixing it, press <b>Resume</b> on the task in APP Builder. '
+                        'The next scheduled build will also try again.'))
+    foot = [f'Plugin {_e(params.get("plugin_source", ""))} → {_e(branch)}']
+    foot += [_a(item['url'], item['label']) for item in links[1:]]
+    foot.append(f'task {_e(row["id"])}')
+    out.append(_footer(foot))
+    return _frame(out, 'This is a test email (content from an earlier failed build).' if test else '')
 
 
 def _locked(path):
@@ -230,21 +394,23 @@ def html_body(text):
     return '<div style="font-family:sans-serif;font-size:14px;line-height:1.5">' + '<br>'.join(out) + '</div>'
 
 
-def request_for(issue, users, subject, body, flavor='server'):
+def request_for(issue, users, subject, body, flavor='server', html=None, groups=()):
     who = [{'accountId': u} if flavor == 'cloud' else {'name': u} for u in users]
-    payload = {'subject': subject, 'textBody': body, 'htmlBody': html_body(body),
-               'to': {'reporter': False, 'assignee': False, 'watchers': False, 'voters': False, 'users': who}}
+    to = {'reporter': False, 'assignee': False, 'watchers': False, 'voters': False, 'users': who}
+    if groups:
+        to['groups'] = [{'name': g} for g in groups]
+    payload = {'subject': subject, 'textBody': body, 'htmlBody': html or html_body(body), 'to': to}
     return f'/rest/api/2/issue/{quote(issue)}/notify', payload
 
 
-def send(client, issue, users, subject, body, flavor='server'):
-    path, payload = request_for(issue, users, subject, body, flavor)
+def send(client, issue, users, subject, body, flavor='server', html=None, groups=()):
+    path, payload = request_for(issue, users, subject, body, flavor, html, groups)
     return client._call('POST', path, payload)
 
 
-def describe_request(base_url, issue, users, subject, body, flavor='server'):
+def describe_request(base_url, issue, users, subject, body, flavor='server', html=None, groups=()):
     """The exact request, for the page: method, URL and JSON body (no token)."""
-    path, payload = request_for(issue, users, subject, body, flavor)
+    path, payload = request_for(issue, users, subject, body, flavor, html, groups)
     return 'POST ' + base_url.rstrip('/') + path + '\n' + json.dumps(payload, ensure_ascii=False, indent=2)
 
 
@@ -281,9 +447,10 @@ def notify_team(task_id, client=None, config=None):
     try:
         issue = check_issue(conf.get('mail_issue', ''))
         users = parse_users(conf.get('mail_users', ''))
+        groups = parse_groups(conf.get('mail_groups', ''))
     except ValueError as exc:
         return record({'status': 'SKIPPED', 'kind': kind, 'reason': '邮件设置有误：' + str(exc)})
-    if not issue or not users or not conf.get('base_url'):
+    if not issue or not (users or groups) or not conf.get('base_url'):
         return record({'status': 'SKIPPED', 'kind': kind, 'reason': '未填写 Jira 地址、公告单号或收件人，不发邮件'})
     key = _failure_key(params)
     recovered = False
@@ -291,10 +458,9 @@ def notify_team(task_id, client=None, config=None):
         link = (runtime.get('testfairy_app') or {}).get('share_url')
         if not (isinstance(link, str) and link.startswith('https://')):
             return record({'status': 'SKIPPED', 'kind': kind, 'reason': '本次没有 App 链接，不发邮件'})
-        subject, body = compose(row, params, runtime, conf['base_url'])
         recovered = bool(_mail_state().get(key))
-        if recovered:
-            body = 'The earlier build failure has recovered.\n\n' + body
+        subject, body = compose(row, params, runtime, conf['base_url'], recovered=recovered)
+        html = success_html(row, params, runtime, conf['base_url'], recovered=recovered)
     else:
         signature = _signature(row)
         if conf.get('mail_failure_once', True) and _mail_state().get(key) == signature:
@@ -306,20 +472,22 @@ def notify_team(task_id, client=None, config=None):
         except Exception:
             links = []
         subject, body = compose_failure(row, params, runtime, links)
-    entry = {'kind': kind, 'task_id': task_id, 'issue': issue, 'to': users, 'subject': subject, 'body': body}
+        html = failure_html(row, params, runtime, links)
+    to = users + [f'group:{g}' for g in groups]
+    entry = {'kind': kind, 'task_id': task_id, 'issue': issue, 'to': to, 'subject': subject, 'body': body}
     try:
-        send(client or _client(conf), issue, users, subject, body, conf['flavor'])
+        send(client or _client(conf), issue, users, subject, body, conf['flavor'], html, groups)
     except Exception as exc:
         reason = '邮件发送失败（不会自动重发）：' + safe_text(str(exc))[:300]
         log_mail({**entry, 'status': 'FAILED', 'reason': reason})
-        return record({'status': 'FAILED', 'kind': kind, 'issue': issue, 'to': users, 'subject': subject,
+        return record({'status': 'FAILED', 'kind': kind, 'issue': issue, 'to': to, 'subject': subject,
                        'reason': reason})
     if kind == 'failure':
         _mail_state(lambda data: {**data, key: _signature(row)})
     elif recovered:
         _mail_state(lambda data: {k: v for k, v in data.items() if k != key})
     log_mail({**entry, 'status': 'SENT'})
-    record({'status': 'SENT', 'kind': kind, 'issue': issue, 'to': users, 'subject': subject,
+    record({'status': 'SENT', 'kind': kind, 'issue': issue, 'to': to, 'subject': subject,
             'signature': _signature(row) if kind == 'failure' else None})
 
 
@@ -346,23 +514,27 @@ def test_email(body, client=None, config=None):
         raise ValueError('请先填写并保存 Jira 地址')
     issue = check_issue(body.get('mail_issue', conf.get('mail_issue', '')))
     users = parse_users(body.get('mail_users', conf.get('mail_users', '')))
+    groups = parse_groups(body.get('mail_groups', conf.get('mail_groups', '')))
     if not issue:
         raise ValueError('请填写公告单号')
-    if not users:
-        raise ValueError('请至少填写一个收件人的 Jira 用户名')
+    if not users and not groups:
+        raise ValueError('请至少填写一个收件人的 Jira 用户名或一个用户组')
     task_id = latest_success()
+    html = None
     if task_id:
         row = task(task_id)
-        subject, text = compose(row, json.loads(row['params']), read_state(task_id).get('runtime', {}),
-                                conf['base_url'], test=True)
+        params, runtime = json.loads(row['params']), read_state(task_id).get('runtime', {})
+        subject, text = compose(row, params, runtime, conf['base_url'], test=True)
+        html = success_html(row, params, runtime, conf['base_url'], test=True)
     else:
         subject = '[TEST] APP Builder email test'
         text = ('This is a test email. There is no successful build with an App link yet, so no build '
                 'details are included.\n\n-- sent automatically by APP Builder')
-    request = describe_request(conf['base_url'], issue, users, subject, text, conf['flavor'])
-    entry = {'kind': 'test', 'task_id': task_id, 'issue': issue, 'to': users, 'subject': subject, 'body': text}
+    request = describe_request(conf['base_url'], issue, users, subject, text, conf['flavor'], html, groups)
+    to = users + [f'group:{g}' for g in groups]
+    entry = {'kind': 'test', 'task_id': task_id, 'issue': issue, 'to': to, 'subject': subject, 'body': text}
     try:
-        send(client or _client(conf), issue, users, subject, text, conf['flavor'])
+        send(client or _client(conf), issue, users, subject, text, conf['flavor'], html, groups)
     except Exception as exc:
         message = safe_text(str(exc))
         log_mail({**entry, 'status': 'FAILED', 'reason': message[:300]})
@@ -371,11 +543,11 @@ def test_email(body, client=None, config=None):
             hint = ('（Jira 不会给发起操作的人本人发通知：收件人只有你自己时就等于没人。'
                     '请至少再加一位同事的用户名）')
         elif 'HTTP 400' in message:
-            hint = '（常见原因：用户名不存在，或公告单号不对）'
+            hint = '（常见原因：用户名或用户组不存在，或公告单号不对）'
         elif 'HTTP 403' in message or 'HTTP 401' in message:
             hint = '（Token 无效，或公司 Jira 不允许用接口发通知）'
         elif 'HTTP 404' in message:
             hint = '（公告单不存在，或 Token 看不到这张单）'
         raise ValueError('发送失败：' + message + hint + '\n\n本次请求（不含 Token）：\n' + request) from None
     log_mail({**entry, 'status': 'SENT'})
-    return {'ok': True, 'issue': issue, 'to': users, 'subject': subject, 'from_task': task_id, 'request': request}
+    return {'ok': True, 'issue': issue, 'to': to, 'subject': subject, 'from_task': task_id, 'request': request}

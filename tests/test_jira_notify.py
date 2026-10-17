@@ -223,13 +223,15 @@ class GitAndFlowTests(unittest.TestCase):
         jira = NoInTest(status='Development')
         report, ledger = self.run_notify({'dry_run': False}, ledger={'develop': {'last_sha': self.shas[0]}}, client=jira)
         self.assertEqual([c[0] for c in jira.calls], ['comment', 'assign'])
-        self.assertIn('Please update it manually', jira.calls[0][2])
+        self.assertIn('Please move it to', jira.calls[0][2])
         self.assertEqual(report['errors'], [])
         self.assertIn('Ready for Test', report['needs_manual'][0]['reason'])
         comment = jira.calls[0][2]
-        self.assertIn("there is no 'In Test' transition from the current status 'Development'", comment)
+        self.assertIn("*Status not changed:* 'Development' cannot move to 'In Test' directly.", comment)
+        self.assertNotIn('No Longer Required', comment)                            # the long list stays out
+        self.assertNotIn('Change:', comment)                                       # no repeated title
         self.assertFalse(any('\u4e00' <= ch <= '\u9fff' for ch in comment))       # English only
-        self.assertIn('This ticket is included because of:', comment)
+        self.assertIn('*Included because of*', comment)
         self.assertIn('/commit/', comment)
         self.assertEqual(report['status'], 'DONE')
 
@@ -238,7 +240,7 @@ class GitAndFlowTests(unittest.TestCase):
         jira = FakeJira(issue_type='Bug', required=text)
         report, ledger = self.run_notify({'dry_run': False}, ledger={'develop': {'last_sha': self.shas[0]}}, client=jira)
         self.assertEqual([c[0] for c in jira.calls], ['comment', 'assign'])
-        self.assertIn('Please update it manually', jira.calls[0][2])
+        self.assertIn('Please move it to', jira.calls[0][2])
         self.assertIn('Fix Note', report['needs_manual'][0]['reason'])
         self.assertEqual(report['status'], 'DONE')
 
@@ -265,7 +267,7 @@ class GitAndFlowTests(unittest.TestCase):
         jira = FakeJira()
         self.run_notify({'dry_run': False, 'comment_mentions': '44065253, 43123456'},
                         ledger={'develop': {'last_sha': self.shas[0]}}, client=jira)
-        self.assertTrue(jira.calls[0][2].endswith('\n\ncc [~44065253] [~43123456]'))
+        self.assertIn('\n\ncc [~44065253] [~43123456]\n{color:#97A0AF}[app-build:T1]{color}', jira.calls[0][2])
         self.assertEqual(J.mention_line(''), '')
         self.assertEqual(J.mention_line('abc', 'cloud'), 'cc [~accountid:abc]')
         self.assertEqual(J.mention_line('George <g@x>'), '')          # invalid list: mention nobody
@@ -276,7 +278,8 @@ class GitAndFlowTests(unittest.TestCase):
         jira = FakeJira(status='In Test', existing_comments=['[app-build:7] old', '[app-build:OTHER-TASK] older'])
         report, _ = self.run_notify({'dry_run': False}, ledger={'develop': {'last_sha': self.shas[0]}}, client=jira)
         self.assertEqual([c[0] for c in jira.calls], ['comment', 'assign'])
-        self.assertTrue(jira.calls[0][2].startswith('[app-build:T1] New test build is ready (GMX build #7): '))
+        self.assertTrue(jira.calls[0][2].startswith('{panel:bgColor=#E9F5EE|borderColor=#B7DCC4}\n*Ready to test* · GMX #7'))
+        self.assertTrue(jira.calls[0][2].endswith('{color:#97A0AF}[app-build:T1]{color}'))
 
     def test_failed_build_or_disabled_does_nothing(self):
         jira = FakeJira()
@@ -423,6 +426,36 @@ class PRFirstTests(unittest.TestCase):
         self.assertIn('403', lookup.error)
         self.assertIsNone(lookup.for_commit('b'))
         self.assertEqual(lookup.calls, 1)
+
+    def test_pr_author_login_is_shown_by_its_github_name(self):
+        lookup = J.PRLookup('https://h.example/o/r', 'tok')
+        paths = []
+
+        def get(path):
+            paths.append(path)
+            if path.startswith('/users/'):
+                return {'name': 'Glenn Li'} if path == '/users/45521793' else {}
+            return [{'number': 180, 'title': 'TRANSACT-1: Fix x', 'merged_at': 'x', 'head': {'ref': 'b'},
+                     'user': {'login': '45521793' if 'a' in path else '999'}}]
+        lookup._get = get
+        found, _ = J.tickets_from_commits([{'sha': 'a', 'subject': 's', 'body': ''},
+                                           {'sha': 'b', 'subject': 's', 'body': ''}], PATTERN, None, lookup)
+        authors = [r['pr']['author'] for r in found['TRANSACT-1']['refs']]
+        self.assertEqual(authors, ['Glenn Li', '999'])                 # no name on GitHub: keep the login
+        found, _ = J.tickets_from_commits([{'sha': 'a', 'subject': 's', 'body': ''}], PATTERN, None, lookup)
+        self.assertEqual(paths.count('/users/45521793'), 1)            # one lookup per person
+
+    def test_comment_is_one_box_then_sources_then_actions(self):
+        items = J.ref_items({'refs': [{'sha': 'a', 'subject': '', 'author': '',
+                                       'pr': {'number': 180, 'title': 'TRANSACT-1: Fix [x] *now*', 'url': 'https://g/pull/180',
+                                              'author': 'Glenn Li'}}]}, 'TRANSACT-1')
+        self.assertEqual(items[0]['title'], 'Fix [x] *now*')            # own key dropped from the title
+        text = J.comment_text('[app-build:T9]', 'https://tf/app', 2, 'release/v1.3.1', items, '', 'cc [~a]')
+        self.assertEqual(text.split('\n'), [
+            '{panel:bgColor=#E9F5EE|borderColor=#B7DCC4}', '*Ready to test* · GMX #2 · release/v1.3.1',
+            '*[Install from TestFairy|https://tf/app]*', '{panel}', '*Included because of*',
+            '* [PR #180|https://g/pull/180] Fix \\[x\\] \\*now\\* · Glenn Li', '', 'cc [~a]',
+            '{color:#97A0AF}[app-build:T9]{color}'])
 
     def test_lookup_prefers_the_merged_pull_request(self):
         lookup = J.PRLookup('https://h.example/o/r', 'tok')

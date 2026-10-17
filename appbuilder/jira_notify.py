@@ -28,7 +28,7 @@ EDITABLE = {'enabled': bool, 'dry_run': bool, 'base_url': str, 'transition_name'
             'use_pr_lookup': bool, 'key_pattern': str, 'first_run_commits': int, 'max_tickets_per_run': int,
             'flavor': str, 'transition_fields': str,
             'mail_enabled': bool, 'mail_issue': str, 'mail_users': str, 'mail_failure_once': bool,
-            'comment_mentions': str}
+            'comment_mentions': str, 'mail_groups': str}
 
 
 def _type_ok(key, value):
@@ -64,6 +64,7 @@ def settings(config):
     j.setdefault('mail_users', '')              # 收件人 Jira 用户名，逗号/空格/换行分隔
     j.setdefault('mail_failure_once', True)     # 同一原因连续失败只发一次，恢复成功时再发
     j.setdefault('comment_mentions', '')        # 评论里 @ 的 Jira 用户名，逗号/空格/换行分隔
+    j.setdefault('mail_groups', '')             # 也按 Jira 用户组发邮件，逗号/换行分隔（组名可含空格）
     return j
 
 
@@ -203,6 +204,20 @@ class PRLookup:
         self.cache[sha] = info
         return info
 
+    def display_name(self, login):
+        """GitHub profile name for a login (staff numbers are logins here), else the login.
+        Best effort: any failure just keeps the login."""
+        if not login or self.calls >= self.max_calls:
+            return login
+        names = self.__dict__.setdefault('names', {})
+        if login not in names:
+            self.calls += 1
+            try:
+                names[login] = str((self._get(f'/users/{quote(login)}') or {}).get('name') or '').strip()[:80]
+            except Exception:
+                names[login] = ''
+        return names[login] or login
+
 
 def tickets_from_commits(commits, pattern, llm=None, prs=None):
     """Return ({key: info}, []). Every ticket key mentioned anywhere - PR title, PR branch,
@@ -218,6 +233,8 @@ def tickets_from_commits(commits, pattern, llm=None, prs=None):
         if pr:
             places += [('PR标题/分支', pr['title'] + '\n' + pr['head']), ('PR描述', pr['body'])]
         places += [('提交标题', c['subject']), ('提交正文', c['body'])]
+        if pr and prs is not None and hasattr(prs, 'display_name') and pr.get('author'):
+            pr = {**pr, 'author': prs.display_name(pr['author'])}
         ref = {'sha': c['sha'], 'subject': c['subject'], 'author': c.get('author', ''),
                'pr': ({k: pr.get(k) for k in ('number', 'title', 'url', 'author')} if pr else None)}
         for name, text in places:
@@ -404,42 +421,86 @@ def repo_web_url(plugin_url):
     return f'https://{parts.netloc}/{path}'
 
 
-def describe_refs(info):
-    """English lines naming each PR / commit that pulled the ticket in, and who made it."""
+def _without_key(title, key):
+    """'TRANSACT-1: Fix x' -> 'Fix x' when TRANSACT-1 is this ticket (it is already on the page)."""
+    if not key:
+        return title
+    return re.sub(r'^\s*[\[(]?' + re.escape(key) + r'[\])]?\s*[:\-–|]?\s*', '', title or '').strip() or title
+
+
+def ref_items(info, key=''):
+    """Each PR / commit that pulled the ticket in: {kind, label, title, url, author}."""
     repo = info.get('repo_url', '')
     refs = info.get('refs') or [{'sha': info.get('sha', ''), 'subject': info.get('subject', ''),
                                  'author': info.get('author', ''), 'pr': None}]
-    lines, seen_prs = [], set()
+    items, seen_prs = [], set()
     for ref in refs:
         pr = ref.get('pr')
         if pr and pr.get('number') is not None:
             if pr['number'] in seen_prs:
                 continue
             seen_prs.add(pr['number'])
-            url = pr.get('url') or (f'{repo}/pull/{pr["number"]}' if repo else '')
-            who = f' by {pr["author"]}' if pr.get('author') else ''
-            lines.append(f'- PR #{pr["number"]} "{pr.get("title") or ""}"{who}' + (f' {url}' if url else ''))
+            items.append({'kind': 'PR', 'label': f'PR #{pr["number"]}',
+                          'title': safe_text(_without_key(pr.get('title') or '', key))[:200],
+                          'url': pr.get('url') or (f'{repo}/pull/{pr["number"]}' if repo else ''),
+                          'author': safe_text(pr.get('author') or '')[:80]})
         else:
             sha = ref.get('sha') or ''
-            url = f'{repo}/commit/{sha}' if repo and sha else ''
-            who = f' by {ref["author"]}' if ref.get('author') else ''
-            lines.append(f'- Commit {sha[:10]} "{ref.get("subject") or ""}"{who}' + (f' {url}' if url else ''))
-    return lines
+            items.append({'kind': 'Commit', 'label': f'Commit {sha[:10]}',
+                          'title': safe_text(_without_key(ref.get('subject') or '', key))[:200],
+                          'url': f'{repo}/commit/{sha}' if repo and sha else '',
+                          'author': safe_text(ref.get('author') or '')[:80]})
+    return items
+
+
+def describe_refs(info, key=''):
+    """Plain English lines (kept for the delivery page and the plain-text email)."""
+    return [f'- {i["label"]} "{i["title"]}"' + (f' by {i["author"]}' if i['author'] else '')
+            + (f' {i["url"]}' if i['url'] else '') for i in ref_items(info, key)]
+
+
+WIKI_SPECIAL = re.compile(r'([\[\]{}|*_^~+!#])')
+
+
+def wiki_text(text):
+    """Plain text that Jira wiki markup shows as typed (no accidental bold, links or macros)."""
+    return WIKI_SPECIAL.sub(r'\\\1', (text or '').replace('\n', ' '))
+
+
+def comment_text(marker, link, gmx_build, branch, items, manual, mentions):
+    """The Jira comment (wiki markup). One highlighted box with the state and the install
+    link, then why the ticket is here, then anything a person must do. The marker goes
+    last in grey: it is how a re-run knows this build already commented."""
+    head = '*Ready to test*' + (f' · GMX #{gmx_build}' if gmx_build else '') + (f' · {wiki_text(branch)}' if branch else '')
+    lines = ['{panel:bgColor=#E9F5EE|borderColor=#B7DCC4}', head,
+             f'*[Install from TestFairy|{link}]*', '{panel}']
+    if items:
+        lines.append('*Included because of*')
+        for i in items:
+            label = f'[{i["label"]}|{i["url"]}]' if i['url'] else i['label']
+            lines.append(f'* {label} {wiki_text(i["title"])}' + (f' · {wiki_text(i["author"])}' if i['author'] else ''))
+    if manual:
+        lines += ['', '{color:#9A5B00}*Status not changed:* ' + wiki_text(manual) + '{color}']
+    if mentions:
+        lines += ['', mentions]
+    lines.append('{color:#97A0AF}' + marker + '{color}')
+    return '\n'.join(lines)
 
 
 def _manual_reason(exc_or_plan, status, name):
     """Plain English for the Jira comment (Jira readers do not see this tool's Chinese UI)."""
+    please = f"Please move it to '{name}' manually."
     if isinstance(exc_or_plan, NoSuchTransition):
-        available = ', '.join(getattr(exc_or_plan, 'available', [])) or 'none'
-        return f"there is no '{name}' transition from the current status '{status}' (available: {available})"
+        return f"'{status}' cannot move to '{name}' directly. {please}"
     if isinstance(exc_or_plan, dict):
         parts = []
         if exc_or_plan.get('missing'):
-            parts.append('required field(s) without a configured value: ' + ', '.join(exc_or_plan['missing']))
+            parts.append('required field(s) ' + ', '.join(exc_or_plan['missing']) + ' have no configured value')
         if exc_or_plan.get('bad'):
-            parts.append('configured value not allowed for: ' + ', '.join(b.split(':', 1)[0] for b in exc_or_plan['bad']))
-        return '; '.join(parts)
-    return f"the '{name}' transition could not be checked ({type(exc_or_plan).__name__})"
+            parts.append('configured value not allowed for ' + ', '.join(b.split(':', 1)[0] for b in exc_or_plan['bad']))
+        text = '; '.join(parts)
+        return text[:1].upper() + text[1:] + '. ' + please
+    return f"The '{name}' move could not be checked ({type(exc_or_plan).__name__}). {please}"
 
 
 def mention_line(text, flavor='server'):
@@ -455,7 +516,7 @@ def mention_line(text, flavor='server'):
     return 'cc ' + ' '.join(f'[~accountid:{u}]' if flavor == 'cloud' else f'[~{u}]' for u in users)
 
 
-def process_ticket(client, key, info, link, build_label, conf, llm, dry_run, gmx_build=None):
+def process_ticket(client, key, info, link, build_label, conf, llm, dry_run, gmx_build=None, branch=''):
     # The marker identifies THIS build task, so a ticket gets one comment per build it is in.
     # (The GMX build number alone is not unique: every new upload branch starts at #2.)
     marker = f'[app-build:{build_label}]'
@@ -470,9 +531,9 @@ def process_ticket(client, key, info, link, build_label, conf, llm, dry_run, gmx
     reporter = fields.get('reporter') or {}
     status = (fields.get('status') or {}).get('name', '')
     issue_type = (fields.get('issuetype') or {}).get('name', '')
-    summary = tester_summary(llm, info['subject'], info.get('body', ''))
-    refs = describe_refs(info)
-    result['refs'] = refs
+    items = ref_items(info, key)
+    result['ref_items'] = items
+    result['refs'] = describe_refs(info, key)
     need_move = status.strip().lower() != name.strip().lower()
     plan = None
     if need_move:
@@ -486,15 +547,11 @@ def process_ticket(client, key, info, link, build_label, conf, llm, dry_run, gmx
             raise
         except Exception as exc:
             result['manual'] = _manual_reason(exc, status, name)
-    text = f'{marker} New test build is ready' + (f' (GMX build #{gmx_build})' if gmx_build else '') + f': {link}'
-    if refs:
-        text += '\n\nThis ticket is included because of:\n' + '\n'.join(refs)
-    text += f'\n\nChange: {summary}'
-    if result.get('manual'):
-        text += f"\n\nNote: the status was not changed to '{name}' automatically: {result['manual']}. Please update it manually."
+            if isinstance(exc, NoSuchTransition):
+                result['available'] = getattr(exc, 'available', [])
+    result['status'] = status
     mentions = mention_line(conf.get('comment_mentions', ''), conf.get('flavor', 'server'))
-    if mentions:
-        text += '\n\n' + mentions
+    text = comment_text(marker, link, gmx_build, branch, items, result.get('manual'), mentions)
     if dry_run:
         step = (f'transition -> {name} (当前 {status}, 类型 {issue_type or "?"})' if need_move
                 else f'已在 {name}，不需要流转')
@@ -504,7 +561,7 @@ def process_ticket(client, key, info, link, build_label, conf, llm, dry_run, gmx
             step += '；自动选第一个可选值：' + '、'.join(plan['auto'])
         elif plan and plan['fields']:
             step += '；将按配置填写必填字段'
-        result['steps'] = [f'[dry-run] comment: {text[:80]}', f'[dry-run] assign -> {reporter.get("displayName") or reporter.get("name")}', f'[dry-run] {step}']
+        result['steps'] = [f'[dry-run] comment: Ready to test, {len(items)} 个来源' + ('，含状态提醒' if result.get('manual') else ''), f'[dry-run] assign -> {reporter.get("displayName") or reporter.get("name")}', f'[dry-run] {step}']
         return result
     if not any(marker in (c.get('body') or '') for c in client.comments(key)):
         client.add_comment(key, text)
@@ -512,12 +569,14 @@ def process_ticket(client, key, info, link, build_label, conf, llm, dry_run, gmx
     if conf['assign_to_reporter'] and (reporter.get('name') or reporter.get('accountId')):
         client.assign(key, reporter)
         result['steps'].append('assign')
+        result['assignee'] = safe_text(str(reporter.get('displayName') or reporter.get('name') or ''))[:80]
     if need_move and not result.get('manual'):
         try:
             client.do_transition(key, plan)
+            result['status'] = name
             result['steps'].append('transition' + (' (自动选: ' + '、'.join(plan['auto']) + ')' if plan.get('auto') else ''))
         except Exception as exc:
-            result['manual'] = f"moving to '{name}' failed ({safe_text(str(exc))[:120]})"
+            result['manual'] = f"Moving to '{name}' failed ({safe_text(str(exc))[:120]}). Please move it manually."
     return result
 
 
@@ -636,7 +695,8 @@ def _notify_jira(task_id, client=None, llm=None, config=None, preview=None):
                                       timeout=conf['timeout_seconds'], ca_bundle=conf.get('ca_bundle'))
     for key in keys:
         try:
-            results.append(process_ticket(client, key, found[key], link, task_id, conf, llm, dry, gmx_build=build))
+            results.append(process_ticket(client, key, found[key], link, task_id, conf, llm, dry, gmx_build=build,
+                                          branch=params.get('plugin_branch', '')))
         except UnknownTicket:
             ignored.append(key)
             action('JIRA', f'{key} 在 Jira 中查不到，已忽略')
@@ -645,9 +705,11 @@ def _notify_jira(task_id, client=None, llm=None, config=None, preview=None):
             action('JIRA', safe_text(f'{key} 处理失败: {exc}'))
     report = {'status': 'PREVIEW' if preview is not None else ('DRY_RUN' if dry else ('DONE' if not errors else 'PARTIAL')),
               'at': datetime.now().isoformat(timespec='seconds'), 'link': link, 'build': build,
+              'transition': conf['transition_name'],
               'commits_scanned': len(commits), 'tickets': results,
               'errors': errors, 'ignored_keys': ignored, 'ambiguous_commits': ambiguous, 'from': old, 'to': source_sha,
-              'needs_manual': [{'key': r['key'], 'reason': r['manual']} for r in results if r.get('manual')],
+              'needs_manual': [{'key': r['key'], 'reason': r['manual'] + (' (available: ' + ', '.join(r['available']) + ')' if r.get('available') else '')}
+                             for r in results if r.get('manual')],
               'ticket_sources': {k: found[k].get('source') for k in keys},
               'pr_lookup': ('未启用' if not prs else (prs.error or f'正常，查询 {prs.calls} 次'))}
     if preview is not None:
