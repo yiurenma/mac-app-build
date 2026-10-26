@@ -82,7 +82,7 @@ class TestRecoveryAndIsolation(unittest.TestCase):
             upgrade.chmod(0o755)
             with patch.dict(os.environ, {'PATH': str(root) + os.pathsep + os.environ['PATH']}):
                 run_bootstrap(root, Path(tmp) / 'bootstrap.log', timeout_minutes=1)
-            self.assertEqual((root / 'where-executed.txt').read_text().strip(), str(root))
+            self.assertEqual(Path((root / 'where-executed.txt').read_text().strip()).resolve(), root.resolve())
 
     def test_bootstrap_nonzero_exit_fails(self):
         with tempfile.TemporaryDirectory() as tmp:

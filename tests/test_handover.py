@@ -99,6 +99,7 @@ class HandOverOrderTests(unittest.TestCase):
 class StopOtherFoldersTests(unittest.TestCase):
     def test_only_services_from_other_folders_are_stopped(self):
         with tempfile.TemporaryDirectory() as base:
+            base = Path(base).resolve()      # macOS temp dirs live behind a /var -> /private/var symlink
             new, old = Path(base) / 'app', Path(base) / 'app-old'
             for folder in (new, old):
                 (folder / 'appbuilder').mkdir(parents=True)

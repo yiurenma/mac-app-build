@@ -11,7 +11,7 @@ REAL_DISABLE = lifecycle.disable_launchd
 
 class LifecycleTests(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory(); self.data = Path(self.tmp.name)
+        self.tmp = tempfile.TemporaryDirectory(); self.data = Path(self.tmp.name).resolve()
         self.stack = contextlib.ExitStack()
         self.stack.enter_context(patch.object(lifecycle, 'DATA', self.data))
         self.stack.enter_context(patch.object(lifecycle, 'disable_launchd', return_value=False))

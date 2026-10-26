@@ -50,7 +50,7 @@ jobs:
         run: |
           import pathlib, subprocess, sys
           files = [p.name for p in sorted(pathlib.Path('tests').glob('test_*.py'))
-                   if 'sync_playwright' not in p.read_text(encoding='utf-8')]
+                   if not any(k in p.read_text(encoding='utf-8') for k in ('sync_playwright', 'playwright.sync_api', 'import test_shared_build_ui'))]
           failed = []
           for name in files:
               r = subprocess.run([sys.executable, '-m', 'unittest', 'discover', '-s', 'tests', '-p', name],

@@ -120,7 +120,7 @@ with patch('appbuilder.runner.task_folder', return_value=Path(sys.argv[1])):
                     folder = root / f'task-{i}'
                     self.assertEqual((folder / 'order.txt').read_text().splitlines(), ['upgrade', 'bootstrap'])
                     for name in ('upgrade-cwd.txt', 'bootstrap-cwd.txt'):
-                        self.assertEqual((folder / name).read_text().strip(), str(folder))
+                        self.assertEqual(Path((folder / name).read_text().strip()).resolve(), folder.resolve())
                     log = (folder / 'bootstrap.log').read_text()
                     self.assertIn(f'upgrade task-{i}\n', log)
                     self.assertIn(f'bootstrap task-{i}\n', log)
