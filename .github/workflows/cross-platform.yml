@@ -53,9 +53,17 @@ jobs:
                    if 'sync_playwright' not in p.read_text(encoding='utf-8')]
           failed = []
           for name in files:
-              r = subprocess.run([sys.executable, '-m', 'unittest', 'discover', '-s', 'tests', '-p', name])
+              r = subprocess.run([sys.executable, '-m', 'unittest', 'discover', '-s', 'tests', '-p', name],
+                                 capture_output=True, text=True, encoding='utf-8', errors='replace')
               if r.returncode:
                   failed.append(name)
+                  lines = [l for l in r.stderr.splitlines() if l.startswith(('ERROR:', 'FAIL:'))
+                           or l.lstrip().startswith(('AssertionError', 'FileNotFoundError', 'ModuleNotFoundError',
+                                                      'ImportError', 'AttributeError', 'OSError', 'PermissionError'))]
+                  for l in lines[:6]:
+                      print('::error title=' + name + '::' + l.strip()[:250])
+                  if not lines:
+                      print('::error title=' + name + '::' + ' | '.join(r.stderr.splitlines()[-4:])[:300])
           print(f'{len(files)} files, failed: {failed}')
           sys.exit(1 if failed else 0)
 
