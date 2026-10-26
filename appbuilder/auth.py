@@ -9,6 +9,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 from urllib.parse import urlsplit
 
 SERVICE = 'mac-app-builder.jenkins'
@@ -86,15 +87,69 @@ def _one_visible(page, selectors):
     return found[0] if found else None
 
 
-def submit_recognized_login(page, username, password, *, log=None):
+def submit_recognized_login(page, username, password, *, log=None, validate_target=None):
     """Conservatively fill known Jenkins/enterprise form controls.
 
+    True means one submit click was attempted, not verified authentication.
+    Callers must verify their exact authenticated destination; never retry a
+    password submit merely because its asynchronous handler has not completed.
     Return False for an unknown login page rather than accidentally entering
     corporate passwords into arbitrary forms. MFA stays subject to IdP rules.
     """
     def note(message):
         if log:
             log(message)
+
+    initial = urlsplit(getattr(page, 'url', ''))
+
+    def approved(url):
+        try:
+            parsed = urlsplit(url)
+            if parsed.scheme != 'https' or not parsed.hostname or parsed.username or parsed.password:
+                return False
+            if validate_target is not None:
+                return bool(validate_target(url))
+            return (parsed.scheme, parsed.hostname, parsed.port) == (initial.scheme, initial.hostname, initial.port)
+        except Exception:
+            return False
+
+    def safe_control(control):
+        # Re-evaluate after each SSO navigation and immediately before each action.
+        if not approved(getattr(page, 'url', '')):
+            note('登录目标未获批准，停止自动填写或提交')
+            return False
+        try:
+            targets = control.evaluate("""el => {
+              const urls=[];
+              if(el.form) {
+                urls.push(el.form.action || location.href);
+                for(const button of el.form.querySelectorAll('[formaction]')) urls.push(button.formAction);
+              }
+              if(el.hasAttribute('formaction')) urls.push(el.formAction);
+              return urls;
+            }""")
+            allowed = isinstance(targets, list) and all(isinstance(url, str) and approved(url) for url in targets)
+        except Exception:
+            allowed = False
+        if not allowed:
+            note('登录表单提交目标未获批准，停止自动填写或提交')
+        return allowed
+
+    def ready(control, *, editable=False, submitting=False):
+        try:
+            control.wait_for(state='visible', timeout=5000)
+            deadline = time.monotonic() + 5
+            while not control.is_enabled() or (editable and not control.is_editable()):
+                if time.monotonic() >= deadline:
+                    note('登录控件仍未启用或不可编辑，停止自动填写')
+                    return False
+                page.wait_for_timeout(50)
+            if submitting and not control.evaluate('el => !el.form || el.form.checkValidity()'):
+                note('登录表单校验未通过，未提交认证')
+                return False
+        except Exception:
+            return False
+        return safe_control(control)
 
     user_fields = ['input[name="j_username"]', 'input[name="username"]',
                    'input[name="loginfmt"]', 'input#i0116',
@@ -104,8 +159,18 @@ def submit_recognized_login(page, username, password, *, log=None):
     user = _one_visible(page, user_fields)
     pwd = _one_visible(page, pass_fields)
     if not user and not pwd:
-        return False
+        # DOM load is not form readiness: allow bounded asynchronous initialization.
+        try:
+            page.locator(','.join(css + ':visible' for css in user_fields + pass_fields)).first.wait_for(state='visible', timeout=5000)
+        except Exception:
+            return False
+        user = _one_visible(page, user_fields)
+        pwd = _one_visible(page, pass_fields)
+        if not user and not pwd:
+            return False
     if user:
+        if not ready(user, editable=True):
+            return False
         note('填写 Jenkins/SSO 账号（已隐藏）')
         user.fill(username)
     if not pwd:
@@ -113,6 +178,8 @@ def submit_recognized_login(page, username, password, *, log=None):
         selectors = ['#idSIButton9', 'button[type="submit"]', 'input[type="submit"]']
         btn = _one_visible(page, selectors)
         if not btn:
+            return False
+        if not ready(btn, submitting=True):
             return False
         note('点击登录下一步')
         btn.click()
@@ -123,11 +190,15 @@ def submit_recognized_login(page, username, password, *, log=None):
         pwd = _one_visible(page, pass_fields)
     if not pwd:
         return False
+    if not ready(pwd, editable=True):
+        return False
     note('填写 Jenkins/SSO 密码（已隐藏）')
     pwd.fill(password)
     submit = _one_visible(page, ['#idSIButton9', 'button[type="submit"]',
                                  'input[type="submit"]'])
     if not submit:
+        return False
+    if not ready(submit, submitting=True):
         return False
     note('点击认证表单提交')
     submit.click()
@@ -162,3 +233,84 @@ def read_github_token():
     if result.returncode:
         return None
     return result.stdout.strip() or None
+
+
+JIRA_SERVICE = 'mac-app-builder.jira-token'
+
+
+def store_jira_token(token: str):
+    """Store the Jira PAT in the local Keychain; never in the page, task params or logs."""
+    token = str(token or '').strip()
+    if not token or len(token) > 4096 or '\n' in token or '\r' in token:
+        raise CredentialError('Jira Token 不能为空、过长或包含换行')
+    if sys.platform != 'darwin':
+        raise CredentialError('保存 Jira Token 目前仅支持 macOS Keychain')
+    result = subprocess.run(
+        ['security', 'add-generic-password', '-U', '-s', JIRA_SERVICE, '-a', 'enterprise', '-w', token],
+        text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    if result.returncode:
+        raise CredentialError('Jira Token 保存到 Mac Keychain 失败')
+
+
+def read_jira_token():
+    if sys.platform != 'darwin':
+        return None
+    result = subprocess.run(
+        ['security', 'find-generic-password', '-s', JIRA_SERVICE, '-a', 'enterprise', '-w'],
+        text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    return (result.stdout.strip() or None) if result.returncode == 0 else None
+
+
+JENKINS_API_SERVICE = 'mac-app-builder.jenkins-api-token'
+JENKINS_API_SITES = ('plugin', 'gmx')   # two different Jenkins servers, one token each
+
+
+def _keychain_write(service, account, secret, label):
+    if sys.platform != 'darwin':
+        raise CredentialError(f'保存{label}目前仅支持 macOS Keychain')
+    result = subprocess.run(['security', 'add-generic-password', '-U', '-s', service, '-a', account, '-w', secret],
+                            text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    if result.returncode:
+        raise CredentialError(f'{label}保存到 Mac Keychain 失败')
+
+
+def _keychain_read(service, account):
+    if sys.platform != 'darwin':
+        return None
+    result = subprocess.run(['security', 'find-generic-password', '-s', service, '-a', account, '-w'],
+                            text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    return (result.stdout.strip() or None) if result.returncode == 0 else None
+
+
+def store_jenkins_api_token(site: str, token: str):
+    """Jenkins user API token for one Jenkins server (plugin or gmx); Keychain only."""
+    if site not in JENKINS_API_SITES:
+        raise CredentialError('未知的 Jenkins')
+    token = str(token or '').strip()
+    if not token or len(token) > 512 or any(c.isspace() for c in token):
+        raise CredentialError('Jenkins API Token 不能为空、过长或包含空白')
+    _keychain_write(JENKINS_API_SERVICE + '.' + site, 'token', token, 'Jenkins API Token ')
+
+
+def read_jenkins_api_token(site: str):
+    return _keychain_read(JENKINS_API_SERVICE + '.' + site, 'token') if site in JENKINS_API_SITES else None
+
+
+def store_jenkins_api_user(user: str):
+    """Jenkins user ID used with the API tokens (the staff number)."""
+    user = str(user or '').strip()
+    if not user or len(user) > 128 or any(c.isspace() for c in user) or ':' in user:
+        raise CredentialError('Jenkins 用户 ID 不能为空、过长，且不能包含空白或冒号')
+    _keychain_write(JENKINS_API_SERVICE + '.user', 'default', user, 'Jenkins 用户 ID ')
+
+
+def read_jenkins_username():
+    """API user ID; falls back to the saved browser-login account name."""
+    return (_keychain_read(JENKINS_API_SERVICE + '.user', 'default')
+            or _keychain_read(SERVICE + '.account', 'default'))
+
+
+def jenkins_api_credentials(site):
+    """(user, token) for one Jenkins server, or None when either is missing."""
+    user, token = read_jenkins_username(), read_jenkins_api_token(site)
+    return (user, token) if user and token else None

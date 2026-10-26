@@ -71,7 +71,7 @@ class JenkinsGreenTickDOMTests(unittest.TestCase):
         worker.page=self.page
         worker.context=SimpleNamespace(request=SimpleNamespace(
             get=lambda *args, **kwargs: self.fail('No consoleText should be downloaded')))
-        worker.visit=lambda url:200
+        worker.visit=lambda url, **kwargs:200
         worker.find_callback=lambda *args:None
         self.assertEqual(JenkinsBrowser.wait_result(worker, 'https://ci.corp/job/p/', 2), ('SUCCESS', ''))
 

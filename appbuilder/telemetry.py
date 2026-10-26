@@ -38,10 +38,13 @@ def safe_text(value, env=None):
     s = re.sub(r'https?://[^\s<>\"\']+',
                lambda match: (lambda u: urlunsplit((u.scheme, u.netloc, u.path, '', '')))(urlsplit(match.group())),
                s)
-    s = re.sub(r'(?i)\b(authorization|proxy-authorization|cookie|set-cookie)\s*[:=]\s*[^\s,;]+',
+    s = re.sub(r'(?im)\b(authorization|proxy-authorization|cookie|set-cookie)\s*[:=]\s*[^\r\n]*',
                r'\1=[REDACTED]', s)
-    s = re.sub(r'(?i)\b(token|password|passwd|secret|api[_-]?key|access[_-]?key)\s*[:=]\s*[^\s,;&]+',
-               r'\1=[REDACTED]', s)
+    # Structured errors and Playwright action logs can quote credential values.
+    s = re.sub(r"(?i)([\"']?)\b(token|password|passwd|secret|api[_-]?key|access[_-]?key)\1\s*[:=]\s*(?:\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'|[^\s,;&]+)",
+               r'\2=[REDACTED]', s)
+    s = re.sub(r"(?i)\bfill\(\s*(?:\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*')\s*\)",
+               'fill([REDACTED])', s)
     return s
 
 

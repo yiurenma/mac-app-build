@@ -4,13 +4,37 @@ import re
 from urllib.parse import quote
 
 MAJOR_RE = re.compile(r"^[0-9]+\.[0-9]+$")
+VERSION_INPUT_RE = re.compile(r"^[0-9]+\.[0-9]+(?:\.[0-9]+)?$")
 BRANCH_RE = re.compile(r"^[A-Za-z0-9_./-]+$")
 ARTIFACTS = ("PayByBankDomainModelPluginKit", "PayByBankJourneyPluginKit")
 
+# Only normalize the shipped defaults when creating a new task; explicit custom paths stay.
+# The Plugin repo is registered under the GB EIM (12579065): GitHub callbacks only reach
+# release builds in that folder. The old Global EIM (12824743) folder never gets a callback.
+PLUGIN_RELEASE_PARENT = ('https://mobile-premier01-jenkins.build-mobile.iwpb.euw2.prod.aws.cloud.hsbc/'
+                         'job/IWPB_Transaction_Banking/job/Domestic_Payment_and_Transfer_Mobile_GB_12579065/'
+                         'job/Lib/job/mobile_paybybank-ios-plugin/job/release-build/job/')
+PLUGIN_FEATURE_PARENT = PLUGIN_RELEASE_PARENT.replace('/release-build/', '/feature-build/')
+OLD_PLUGIN_RELEASE_PARENT = PLUGIN_RELEASE_PARENT.replace('_GB_12579065/', '_Global_12824743/')
+OLD_PLUGIN_FEATURE_PARENT = PLUGIN_FEATURE_PARENT.replace('_GB_12579065/', '_Global_12824743/')
+SHIPPED_PARENTS = (PLUGIN_RELEASE_PARENT, PLUGIN_FEATURE_PARENT, OLD_PLUGIN_RELEASE_PARENT, OLD_PLUGIN_FEATURE_PARENT)
+
+
+def plugin_parent_for_branch(parent, branch):
+    """Saved schedules and old forms may still carry an old shipped default: move those to
+    the current release folder. A path the user typed themselves is never changed."""
+    normal = parent.rstrip('/') + '/'
+    if normal in (OLD_PLUGIN_RELEASE_PARENT, OLD_PLUGIN_FEATURE_PARENT):
+        return PLUGIN_RELEASE_PARENT if branch.startswith('release/') or normal == OLD_PLUGIN_RELEASE_PARENT else PLUGIN_FEATURE_PARENT
+    if branch.startswith('release/') and normal == PLUGIN_FEATURE_PARENT:
+        return PLUGIN_RELEASE_PARENT
+    return parent
+
+
 
 def validate_args(major, plugin_source, gmx_source, country, project):
-    if not MAJOR_RE.fullmatch(major):
-        raise ValueError("Plugin Version 必须为 1.3 这样的主次版本号")
+    if not VERSION_INPUT_RE.fullmatch(major):
+        raise ValueError("Plugin Version 必须为两段数字（如 1.3）或完整三段数字（如 1.3.1），不带 v")
     for b in [plugin_source, gmx_source]:
         if not b or not BRANCH_RE.fullmatch(b) or b.startswith(('-', '.')) or '..' in b or '//' in b or b.endswith(('/', '.')):
             raise ValueError(f"无效源分支: {b!r}")
@@ -23,16 +47,37 @@ def timestamp_now():
     return datetime.now().strftime("%Y%m%d%H%M")
 
 
-def branch_names(major, stamp):
-    if not MAJOR_RE.fullmatch(major) or not re.fullmatch(r"\d{12}", stamp):
+def gmx_issue_key(source, explicit=''):
+    """Use an explicit issue or the single unambiguous issue in the source ref."""
+    if explicit:
+        if not re.fullmatch(r'[A-Z]{1,10}-[0-9]+', explicit):
+            raise ValueError('GMX 工单编号必须为大写字母-数字，例如 UKPBB-203745')
+        return explicit
+    keys = set(re.findall(r'(?<![A-Za-z0-9])[A-Z]{1,10}-[0-9]+(?![A-Za-z0-9])', source))
+    if len(keys) > 1:
+        raise ValueError('GMX 源分支含多个工单编号；请填写 GMX Issue Key（或 --gmx-issue-key），使用真实工单编号')
+    return keys.pop() if keys else ''
+
+
+def validate_gmx_target(branch):
+    if (not re.fullmatch(r'upload/[A-Z]{1,10}-[0-9]+[A-Za-z0-9_.-]*', branch)
+            or '..' in branch or branch.endswith(('.', '.lock'))):
+        raise ValueError('GMX 目标分支必须为 upload/工单编号-描述；旧 upload/auto 分支需先修复')
+    return branch
+
+
+def branch_names(major, stamp, gmx_source='', issue_key=''):
+    if not VERSION_INPUT_RE.fullmatch(major) or not re.fullmatch(r"\d{12}", stamp):
         raise ValueError("无效大版本或时间戳")
-    v = f"{major}.{stamp}"
-    return {"plugin_version": v, "plugin_branch": f"release/{v}",
-            "gmx_branch": f"upload/auto{stamp}"}
+    key = gmx_issue_key(gmx_source, issue_key)
+    target = f"upload/{key}-auto{stamp}" if key else f"upload/AUTO-{stamp}"
+    v = f"{major}.{stamp}" if MAJOR_RE.fullmatch(major) else major
+    return {"plugin_version": v, "plugin_branch": f"release/v{v}",
+            "gmx_branch": validate_gmx_target(target)}
 
 
 def job_urls(config, plugin_branch, gmx_branch):
-    parent1 = config['jenkins']['plugin_parent'].rstrip('/') + '/'
+    parent1 = plugin_parent_for_branch(config['jenkins']['plugin_parent'], plugin_branch).rstrip('/') + '/'
     parent2 = config['jenkins']['gmx_parent'].rstrip('/') + '/'
     plugin_job = plugin_branch.replace('/', '_').replace('.', '_')
     gmx_job = quote(gmx_branch, safe='')

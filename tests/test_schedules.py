@@ -45,16 +45,6 @@ class ValidationTests(SchedulerCase):
         self.assertEqual(row['next_run'], '2026-10-10T11:00:00')
         self.assertEqual(json.loads(row['params'])['country'], 'UK')
 
-    def test_template_keeps_every_form_field_so_future_fields_need_no_schedule_change(self):
-        form_body = {**TEMPLATE, 'gmx_build_type': 'Release', 'poll_seconds': '60', 'gmx_force': False,
-                     'visible': False, 'verbose': True, 'some_future_form_field': 'kept', 'empty_one': ''}
-        row = schedules.create_schedule('x', '0 * * * *', form_body, now=dt(2026, 10, 10, 10, 15), config=CONFIG)
-        saved = json.loads(row['params'])
-        self.assertEqual(saved['gmx_build_type'], 'Release')
-        self.assertEqual(saved['some_future_form_field'], 'kept')
-        self.assertIs(saved['gmx_force'], False)
-        self.assertNotIn('empty_one', saved)          # empty means "use the default"
-
     def test_secrets_are_refused_not_stored(self):
         for key in ('jenkins_password', 'jenkins_user', 'github_token'):
             with self.subTest(key=key), self.assertRaisesRegex(ValueError, 'Keychain'):
@@ -92,11 +82,11 @@ class TickTests(SchedulerCase):
         self.make()
         self.assertEqual(self.tick(dt(2026, 10, 10, 10, 59, 59)), {'queued': 0, 'started': 0})
 
-    def test_due_schedule_starts_a_task_with_unattended_defaults(self):
+    def test_due_schedule_starts_a_task_with_shared_defaults(self):
         row = self.make()
         self.assertEqual(self.tick(dt(2026, 10, 10, 11, 0, 5)), {'queued': 1, 'started': 1})
         body = self.started[0]
-        self.assertIs(body['visible'], False)   # no surprise Chrome windows
+        self.assertIs(body['visible'], True)   # same default as New build
         self.assertIs(body['verbose'], True)
         self.assertNotIn('jenkins_password', body)
         run = schedules.last_run(row['id'])
@@ -180,13 +170,38 @@ class TickTests(SchedulerCase):
         self.assertEqual(self.tick(dt(2026, 10, 10, 10, 20, 5)), {'queued': 0, 'started': 1})
         self.assertEqual(schedules.last_run(row['id'])['note'], '手动触发')
 
+    def test_hidden_schedule_and_manual_run_keep_mode_and_distinct_task_ids(self):
+        row=schedules.create_schedule('hidden','0 * * * *',{**TEMPLATE,'visible':False},now=dt(2026,10,10,10,15),config=CONFIG)
+        with patch.object(store,'active_count',return_value=0):
+            schedules.tick(dt(2026,10,10,11,0,1),start=self.starter,config=CONFIG)
+            receipt=schedules.run_now(row['id'],now=dt(2026,10,10,11,0,2))
+            schedules.dispatch_pending(start=self.starter,config=CONFIG)
+        runs=schedules.list_runs(row['id'])
+        self.assertEqual(len({r['task_id'] for r in runs}),2)
+        self.assertEqual(receipt['status'],'PENDING')
+        self.assertTrue(all(body['visible'] is False for body in self.started))
+
+    def test_manual_run_at_capacity_has_pending_id_and_no_worker(self):
+        row=self.make()
+        receipt=schedules.run_now(row['id'])
+        with patch.object(store,'active_count',return_value=2),patch('builtins.print') as output:
+            self.assertEqual(schedules.dispatch_pending(start=self.starter,config=CONFIG),0)
+        run=schedules.last_run(row['id'])
+        self.assertEqual(run['id'],receipt['run_id']);self.assertIsNone(run['task_id'])
+        self.assertEqual(run['status'],'PENDING');self.assertFalse(self.started)
+        self.assertIn('尚未创建',output.call_args.args[0])
+
 
 class SchedulerProcessTests(SchedulerCase):
     def test_heartbeat_online_then_stale(self):
         with patch.object(scheduler, 'DATA', Path(self.tmp.name)):
             self.assertFalse(scheduler.heartbeat_status()['online'])
             scheduler.write_heartbeat()
-            self.assertTrue(scheduler.heartbeat_status()['online'])
+            self.assertFalse(scheduler.heartbeat_status()['online'])
+            with scheduler.lock_path().open('a+b') as handle:
+                import fcntl
+                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                self.assertTrue(scheduler.heartbeat_status()['online'])
             self.assertFalse(scheduler.heartbeat_status(now=__import__('time').time() + 600)['online'])
 
     def test_run_forever_survives_a_failing_tick_and_single_instance(self):

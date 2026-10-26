@@ -11,7 +11,7 @@ class TestSeparateTasks(unittest.TestCase):
         cfg = load_config()
         cfg['build']['max_parallel'] = 2
         params = {'plugin_version_input': '1.3', 'plugin_source': 'develop',
-                  'gmx_source': 'develop', 'project': 'Demo', 'country': 'UK',
+                  'gmx_source': 'feature/UKPBB-203745-test', 'project': 'Demo', 'country': 'UK',
                   'plugin_url': cfg['github']['plugin_url'], 'gmx_url': cfg['github']['gmx_url']}
         with tempfile.TemporaryDirectory() as tmp, patch.object(store, 'DATA', Path(tmp)):
             a = store.create_task(cfg, params)

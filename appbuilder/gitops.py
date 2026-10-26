@@ -134,7 +134,8 @@ def verify_pushed(directory: Path, target: str, sha: str, env):
 
 
 def recover_pushed_commit(directory: Path, target: str, expected: set[str],
-                           expected_message: str, base_sha: str, env, validate_before_push=None):
+                           expected_message: str, base_sha: str, env, validate_before_push=None,
+                           allow_subset=False):
     """Recover crash after commit or push, but before runtime state was saved."""
     if set(changed_files(directory)):
         return None
@@ -144,10 +145,11 @@ def recover_pushed_commit(directory: Path, target: str, expected: set[str],
     subject = git(['log', '-1', '--format=%s'], cwd=directory)
     if subject != expected_message:
         raise RuntimeError('工作区没有修改但 HEAD 信息不符合自动构建 Commit，已停止')
-    if git(['rev-parse', 'HEAD^'], cwd=directory) != base_sha:
+    if git(['rev-list', '--parents', '-n', '1', 'HEAD'], cwd=directory).split()[1:] != [base_sha]:
         raise RuntimeError('工作分支首个 Commit 未基于记录的源分支 SHA')
     actual = set(git(['diff-tree', '--no-commit-id', '--name-only', '-r', 'HEAD'], cwd=directory).splitlines())
-    if actual != expected:
+    if (actual != expected and not (allow_subset and validate_before_push is not None
+                                    and actual and actual <= expected)):
         raise RuntimeError(f'恢复 Commit 实际文件异常: {sorted(actual)}')
     if validate_before_push is not None:
         validate_before_push()
@@ -156,6 +158,34 @@ def recover_pushed_commit(directory: Path, target: str, expected: set[str],
         git(['push', '-u', 'origin', f'HEAD:refs/heads/{target}'], cwd=directory, env=env)
     verify_pushed(directory, target, sha, env)
     return sha
+
+
+def publish_gmx(directory, target, base_sha, version, hashes, env, max_lines=100):
+    """Publish only validated dependency edits, including an unchanged source tree."""
+    from .verify import gmx_commit
+    expected = {'mobile-ci.json', 'mobile-ci.lock'}
+    message = f'build: update PayByBank plugins to {version}'
+    if git(['branch', '--show-current'], cwd=directory) != target:
+        raise ValueError('GMX 工作目录不是本任务目标分支')
+    validator = lambda: gmx_commit(directory, base_sha, version, hashes)
+    sha = git(['rev-parse', 'HEAD'], cwd=directory)
+    if sha == base_sha and not status(directory):
+        validator()
+        remote = git(['ls-remote', 'origin', f'refs/heads/{target}'], cwd=directory, env=env)
+        if remote and remote.split()[0] != sha:
+            raise RuntimeError('GMX 远端目标已被外部修改，禁止覆盖')
+        if not remote:
+            git(['push', '-u', 'origin', f'HEAD:refs/heads/{target}'], cwd=directory, env=env)
+        verify_pushed(directory, target, sha, env)
+        return sha
+    recovered = recover_pushed_commit(directory, target, expected, message, base_sha, env,
+                                      validate_before_push=validator, allow_subset=True)
+    if recovered:
+        return recovered
+    if sha != base_sha:
+        raise RuntimeError('GMX HEAD 不再是记录的来源，禁止提交额外修改')
+    return commit_and_push(directory, expected, message, target, env, max_lines=max_lines,
+                           validate_before_push=validator)
 
 
 def git_blob(directory: Path, rev: str, relpath: str):

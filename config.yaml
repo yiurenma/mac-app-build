@@ -10,7 +10,7 @@ jenkins:
   # 只允许向以下经过核准的 HTTPS 登录域名填写 Keychain 凭据；外部 SSO 请先核实再加。
   auth_allowed_hosts:
     - "*.hsbc"
-  plugin_parent: "https://mobile-premier01-jenkins.build-mobile.iwpb.euw2.prod.aws.cloud.hsbc/job/IWPB_Transaction_Banking/job/Domestic_Payment_and_Transfer_Mobile_Global_12824743/job/Lib/job/mobile_paybybank-ios-plugin/job/release-build/job/"
+  plugin_parent: "https://mobile-premier01-jenkins.build-mobile.iwpb.euw2.prod.aws.cloud.hsbc/job/IWPB_Transaction_Banking/job/Domestic_Payment_and_Transfer_Mobile_GB_12579065/job/Lib/job/mobile_paybybank-ios-plugin/job/release-build/job/"
   gmx_parent: "https://mobile-platform-jenkins.build-mobile.iwpb.euw2.prod.aws.cloud.hsbc/job/mobilex-global-uploads/job/global-ios-upload/job/"
   discover_timeout_minutes: 30
   # 等待新分支 Jenkins Job 时每 10 秒重试（404 在 Job 创建前通常正常）。
@@ -43,9 +43,35 @@ jenkins:
     KEEP_ALIVE: ""
 
 build:
-  max_parallel: 2
+  # 可选工单编号；无编号时生成 AUTO-时间戳。页面和 CLI 输入优先。
+  gmx_issue_key: ""
+  max_parallel: 10
   timezone: "local"
   # 202610100030: 分钟精度。并发同一分钟提交，管理器会分配不同的时间戳。
   max_changed_lines: 100
   # 内网 Jenkins Stage 名称、成功文案若和此处不同，以联调为准。
   upload_success_pattern: ""
+
+# 构建成功后回写 Jira（已启用；dry_run=true 时只演练，不改任何 ticket）。
+# 确认 state.json 里的 jira_report 无误后，把 dry_run 改为 false 才会真正写入。
+# 认证只读环境变量：JIRA_TOKEN（Bearer PAT），或 JIRA_USER + JIRA_API_TOKEN。
+jira:
+  enabled: true
+  dry_run: true
+  base_url: "https://wpb-jira.systems.uk.hsbc"
+  flavor: "server"          # server=按用户名指派；cloud=按 accountId 指派
+  key_pattern: '\b[A-Z][A-Z0-9]{1,9}-\d{1,7}\b'
+  transition_name: "In Test"
+  assign_to_reporter: true
+  first_run_commits: 0      # 0=首次只记录基线；>0=首次回溯最近 N 个提交
+  max_tickets_per_run: 40
+  use_pr_lookup: true       # 以 PR（标题/分支/描述）为主要来源找 Jira 号；查询失败自动退回提交信息
+
+# 离线本地模型（llama.cpp GGUF）。不联网、不调用任何外部 API。
+# 只做两件事：一个提交写了多个 Jira 号时选主要的一个；把提交改写成给测试看的短说明。
+# 模型文件不存在或没装 llama-cpp-python 时自动降级为纯规则。
+ai:
+  enabled: false
+  model_path: ""            # 通常不用改：在 设置 → 离线 AI 一键安装后自动填写（页面设置优先）
+  n_ctx: 4096
+  n_gpu_layers: -1          # Apple Silicon 使用 Metal；-1=尽量全部放 GPU

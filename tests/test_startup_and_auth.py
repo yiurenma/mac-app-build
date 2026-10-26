@@ -22,10 +22,15 @@ class FakeLocator:
         self.calls = []
     def count(self): return 1
     def is_visible(self): return self.visible
+    def is_enabled(self): return True
+    def is_editable(self): return True
+    def wait_for(self, **kwargs): pass
+    def evaluate(self, script): return True if "checkValidity" in script else []
     def fill(self, value): self.calls.append(('fill', value))
     def click(self): self.calls.append(('click',))
 
 class LoginPage:
+    url = "https://jenkins.invalid/login"
     def __init__(self):
         self.fields = {
             'input[name="j_username"]': FakeLocator(),
@@ -43,7 +48,7 @@ class EmptyLocator:
 class AuthAndStartupTests(unittest.TestCase):
     def test_cli_accepts_once_only_login_and_update(self):
         a = args_parser().parse_args(['run', '--plugin-version','1.3','--plugin-branch','develop',
-            '--gmx-branch','develop','--project-name','Demo','--jenkins-user','example',
+            '--gmx-branch','feature/UKPBB-203745-test','--project-name','Demo','--jenkins-user','example',
             '--jenkins-password','SECRET_PASSWORD','--update','--live'])
         self.assertEqual(a.jenkins_user, 'example')
         self.assertTrue(a.update)

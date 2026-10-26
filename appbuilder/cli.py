@@ -8,9 +8,9 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
-from .config import DATA, ROOT, load_config
-from .versions import validate_args, branch_names, job_urls, folder
-from .store import create_task, task, task_list, update_task, update_task_params, task_folder, active_count
+from .config import DATA, ROOT, load_config, parallel_limit
+from .versions import validate_args, branch_names, job_urls, folder, gmx_issue_key
+from .store import create_task, task, task_list, update_task, update_task_params, task_folder, active_count, reserve_resume
 from .jenkins import interactive_login, saved_auth_path
 from .auth import store_credentials, read_credentials, CredentialError
 
@@ -25,6 +25,7 @@ def args_parser():
     run.add_argument('--update', action='store_true', help='启动前安全执行 git pull --ff-only（由 ./app-build 处理）')
     run.add_argument('--jenkins-user', help='首次填写 Jenkins 用户名并保存到 Mac Keychain')
     run.add_argument('--jenkins-password', help='首次填写 Jenkins 密码并保存到 Mac Keychain（命令历史可能可见）')
+    run.add_argument('--gmx-issue-key', default='', help='GMX 工单编号；默认从 GMX 源分支提取')
     run.add_argument('--gmx-url', help='覆盖 GMX GitHub URL')
     run.add_argument('--country', default='UK')
     run.add_argument('--dry-run', action='store_true', help='仅预览，不克隆/修改/提交/触发 Jenkins')
@@ -49,6 +50,10 @@ def args_parser():
     worker = sub.add_parser('worker', help=argparse.SUPPRESS)
     worker.add_argument('task_id')
     sub.add_parser('status', help='查看任务')
+    stop = sub.add_parser('stop', help='停止本项目后台进程，保留任务状态')
+    stop.add_argument('--timeout', type=float, default=5, help='TERM后等待退出的秒数（默认5），不等待业务完成')
+    stop.add_argument('--cancel', action='store_true', help='取消暂停并恢复接收')
+    sub.add_parser('start', help='解除安全停机，允许正常启动服务')
     logs = sub.add_parser('logs', help='显示任务日志')
     logs.add_argument('task_id')
     logs.add_argument('--follow', '-f', action='store_true')
@@ -57,9 +62,13 @@ def args_parser():
     diag.add_argument('--build-number', type=int, help='指定要测试的 Build Number，例如 2')
     diag.add_argument('--expected', choices=['SUCCESS','FAILURE','ABORTED','UNSTABLE','NOT_BUILT'], default='SUCCESS')
     diag.add_argument('--visible', action='store_true', default=True, help='兼容参数：诊断模式始终显示 Chrome 并允许手动 SSO 登录')
+    link = sub.add_parser('app-link', help='从历史任务对应的 Jenkins 完整日志提取并保存 APP 链接，不重新构建')
+    link.add_argument('task_id', help='已有历史任务编号')
+    link.add_argument('--headless', action='store_true', help='使用已保存的 Jenkins 认证，不显示浏览器')
     login = sub.add_parser('login', help='手动登录 Jenkins，保存本地认证状态')
     login.add_argument('--site', choices=['plugin', 'gmx'], required=True)
     sub.add_parser('doctor', help='检查本机 Python/Git/Playwright/Token')
+    sub.add_parser('update', help='一条命令更新：停止旧服务 → git pull → 启动 Web（由 ./app-build 处理）')
     web = sub.add_parser('web', help='启动 Mac 本地 Web Console (http://127.0.0.1:8765)')
     web.add_argument('--port', type=int, default=8765, help='本地页面端口（默认 8765）')
     web.add_argument('--no-open', action='store_true', help='只启动服务，不自动打开浏览器')
@@ -85,23 +94,53 @@ def create_params(a, c):
     country = a.country.upper()
     validate_args(a.plugin_version, a.plugin_branch, a.gmx_branch, country, a.project_name)
     return {'plugin_source': a.plugin_branch, 'gmx_source': a.gmx_branch,
+            'gmx_issue_key': gmx_issue_key(a.gmx_branch, getattr(a, 'gmx_issue_key', '') or c.get('build', {}).get('gmx_issue_key', '')),
             'plugin_version_input': a.plugin_version, 'country': country,
             'project': a.project_name, 'plugin_url': plugin_url, 'gmx_url': gmx_url,
             'visible': bool(a.visible), 'verbose': bool(a.verbose)}
 
 
-def spawn(task_id, wait=False):
+def spawn(task_id, wait=False, transient_credentials=None):
+    from . import lifecycle
+    admitted = False
+    try:
+        if wait:
+            with lifecycle.admission(): admitted = True
+            return _spawn(task_id, wait, transient_credentials)
+        with lifecycle.admission():
+            admitted = True
+            return _spawn(task_id, wait, transient_credentials)
+    except Exception:
+        current = task(task_id)
+        if not admitted and current['status'] == 'QUEUED' and not current['pid']:
+            update_task(task_id, status='FAILED', note='Worker 未启动；可在恢复接收后 Resume')
+        raise
+
+def _spawn(task_id, wait=False, transient_credentials=None):
     if wait:
         from .runner import run
-        run(task_id)
+        run(task_id, transient_credentials=transient_credentials)
         return
     log_path = task_folder(task_id) / 'run.log'
     cmd = [sys.executable, '-m', 'appbuilder', 'worker', task_id]
     if sys.platform == 'darwin' and shutil.which('caffeinate'):
         cmd = ['caffeinate', '-i', *cmd]
-    with log_path.open('ab') as out:
-        p = subprocess.Popen(cmd, cwd=ROOT, stdin=subprocess.DEVNULL,
-                             stdout=out, stderr=subprocess.STDOUT, start_new_session=True)
+    p = None
+    try:
+        with log_path.open('ab') as out:
+            p = subprocess.Popen(cmd, cwd=ROOT, stdin=subprocess.PIPE if transient_credentials else subprocess.DEVNULL,
+                                 stdout=out, stderr=subprocess.STDOUT, start_new_session=True)
+    except Exception:
+        if p is None:
+            # No worker was created. Release both the global and schedule slot.
+            update_task(task_id, status='FAILED', note='Worker 未启动；可恢复此任务，或等待定时计划下一次运行')
+        raise
+    if transient_credentials:
+        # Private pipe: never arguments, environment variables or task files.
+        try:
+            p.stdin.write(json.dumps(transient_credentials).encode('utf-8'))
+        finally:
+            p.stdin.close()
     # Only the Worker updates its own pid/status. A fast worker can already
     # have reached SUCCESS before Popen returns; never overwrite it here.
     print(f'任务后台启动: {task_id} (PID={p.pid})\n日志: ./app-build logs {task_id} --follow')
@@ -110,12 +149,14 @@ def spawn(task_id, wait=False):
 
 STAGES = (
     'PLUGIN_CHECKOUT', 'PLUGIN_EDIT', 'PLUGIN_PUSH', 'PLUGIN_JENKINS',
-    'GMX_CHECKOUT', 'GMX_EDIT', 'GMX_LOCK', 'GMX_PUSH', 'GMX_JENKINS', 'FINISHED',
+    'GMX_CHECKOUT', 'GMX_EDIT', 'GMX_LOCK', 'GMX_PUSH', 'GMX_JENKINS', 'TESTFAIRY_LOOKUP', 'FINISHED',
 )
 
 
 def stage_indicator(stage):
     """Workflow stage, NOT an estimated Jenkins build completion percentage."""
+    if stage == 'PLUGIN_PREPARE':
+        return f"1–3/{len(STAGES)}"
     return f"{STAGES.index(stage)+1}/{len(STAGES)}" if stage in STAGES else '-/10'
 
 
@@ -223,15 +264,39 @@ def main(argv=None):
     a = p.parse_args(argv)
     if a.command in ('run', 'resume') and a.live:
         a.watch = a.visible = a.verbose = True
+    if a.command in ('stop', 'start'):
+        from . import lifecycle
+        if a.command == 'start' or a.cancel:
+            lifecycle.resume()
+        else:
+            if a.timeout <= 0: p.error('--timeout 必须大于0')
+            lifecycle.stop(a.timeout)
+        return
     if a.command == 'doctor':
         doctor_check(load_config())
         return
     if a.command == 'web':
+        # New ZIP version: bring the previous folder's data along and retire its services.
+        from .handover import hand_over
+        hand_over()
         # A local dashboard can open even when Jenkins/token is not configured;
         # preflight errors are visible in the page and builds still require strict doctor.
         doctor_check(load_config(), strict=False)
+        from . import lifecycle
+        if lifecycle.state().get('mode') != 'RUNNING':
+            # Starting the page is an explicit wish to run again: lift the pause left by stop.
+            print('[WEB] 检测到之前执行过 stop，自动解除暂停', flush=True)
+            lifecycle.resume()
         from .web import serve
-        serve(port=a.port, open_browser=not a.no_open)
+        try:
+            serve(port=a.port, open_browser=not a.no_open)
+        except OSError as exc:
+            if exc.errno in (48, 98):          # macOS / Linux: address already in use
+                print(f'[WEB] 端口 {a.port} 已被占用：多半是旧的服务还在运行。'
+                      f'先执行 ./app-build stop；若仍被占用，用 lsof -nP -iTCP:{a.port} -sTCP:LISTEN 找到进程后 kill',
+                      file=sys.stderr, flush=True)
+                raise SystemExit(1)
+            raise
         return
     if a.command == 'cleanup':
         from . import cleanup
@@ -285,6 +350,12 @@ def main(argv=None):
                                visible=a.visible, emit=lambda s: print(s, flush=True))
         print('[DIAG] 完整报告：.appbuilder/diagnostics/last-result.json', flush=True)
         return
+    if a.command == 'app-link':
+        from .app_links import lookup_history
+        result = lookup_history(a.task_id, config=load_config(), data=DATA,
+                                visible=not a.headless, emit=lambda s: print(s, file=sys.stderr, flush=True))
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return
     if a.command == 'login':
         interactive_login(load_config(), DATA, a.site)
         return
@@ -293,7 +364,7 @@ def main(argv=None):
         params = create_params(a, c)
         if a.dry_run:
             stamp = datetime.now().strftime('%Y%m%d%H%M')
-            generated = branch_names(params['plugin_version_input'], stamp)
+            generated = branch_names(params['plugin_version_input'], stamp, params['gmx_source'], params.get('gmx_issue_key', ''))
             urls = job_urls(c, generated['plugin_branch'], generated['gmx_branch'])
             print(json.dumps({**params, **generated, **urls, 'folder': folder(params['country'], params['project']),
                               'note': '预览而已：没有 Git、Jenkins、文件写入操作。正式任务时间戳由并发管理器分配。'},
@@ -303,7 +374,7 @@ def main(argv=None):
             p.error('--wait 和 --watch 不能同时使用')
         setup_credentials(a)
         doctor_check(c, strict=True)
-        if active_count() >= int(c.get('build', {}).get('max_parallel', 2)):
+        if active_count() >= parallel_limit(c):
             p.error('并发任务已达上限，请先等待任务结束或调整 config.yaml')
         # Refuse to queue tasks that cannot read an environment token.
         from .config import token_or_error
@@ -315,7 +386,9 @@ def main(argv=None):
         return
     if a.command == 'worker':
         from .runner import run
-        run(a.task_id)
+        raw=sys.stdin.buffer.read(16385)
+        if len(raw)>16384:raise ValueError('Worker 私有输入过大')
+        run(a.task_id, transient_credentials=json.loads(raw) if raw else None)
         return
     if a.command == 'watch':
         task(a.task_id)  # verify ID even when log has not appeared yet
@@ -334,14 +407,19 @@ def main(argv=None):
             return
         if r['status'] in ('RUNNING', 'QUEUED') and not alive(r['pid']):
             update_task(r['id'], status='INTERRUPTED', note='先前的 Worker 进程已退出')
-        if active_count() >= int(load_config().get('build', {}).get('max_parallel', 2)):
+        if active_count() >= parallel_limit(load_config()):
             p.error('并发任务已达上限')
         from .config import token_or_error
         token_or_error(load_config())
         if a.visible or a.verbose:
             update_task_params(a.task_id, visible=(True if a.visible else None),
                                verbose=(True if a.verbose else None))
-        spawn(a.task_id, a.wait)
+        previous = reserve_resume(load_config(), a.task_id)
+        try:
+            spawn(a.task_id, a.wait)
+        except Exception:
+            update_task(a.task_id, status=previous['status'], pid=previous['pid'], note=previous['note'])
+            raise
         if a.watch:
             watch_task(a.task_id)
         return

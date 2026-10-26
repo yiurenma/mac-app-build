@@ -18,7 +18,7 @@ class LiveFlags(unittest.TestCase):
     def test_cli_accepts_live_flags(self):
         a = args_parser().parse_args([
             'run', '--plugin-version', '1.3', '--plugin-branch', 'develop',
-            '--gmx-branch', 'develop', '--project-name', 'PayByBank',
+            '--gmx-branch', 'feature/UKPBB-203745-test', '--project-name', 'PayByBank',
             '--watch', '--visible', '--verbose'])
         self.assertTrue(a.watch)
         self.assertTrue(a.visible)

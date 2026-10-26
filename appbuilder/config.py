@@ -36,3 +36,17 @@ def token_or_error(config):
             "macOS 推荐使用 Keychain/企业密码管理器，不要明文写入脚本。"
         )
     return token
+
+
+def parallel_limit(config):
+    """Manual, scheduled and resumed pipelines share at most ten slots."""
+    value = config.get('build', {}).get('max_parallel', 10)
+    if isinstance(value, bool):
+        raise ValueError('max_parallel 必须为 1 到 10 的整数')
+    try:
+        limit = int(value)
+    except (ValueError, TypeError):
+        raise ValueError('max_parallel 必须为 1 到 10 的整数') from None
+    if str(value).strip() != str(limit) or limit < 1:
+        raise ValueError('max_parallel 必须为 1 到 10 的整数')
+    return min(limit, 10)

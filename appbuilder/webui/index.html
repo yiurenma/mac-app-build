@@ -8,138 +8,125 @@
   <link rel="stylesheet" href="/app.css">
   <script defer src="/app.js"></script>
   <script defer src="/schedules.js"></script>
+  <script defer src="/jira.js"></script>
+  <script defer src="/jenkins-token.js"></script>
+  <script defer src="/settings.js"></script>
+  <script defer src="/ai.js"></script>
+  <script defer src="/delivery.js"></script>
+  <script defer src="/overview.js"></script>
 </head>
 <body>
   <div class="layout">
     <aside class="sidebar">
       <div class="brand"><div class="brand-mark">M<span>✦</span></div><div><strong>APP BUILDER</strong><small>MAC AUTOMATION CONSOLE</small></div></div>
-      <div class="sidebar-label">WORKSPACE</div>
-      <button class="nav active" data-target="overview"><span>▦</span> Overview <b>01</b></button>
-      <button class="nav" data-target="new-build"><span>◇</span> New build</button>
-      <button class="nav" data-target="activity"><span>≡</span> Live activity</button>
-      <button class="nav" data-target="schedules"><span>⏱</span> Schedules</button>
-      <button class="nav" data-target="diagnostics"><span>◎</span> Jenkins URL Test</button>
-      <button class="nav" data-target="live-tests"><span>⚙</span> GMX Live Tests</button>
+      <div class="sidebar-label">日常</div>
+      <button class="nav active" data-target="overview"><span>▦</span> 概览</button>
+      <button class="nav" data-target="new-build"><span>◇</span> 新建构建</button>
+      <button class="nav" data-target="history"><span>≡</span> 运行记录</button>
+      <button class="nav" data-target="delivery"><span>✉</span> 交付记录</button>
+      <button class="nav" data-target="schedules"><span>⏱</span> 定时任务</button>
+      <div class="sidebar-label sidebar-label-gap">设置与排查</div>
+      <button class="nav" data-target="settings"><span>⚙</span> 设置</button>
+      <button class="nav" data-target="tools"><span>◎</span> 测试工具</button>
       <div class="sidebar-spacer"></div>
       <div class="connection">
         <div class="status-line"><span class="pulse"></span><span>LOCAL WORKSPACE</span></div>
         <strong>localhost:8765</strong>
         <p>运行在本机 · 无外部服务</p>
       </div>
-      <div class="sidebar-foot">v0.7.1 <span>·</span> Made for macOS</div>
+      <div class="sidebar-foot">v0.8.0 <span>·</span> Made for macOS</div>
     </aside>
     <main class="main">
       <header class="topbar">
-        <div class="breadcrumbs">WORKSPACE <span>/</span> <strong>Overview</strong></div>
+        <div class="breadcrumbs">APP BUILDER <span>/</span> <strong id="crumb">概览</strong></div>
         <div class="top-actions"><span id="doctor-badge" class="dot-label muted">● 检测中</span><button id="doctor-refresh" class="icon-button" title="重新检查环境">↻</button><div class="avatar">M</div></div>
       </header>
       <div class="content">
-        <section class="hero" id="overview">
-          <div class="hero-copy"><span class="eyebrow"><span class="eyebrow-line"></span> BUILD ORCHESTRATION</span><h1>From code to <em>build.</em><br>All in one place.</h1><p>自动化 Plugin → GMX → Jenkins 构建流水线。从分支管理到 Artifacts，所有进度一目了然。</p><div class="hero-actions"><button class="btn btn-primary" id="hero-start">＋ &nbsp; Create a build <span>↗</span></button><span class="local-note">⦿&nbsp; Running securely on your Mac</span></div></div>
-          <div class="hero-graphic" aria-hidden="true"><div class="orb orb-1"></div><div class="orb orb-2"></div><div class="circuit circuit-one"></div><div class="circuit circuit-two"></div><div class="core-card"><div class="core-icon">✦</div><div class="core-top">PIPELINE READY</div><div class="core-title">PLUGIN / GMX</div><div class="core-bars"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><span>BUILD ENGINE · 06</span></div></div>
+        <section class="overview" id="overview" aria-label="概览">
+          <div class="overview-head"><div><h1>概览</h1><p>现在在跑什么、上次交付了什么、有没有要你处理的。</p></div><button class="btn btn-primary" id="hero-start" type="button">＋ 手动构建一次</button></div>
+          <section class="ov-attention" id="ov-attention" aria-label="需要你处理" hidden><h2>需要你处理</h2><ul id="ov-attention-list"></ul></section>
+          <div class="ov-grid">
+            <section class="ov-card" aria-labelledby="ov-running-title"><h2 id="ov-running-title">正在运行</h2><div id="ov-running" class="ov-body">现在没有在跑的构建。</div></section>
+            <section class="ov-card" aria-labelledby="ov-last-title"><h2 id="ov-last-title">上次交付</h2><div id="ov-last" class="ov-body">还没有成功的构建。</div><button class="text-btn" type="button" data-go="delivery">全部交付记录 →</button></section>
+            <section class="ov-card" aria-labelledby="ov-sched-title"><h2 id="ov-sched-title">定时任务</h2><div id="ov-schedules" class="ov-body">读取中…</div><button class="text-btn" type="button" data-go="schedules">管理定时任务 →</button></section>
+            <section class="ov-card" aria-labelledby="ov-auto-title"><h2 id="ov-auto-title">构建后自动做的事</h2><div id="ov-auto" class="ov-body">读取中…</div><button class="text-btn" type="button" data-go="settings">在设置里改 →</button></section>
+          </div>
         </section>
         <section class="metrics" aria-label="Build metrics">
-          <article class="metric"><div class="metric-label">TOTAL BUILDS <span>↗</span></div><div class="metric-number" id="metric-total">–</div><div class="metric-foot">All-time tasks</div></article>
-          <article class="metric"><div class="metric-label">IN PROGRESS <span class="aqua">◉</span></div><div class="metric-number" id="metric-running">–</div><div class="metric-foot">Currently running</div></article>
-          <article class="metric"><div class="metric-label">COMPLETED <span class="green">✓</span></div><div class="metric-number" id="metric-success">–</div><div class="metric-foot">Successful builds</div></article>
-          <article class="metric"><div class="metric-label">NEEDS ATTENTION <span class="amber">!</span></div><div class="metric-number" id="metric-attention">–</div><div class="metric-foot">Failed / interrupted</div></article>
+          <article class="metric"><div class="metric-label">全部构建 <span>↗</span></div><div class="metric-number" id="metric-total">–</div></article>
+          <article class="metric"><div class="metric-label">进行中 <span class="aqua">◉</span></div><div class="metric-number" id="metric-running">–</div></article>
+          <article class="metric"><div class="metric-label">成功 <span class="green">✓</span></div><div class="metric-number" id="metric-success">–</div></article>
+          <article class="metric"><div class="metric-label">失败 / 中断 <span class="amber">!</span></div><div class="metric-number" id="metric-attention">–</div></article>
         </section>
         <section class="main-grid">
           <article class="panel build-form" id="new-build">
-            <div class="panel-head"><div><span class="section-tag">CREATE NEW</span><h2>New build</h2><p>设置参数，然后启动自动化构建。</p></div><div class="panel-icon">◇</div></div>
+            <div class="panel-head"><div><span class="section-tag">CREATE NEW</span><h2>新建构建</h2><p>设置参数，然后启动自动化构建。</p></div><div class="panel-icon">◇</div></div>
             <form id="build-form" autocomplete="off">
-              <div class="group-head"><span>01</span> SOURCE CONFIGURATION</div>
-              <div class="form-grid">
-                <label>Plugin Source Branch<input name="plugin_branch" placeholder="develop" value="develop" required maxlength="200"></label>
-                <label>GMX Source Branch<input name="gmx_branch" placeholder="develop" value="develop" required maxlength="200"></label>
-                <label>Plugin Version<input name="plugin_version" placeholder="1.3" value="1.3" required maxlength="50"></label>
-                <label>Country / Entity<input name="country" value="UK" list="country-options" required maxlength="30"><datalist id="country-options"><option value="UK"><option value="HK"><option value="SG"><option value="IN"><option value="AU"><option value="AE"><option value="CA"><option value="US"></datalist></label>
-                <label class="span-2">Project Name<input name="project_name" placeholder="PayByBank" value="PayByBank" required maxlength="100"></label>
-              </div>
-              <div class="parameter-summary" id="derived-summary" role="status">
+<div class="group-head"><span>00</span> Jenkins 登录</div><div class="form-grid"><label class="field-toggle span-2">用工号 + API Token 访问 Jenkins · jenkins_api<input type="checkbox" data-build name="jenkins_api" checked><small class="label-help">默认开启。Plugin 构建、GMX 构建、取 App 链接都直接调用 Jenkins 接口，不打开浏览器、不怕 SSO 过期。没保存 Token 或 Jenkins 拒绝时，该步骤自动改用浏览器。关闭则全部回到浏览器方式。工号和 Token 在左侧「设置」里保存。</small></label></div><div class="group-divider"></div><div class="group-head"><span>01</span> Plugin</div><div class="form-grid"><div class="branch-field"><label class=" ">Plugin 来源分支 · plugin_branch<input data-build name="plugin_branch" placeholder="develop" required maxlength="200" list="plugin-branches"><small class="label-help">从列表搜索选择，或填完整分支名；默认 develop，作为新 Plugin 分支的代码来源。</small></label><datalist id="plugin-branches"></datalist><button type="button" class="subtle-btn branch-refresh" data-kind="plugin">↻ 刷新全部分支</button><small id="plugin-branch-status" class="label-help" role="status">读取全部分页后可搜索选择，也可直接填写分支。</small></div><label class=" ">Plugin 版本 · plugin_version<input data-build name="plugin_version" placeholder="1.3" required maxlength="50"><small class="label-help">填 1.3 使用时间戳版本，或填 1.3.1 使用固定版本；不带 v。目标分支为 release/v版本。依赖版本以正式 Jenkins 成功产物的完整版本为准。</small></label>
+</div>
+<details class="advanced-panel" id="plugin-settings"><summary><span><strong>更多 Plugin 设置</strong><small>仓库与 Jenkins 路径</small></span><span class="advanced-chevron">⌄</span></summary><div class="advanced-body"><div class="form-grid"><label class=" span-2">Plugin 仓库地址 · plugin_url<input data-build name="plugin_url" type="url" required maxlength="2048" placeholder="输入 HTTPS 仓库地址"><small class="label-help">填不带账号或 Token 的 HTTPS 仓库地址；默认来自 config.yaml。修改后自动刷新来源分支。</small></label>
+<label class=" span-2">Plugin Jenkins 父路径 · plugin_parent<input data-build name="plugin_parent" type="url" required maxlength="2048" placeholder="输入 HTTPS Jenkins Job 路径"><small class="label-help">填新分支 Job 所在的 HTTPS 父路径；默认来自 config.yaml，不填具体 Build 编号。</small></label>
+</div></div></details>
+<div class="group-head"><span>02</span> GMX</div><div class="form-grid"><div class="branch-field"><label class=" ">GMX 来源分支 · gmx_branch<input data-build name="gmx_branch" placeholder="develop" required maxlength="200" list="gmx-branches"><small class="label-help">搜索选择或手输完整分支名；默认 develop。此分支是新 GMX 构建分支的代码来源。</small></label><datalist id="gmx-branches"></datalist><button type="button" class="subtle-btn branch-refresh" data-kind="gmx">↻ 刷新全部分支</button><small id="gmx-branch-status" class="label-help" role="status">读取全部分页后可搜索选择，也可直接填写分支。</small></div><label class=" ">国家 / 实体 · ENTITIES (country)<select data-build name="country" required><option>AE</option><option>AU</option><option>BM</option><option>CIOM</option><option>CN</option><option>EG</option><option>EX</option><option>HK</option><option>ID</option><option>IN</option><option>LK</option><option>MO</option><option>MSB</option><option>MT</option><option>MX</option><option>MY</option><option>PH</option><option>QA</option><option>SG</option><option>TW</option><option selected>UK</option><option>US</option><option>VN</option><option>NOT_SET</option><option>ALL</option></select><small class="label-help">默认 UK；选择 Jenkins 支持的实体代码。ALL 表示全部实体；NOT_SET 表示未指定实体，两者原样交给 Jenkins，不等同于 UK。</small></label>
+<label class=" ">项目名称 · project_name<input data-build name="project_name" placeholder="PayByBank" required maxlength="100"><small class="label-help">填项目标识，默认 PayByBank；用于生成上传目录，只用字母、数字、下划线或连字符。</small></label>
+</div>
+<details class="advanced-panel" id="gmx-settings"><summary><span><strong>更多 GMX 设置</strong><small>工单、构建参数与 8 个定位器</small></span><span class="advanced-chevron">⌄</span></summary><div class="advanced-body"><div class="form-grid"><label class=" span-2">工单编号 · gmx_issue_key<input data-build name="gmx_issue_key" placeholder="可选；留空自动提取或生成 AUTO-时间戳" maxlength="50"><small class="label-help">可选，例如 UKPBB-203745；留空从来源分支提取唯一工单，无工单时用 AUTO-时间戳。多个工单时必须指定。</small></label>
+<label class=" span-2">GMX 仓库地址 · gmx_url<input data-build name="gmx_url" type="url" required maxlength="2048" placeholder="输入 HTTPS 仓库地址"><small class="label-help">填不带凭据的 HTTPS 仓库地址；默认来自 config.yaml，修改后自动刷新来源分支。</small></label>
+<label class=" span-2">GMX Jenkins 父路径 · gmx_parent<input data-build name="gmx_parent" type="url" required maxlength="2048" placeholder="输入 HTTPS Jenkins Job 路径"><small class="label-help">填新 GMX 分支 Job 所在的 HTTPS 父路径；默认来自 config.yaml，不填具体构建编号。</small></label>
+<label class=" ">构建类型 · BUILD_TYPE<input data-build name="gmx_build_type" maxlength="128" required><small class="label-help">默认 Develop；需要其他类型时填 Jenkins 支持的名称，例如 Release。</small></label>
+<label class=" ">签名分支 · SIGNING_REPO_BRANCH<input data-build name="gmx_signing_repo_branch" maxlength="128" required><small class="label-help">签名配置仓库的分支，默认 master；填写公司允许的签名分支名。</small></label>
+<label class=" span-2">上传目录 · CUSTOM_FOLDER<input data-build name="gmx_custom_folder" maxlength="128" required><small class="label-help">默认随国家和项目生成 0_A_<国家>_<项目>；手动修改后固定使用此值，清空后恢复自动生成。</small></label>
+<label class="field-toggle span-2">跳过测试 · SKIP_TEST<input data-build name="gmx_skip_test" type="checkbox"><small class="label-help">默认开启：跳过 Unit/UI Tests；关闭：执行 Jenkins 配置的测试。</small></label>
+<label class="field-toggle span-2">强制执行 · FORCE<input data-build name="gmx_force" type="checkbox"><small class="label-help">默认开启：强制完整 Pipeline；关闭：按 Jenkins 自身条件决定是否执行。</small></label>
+<label class="field-toggle span-2">同步上传 · SYNC_UPLOAD<input data-build name="gmx_sync_upload" type="checkbox"><small class="label-help">默认开启：等待同步上传流程；关闭：触发下游上传，当前 Build 成功不能单独证明上传完成。</small></label>
+<label class="field-toggle span-2">保留节点 · KEEP_ALIVE<input data-build name="gmx_keep_alive" type="checkbox"><small class="label-help">默认关闭：构建结束释放节点；开启：为 CI 调试保留节点，请按公司规范使用。</small></label>
+</div>
+<div class="form-grid"><label class=" ">上传成功日志规则 · upload_success_pattern<input data-build name="upload_success_pattern" placeholder="留空：仅确认 Jenkins SUCCESS" maxlength="200"><small class="label-help">默认留空，仅确认 Jenkins SUCCESS；可填正则表达式，要求最终上传日志同时匹配。</small></label></div>
+<details class="selectors-panel"><summary>GMX 高级定位器 · 自动识别失败时填写</summary><div class="form-grid"><label class=" span-2">实体定位器 · ENTITIES CSS<input data-build name="selector_entities" maxlength="256" placeholder="自动识别"><small class="label-help">默认留空，自动识别 Jenkins 控件；仅识别失败时填写该控件的 CSS 选择器，例如 #field。</small></label>
+<label class=" span-2">同步上传定位器 · SYNC_UPLOAD CSS<input data-build name="selector_sync_upload" maxlength="256" placeholder="自动识别"><small class="label-help">默认留空，自动识别 Jenkins 控件；仅识别失败时填写该控件的 CSS 选择器，例如 #field。</small></label>
+<label class=" span-2">上传目录定位器 · CUSTOM_FOLDER CSS<input data-build name="selector_custom_folder" maxlength="256" placeholder="自动识别"><small class="label-help">默认留空，自动识别 Jenkins 控件；仅识别失败时填写该控件的 CSS 选择器，例如 #field。</small></label>
+<label class=" span-2">构建类型定位器 · BUILD_TYPE CSS<input data-build name="selector_build_type" maxlength="256" placeholder="自动识别"><small class="label-help">默认留空，自动识别 Jenkins 控件；仅识别失败时填写该控件的 CSS 选择器，例如 #field。</small></label>
+<label class=" span-2">签名分支定位器 · SIGNING_REPO_BRANCH CSS<input data-build name="selector_signing_repo_branch" maxlength="256" placeholder="自动识别"><small class="label-help">默认留空，自动识别 Jenkins 控件；仅识别失败时填写该控件的 CSS 选择器，例如 #field。</small></label>
+<label class=" span-2">跳过测试定位器 · SKIP_TEST CSS<input data-build name="selector_skip_test" maxlength="256" placeholder="自动识别"><small class="label-help">默认留空，自动识别 Jenkins 控件；仅识别失败时填写该控件的 CSS 选择器，例如 #field。</small></label>
+<label class=" span-2">强制执行定位器 · FORCE CSS<input data-build name="selector_force" maxlength="256" placeholder="自动识别"><small class="label-help">默认留空，自动识别 Jenkins 控件；仅识别失败时填写该控件的 CSS 选择器，例如 #field。</small></label>
+<label class=" span-2">保留节点定位器 · KEEP_ALIVE CSS<input data-build name="selector_keep_alive" maxlength="256" placeholder="自动识别"><small class="label-help">默认留空，自动识别 Jenkins 控件；仅识别失败时填写该控件的 CSS 选择器，例如 #field。</small></label>
+</div></details></div></details>
+<div class="group-head"><span>03</span> App 链接</div><div class="form-grid"><label class="field-toggle span-2">构建后取 App 链接 · testfairy_enabled<input type="checkbox" data-build name="testfairy_enabled" checked><small class="label-help">默认开启。从本次 GMX 的 Jenkins 完整日志中找到 upload-to-testfairy 构建并取出 App 链接，不需要 TestFairy 账号密码；开启 00 的 Token 方式时直接读 Jenkins 接口。Jira 回填依赖这个链接。</small></label></div><div class="group-head"><span>04</span> Jira 回填与邮件</div><p id="build-jira-status" class="diag-note" role="status"></p><p class="diag-note">Jira Token、回填和邮件在左侧「设置」里配置。</p>
+<div class="parameter-summary" id="derived-summary" role="status">
                 <div class="summary-tag">AUTO-GENERATED BUILD VALUES</div>
-                <div class="summary-grid"><div><small>Plugin branch</small><code id="derived-plugin">release/1.3.[timestamp]</code></div><div><small>GMX branch</small><code id="derived-gmx">upload/auto[timestamp]</code></div><div class="span-2"><small>GMX CUSTOM_FOLDER</small><code id="derived-folder">0_A_UK_PayByBank</code></div></div>
+                <div class="summary-grid"><div><small>Plugin branch</small><code id="derived-plugin">release/v1.3.[timestamp]</code></div><div><small>GMX branch</small><code id="derived-gmx">upload/AUTO-[timestamp]</code></div><div class="span-2"><small>GMX CUSTOM_FOLDER</small><code id="derived-folder">0_A_UK_PayByBank</code></div></div>
               </div>
-              <details class="advanced-panel" id="advanced-settings">
-                <summary><span class="advanced-icon">⚙</span><span><strong>高级参数 & Jenkins Defaults</strong><small>仓库、Jenkins Job、Build with Parameters、超时和浏览器</small></span><span class="advanced-chevron">⌄</span></summary>
-                <div class="advanced-body">
-                  <div class="group-head"><span>A</span> GITHUB REPOSITORIES</div>
-                  <div class="form-grid">
-                    <label class="span-2">Plugin GitHub URL<input name="plugin_url" type="url" required maxlength="2048" placeholder="输入 HTTPS 仓库地址"></label>
-                    <label class="span-2">GMX GitHub URL<input name="gmx_url" type="url" required maxlength="2048" placeholder="输入 HTTPS 仓库地址"></label>
-                  </div>
-                  <div class="group-head group-divider"><span>B</span> JENKINS JOB SETTINGS</div>
-                  <div class="form-grid">
-                    <label class="span-2">Plugin Jenkins Job Parent URL<input name="plugin_parent" type="url" required maxlength="2048" placeholder="输入 HTTPS Jenkins Job 路径"></label>
-                    <label class="span-2">GMX Jenkins Job Parent URL<input name="gmx_parent" type="url" required maxlength="2048" placeholder="输入 HTTPS Jenkins Job 路径"></label>
-                    <label>Browser Channel<select name="browser_channel"><option value="chrome">Chrome (default)</option><option value="msedge">Microsoft Edge</option><option value="chromium">Playwright Chromium</option></select></label>
-                    <label>最大并发任务<input name="max_parallel_display" type="text" value="2" readonly aria-label="最大并发任务由 config.yaml 管理"><small class="label-help">全局并发设置：在 config.yaml 修改</small></label>
-                  </div>
-                  <div class="group-head group-divider"><span>C</span> GMX BUILD WITH PARAMETERS</div>
-                  <p class="hint">国家 ENTITIES 与上方 Country 同步。以下参数会提交到真实 Jenkins 表单，Plugin 继续使用 Jenkins 默认参数。</p>
-                  <div class="form-grid">
-                    <label>BUILD_TYPE<input name="gmx_build_type" value="Develop" maxlength="128" required></label>
-                    <label>SIGNING_REPO_BRANCH<input name="gmx_signing_repo_branch" value="master" maxlength="128" required></label>
-                    <label class="span-2">CUSTOM_FOLDER<input name="gmx_custom_folder" value="0_A_UK_PayByBank" maxlength="128" required><small class="label-help">默认自动生成；修改此项后保留你的自定义值</small></label>
-                    <label class="span-2 inline-toggle"><input name="gmx_skip_test" type="checkbox" checked> SKIP_TEST <span>勾选时跳过 Unit/UI Tests（Jenkins 页面默认勾选）</span></label>
-                    <label class="span-2 inline-toggle"><input name="gmx_force" type="checkbox" checked> FORCE <span>强制执行完整 Pipeline（Jenkins 页面默认勾选）</span></label>
-                    <label class="span-2 inline-toggle"><input name="gmx_keep_alive" type="checkbox"> KEEP_ALIVE <span>仅 CI 调试时保留节点（Jenkins 页面默认不勾选）</span></label>
-                    <label class="span-2 inline-toggle"><input name="gmx_sync_upload" type="checkbox" checked> SYNC_UPLOAD <span>工具默认 true；你提供的 Jenkins 页面默认未勾选。false 会触发下游上传，不能仅凭当前 Build SUCCESS 认定已上传。</span></label>
-                  </div>
-                  <div class="group-head group-divider"><span>D</span> JENKINS TIMING & RETRIES</div>
-                  <div class="form-grid">
-                    <label>新 Job 轮询间隔（秒）<input type="number" name="discover_poll_seconds" min="5" max="3600" step="1" value="10" required></label>
-                    <label>Build 页面备用检查（秒）<input type="number" name="poll_seconds" min="10" max="3600" step="1" value="45" required></label>
-                    <label>构建结果快速检测（秒）<input type="number" name="result_poll_seconds" min="2" max="60" step="1" value="5" required></label>
-                    <label>Console 最终日志等待（秒）<input type="number" name="console_settle_seconds" min="1" max="120" step="1" value="10" required></label>
-                    <label>等待 Job 创建超时（分钟）<input type="number" name="discover_timeout_minutes" min="1" max="240" step="1" value="30" required></label>
-                    <label>Build 超时（分钟）<input type="number" name="build_timeout_minutes" min="1" max="1440" step="1" value="180" required></label>
-                    <label>Callback 超时（分钟）<input type="number" name="callback_timeout_minutes" min="1" max="240" step="1" value="30" required></label>
-                    <label>最大 Git 变更行数<input type="number" name="max_changed_lines" min="1" max="100000" step="1" value="100" required></label>
-                    <label>Upload success pattern<input name="upload_success_pattern" placeholder="留空：仅确认 Jenkins SUCCESS" maxlength="200"><small class="label-help">可选正则，填写后要求匹配最终上传日志</small></label>
-                  </div>
-                  <details class="selectors-panel"><summary>高级定位器（Jenkins 参数控件无法识别时设置）</summary>
-                    <div class="form-grid">
-                      <label>ENTITIES CSS<input name="selector_entities" maxlength="256" placeholder="自动识别"></label>
-                      <label>SYNC_UPLOAD CSS<input name="selector_sync_upload" maxlength="256" placeholder="自动识别"></label>
-                      <label>CUSTOM_FOLDER CSS<input name="selector_custom_folder" maxlength="256" placeholder="自动识别"></label>
-                      <label>BUILD_TYPE CSS<input name="selector_build_type" maxlength="256" placeholder="自动识别"></label>
-                      <label>SIGNING_REPO_BRANCH CSS<input name="selector_signing_repo_branch" maxlength="256" placeholder="自动识别"></label>
-                      <label>SKIP_TEST CSS<input name="selector_skip_test" maxlength="256" placeholder="自动识别"></label>
-                      <label>FORCE CSS<input name="selector_force" maxlength="256" placeholder="自动识别"></label>
-                      <label>KEEP_ALIVE CSS<input name="selector_keep_alive" maxlength="256" placeholder="自动识别"></label>
-                    </div>
-                  </details>
-                </div>
-              </details>
-              <div class="group-head group-divider"><span>02</span> CREDENTIALS <small>OPTIONAL AFTER FIRST SETUP</small></div>
-              <div class="form-grid token-grid"><label class="span-2">GitHub Personal Access Token (PAT)<input name="github_token" type="password" placeholder="首次输入后保存到 Mac Keychain" autocomplete="off" maxlength="4096"></label></div>
-              <p class="hint">Jenkins 与 GitHub 凭据已有 Keychain 记录时可以留空，首次填写会保存到本机钥匙串。</p>
-              <div class="form-grid">
-                <label>Username<input name="jenkins_user" placeholder="Corporate username" autocomplete="username" maxlength="256"></label>
-                <label>Password<input name="jenkins_password" type="password" placeholder="••••••••" autocomplete="new-password"></label>
-              </div>
-              <div class="switches"><label class="switch-row"><input type="checkbox" name="visible" checked><span class="toggle"></span><span>Visible Chrome<small>显示 Playwright 浏览器操作</small></span></label><label class="switch-row"><input type="checkbox" name="verbose" checked><span class="toggle"></span><span>Full action trace<small>记录 Git、Playwright、Shell 操作</small></span></label></div>
-              <div class="schedule-block" id="schedule-block">
-                <label class="switch-row"><input type="checkbox" id="schedule-toggle"><span class="toggle"></span><span>保存为定时任务<small>不立即构建；按 cron 自动重复运行，参数与上方表单一致</small></span></label>
-                <div id="schedule-fields" hidden>
-                  <input type="hidden" name="schedule_edit_id" disabled>
-                  <div class="form-grid">
-                    <label>任务名称<input name="schedule_name" maxlength="60" placeholder="例如 工作日早间构建" disabled></label>
-                    <label>Cron（分 时 日 月 周）<input name="schedule_cron" maxlength="100" placeholder="0 9 * * 1-5" spellcheck="false" disabled></label>
-                  </div>
-                  <p id="cron-preview" class="diag-note">输入 cron 后在这里预览接下来 5 次运行时间。</p>
-                  <label class="switch-row"><input type="checkbox" name="schedule_enabled" checked disabled><span class="toggle"></span><span>创建后立即启用</span></label>
-                  <p class="diag-note">定时任务不保存账号、密码和 Token，运行时使用 Mac Keychain 中已保存的凭据（先正常 Start build 一次即可保存）。无人值守时建议关闭上方 Visible Chrome，打开定时开关时已自动取消勾选。</p>
-                  <button class="ghost-button" id="schedule-cancel" type="button" hidden>取消编辑</button>
-                </div>
-              </div>
-              <button class="btn btn-primary submit-btn" id="submit-build" type="submit">▶ &nbsp; Start build <span>↗</span></button>
-              <p id="form-message" role="status" class="form-message"></p>
-            </form>
+<details class="advanced-panel" id="advanced-settings"><summary><span><strong>共用高级设置</strong><small>浏览器、并发和等待时间</small></span><span class="advanced-chevron">⌄</span></summary><div class="advanced-body"><div class="form-grid"><label class=" ">浏览器类型 · browser_channel<select data-build name="browser_channel"><option value="chrome">Chrome（默认）</option><option value="msedge">Microsoft Edge</option><option value="chromium">Playwright Chromium</option></select><small class="label-help">默认 Chrome；选择 Mac 已安装的浏览器。Chromium 需先安装 Playwright 浏览器。</small></label>
+<label class=" ">并发流水线上限 · max_parallel<input name="max_parallel_display" type="text" readonly aria-label="最大并发任务由 config.yaml 管理"><small class="label-help">默认 10；手动、定时、Resume 共用完整 Plugin→GMX 流水线名额。config.yaml 可降低，最多 10。</small></label>
+<label class="field-toggle span-2">显示浏览器 · visible<input type="checkbox" data-build name="visible"><small class="label-help">默认开启：显示所选浏览器（默认 Chrome），可手动登录 SSO；关闭：隐藏窗口，需已有有效登录状态。</small></label>
+<label class="field-toggle span-2">完整操作日志 · verbose<input type="checkbox" data-build name="verbose"><small class="label-help">默认开启：记录 Git、浏览器和 Shell 操作；关闭：仅输出基本进度。</small></label>
+<label class=" ">新 Job 检查间隔 · discover_poll_seconds<input type="number" data-build name="discover_poll_seconds" min="5" max="3600" step="1" required><small class="label-help">默认 10 秒，等待 Jenkins 创建分支 Job 时的检查频率，5–3600。</small></label>
+<label class=" ">页面备用检查间隔 · poll_seconds<input type="number" data-build name="poll_seconds" min="10" max="3600" step="1" required><small class="label-help">默认 45 秒，页面状态的备用检查频率，10–3600。</small></label>
+<label class=" ">结果检查间隔 · result_poll_seconds<input type="number" data-build name="result_poll_seconds" min="2" max="60" step="1" required><small class="label-help">默认 5 秒，读取构建结果的频率，2–60。</small></label>
+<label class=" ">最终日志等待 · console_settle_seconds<input type="number" data-build name="console_settle_seconds" min="1" max="120" step="1" required><small class="label-help">默认 10 秒，打开 Console 后等待最终日志，1–120。</small></label>
+<label class=" ">新 Job 等待上限 · discover_timeout_minutes<input type="number" data-build name="discover_timeout_minutes" min="1" max="240" step="1" required><small class="label-help">默认 30 分钟，超过则停止等待，1–240。</small></label>
+<label class=" ">构建等待上限 · build_timeout_minutes<input type="number" data-build name="build_timeout_minutes" min="1" max="1440" step="1" required><small class="label-help">默认 180 分钟，超过则标记超时，1–1440。</small></label>
+<label class=" ">Callback 等待上限 · callback_timeout_minutes<input type="number" data-build name="callback_timeout_minutes" min="1" max="240" step="1" required><small class="label-help">默认 30 分钟，等待回调构建完成，1–240。</small></label>
+<label class=" ">允许 Git 变更行数 · max_changed_lines<input type="number" data-build name="max_changed_lines" min="1" max="100000" step="1" required><small class="label-help">默认 100 行，超出则停止自动提交；填 1–100000 的整数。</small></label>
+
+</div></div></details>
+<label class="switch-row schedule-toggle"><input type="checkbox" id="save-as-schedule"><span class="toggle"></span><span>保存为定时任务 · schedule<small>关闭：立即构建；开启：只保存计划，按本机时间运行。两种方式使用上方同一份参数。</small></span></label>
+<fieldset id="schedule-settings" hidden disabled>
+<legend>定时设置</legend><div class="form-grid">
+<label>计划名称 · name<input name="schedule_name" required maxlength="60" placeholder="例如 工作日早间构建"><small class="label-help">给计划起一个便于识别的名称，最多 60 个字符。</small></label>
+<label>运行时间 · cron<input name="schedule_cron" required maxlength="100" placeholder="0 9 * * 1-5" spellcheck="false"><small class="label-help">按本机时区填写 分 时 日 月 周；示例为工作日 09:00。默认最小间隔 30 分钟。</small></label>
+</div>
+<p id="cron-preview" class="diag-note" role="status">输入 cron 后预览接下来 5 次运行。</p>
+<label class="field-toggle">成功一次后停止<input name="schedule_stop_after_success" type="checkbox" checked><small class="label-help">新建与拷贝默认开启；本计划同时只跑一个任务。整条打包成功（含启用的 TestFairy）后停止并取消尚未启动的排队；邮件失败不重跑打包。重新启用会开启新一轮。</small></label>
+<label class="field-toggle">保存后启用 · enabled<input name="schedule_enabled" type="checkbox" checked><small class="label-help">默认开启：到点自动运行；关闭：只保存，之后在 Schedules 启用。编辑时保留原状态。</small></label>
+<p class="diag-note">Chrome 显示方式沿用「共用高级设置 → visible」，默认开启。凭据不进入计划。启用 TestFairy 时须选择“允许保存本机认证”，且已有 Keychain 或可复用会话；临时密码不能供将来执行。</p>
+</fieldset>
+<div class="sched-buttons"><button class="btn btn-primary submit-btn" id="submit-build" type="submit">▶ Start build</button><button class="ghost-button" id="schedule-cancel" type="button" hidden>取消编辑</button></div>
+<p id="form-message" role="status" class="form-message"></p>
+</form>
           </article>
           <article class="panel activity-panel" id="activity">
-            <div class="panel-head"><div><span class="section-tag">REAL-TIME MONITOR</span><h2>Live activity</h2><p id="selected-subtitle">从任务列表选择一个构建。</p></div><div class="live-indicator"><span class="pulse"></span> LIVE</div></div>
+            <div class="panel-head"><div><span class="section-tag">REAL-TIME MONITOR</span><h2>实时进度</h2><p id="selected-subtitle">从任务列表选择一个构建。</p></div><div class="live-indicator"><span class="pulse"></span> LIVE</div></div>
             <div class="active-summary" id="active-summary"><div class="icon-circle">⌁</div><div><strong>No build selected</strong><small>选择任务查看完整构建过程</small></div></div>
             <div class="jenkins-links" id="jenkins-links" aria-label="关联 Jenkins Job 和 Build"></div>
             <div class="stage-strip" id="stage-strip"><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div></div>
@@ -149,29 +136,91 @@
             <div class="panel-bottom"><span>● Auto-refresh every 3 seconds</span><button class="text-btn" type="button" id="resume-build" hidden>↻ Resume task</button></div>
           </article>
         </section>
-        <section class="panel table-panel" id="history"><div class="panel-head history-head"><div><span class="section-tag">BUILD HISTORY</span><h2>Recent builds</h2></div><button class="ghost-button" id="refresh-tasks">↻ Refresh</button></div><div class="table-wrap"><table><thead><tr><th>BUILD / PROJECT</th><th>VERSION</th><th>PIPELINE STAGE</th><th>CREATED</th><th>STATUS</th><th></th></tr></thead><tbody id="tasks-body"><tr><td class="empty-row" colspan="6">Loading tasks...</td></tr></tbody></table></div></section>
+        <section class="panel table-panel" id="history"><div class="panel-head history-head"><div><span class="section-tag">BUILD HISTORY</span><h2>运行记录</h2></div><button class="ghost-button" id="refresh-tasks">↻ Refresh</button></div><div class="table-wrap"><table><thead><tr><th>BUILD / PROJECT</th><th>VERSION</th><th>PIPELINE STAGE</th><th>CREATED</th><th>STATUS</th><th></th></tr></thead><tbody id="tasks-body"><tr><td class="empty-row" colspan="6">Loading tasks...</td></tr></tbody></table></div></section>
+<section class="panel diagnose-panel delivery-panel" id="delivery"><div class="panel-head"><div><span class="section-tag">给测试交付了什么</span><h2>交付记录</h2><p>哪些 Jira 拿到了哪个 App 链接，发了哪些邮件。按 Jira 编号搜，就能知道某张单在哪个包里。</p></div></div>
+<div class="delivery-bar"><div class="tool-tabs" role="tablist" aria-label="记录类型"><button type="button" role="tab" class="tool-tab active" data-delivery="tickets" aria-selected="true">Jira 更新</button><button type="button" role="tab" class="tool-tab" data-delivery="mails" aria-selected="false">邮件</button></div>
+<label class="delivery-search">搜索<input id="delivery-search" type="search" maxlength="100" placeholder="Jira 编号、标题、任务编号或邮件主题"><small class="label-help">例如输入 TRANSACT-210861，看这张单收到过哪些包。</small></label></div>
+<p id="delivery-status" class="diag-note" role="status"></p>
+<div class="table-wrap"><table id="delivery-table"><thead id="delivery-head"></thead><tbody id="delivery-body"></tbody></table></div>
+</section>
         <section class="panel diagnose-panel schedules-panel" id="schedules">
-          <div class="panel-head"><div><span class="section-tag">RECURRING BUILDS</span><h2>Schedules</h2><p>在 New build 表单底部打开「保存为定时任务」，填入 cron 即可，参数与手动构建完全一致。错过的时间只补跑最近一次；并发已满时排队等待，不会丢弃。</p></div><div class="panel-icon">⏱</div></div>
+          <div class="panel-head"><div><span class="section-tag">RECURRING BUILDS</span><h2>定时任务</h2><p>输入 cron，由独立调度器按时自动创建构建。错过的时间只补跑最近一次；并发已满时排队等待，不会丢弃。账号密码使用 Mac Keychain，定时任务不保存任何密码。</p></div><div class="panel-icon">⏱</div></div>
           <div id="scheduler-status" class="diagnose-verdict unknown">调度器状态读取中…</div>
+          <button type="button" class="btn btn-primary" id="new-schedule">＋ 在 New build 创建定时任务</button><p class="diag-note">构建字段、默认值、Chrome 显示选项均在 New build 共用表单维护；点击列表「编辑」可完整修改。最近 20 次记录包含计划时间、状态、构建与日志；离线或休眠错过时只补最近一次，并发满时排队。</p>
           <div class="table-wrap"><table><thead><tr><th>NAME</th><th>CRON</th><th>NEXT RUN</th><th>LAST RUN</th><th>ENABLED</th><th>ACTIONS</th></tr></thead><tbody id="schedules-body"><tr><td class="empty-row" colspan="6">Loading schedules...</td></tr></tbody></table></div>
           <div id="schedule-runs" class="schedule-runs" hidden>
             <div class="log-heading"><span id="schedule-runs-title">RUN HISTORY</span><button class="subtle-btn" id="schedule-runs-close" type="button">✕ 关闭</button></div>
             <div class="table-wrap"><table><thead><tr><th>PLANNED</th><th>STATUS</th><th>BUILD</th><th>NOTE</th></tr></thead><tbody id="schedule-runs-body"></tbody></table></div>
           </div>
-          <p class="diag-note">调度器是独立后台进程：首次请在终端运行 <code>./app-build scheduler install</code>，之后登录 Mac 自动运行、崩溃自动重启，关闭本页面不影响。电脑睡眠或合盖时任何程序都不会运行，醒来后会补跑最近一次。</p>
+          <p class="diag-note">启动 Web 会自动检查并启动独立后台调度器，复用已运行的实例；关闭页面或 Web 不会停止调度器。无需安装服务。只有需要登录 Mac 后自动运行时，才手动执行 <code>./app-build scheduler install</code>。电脑睡眠或合盖时任何程序都不会运行，醒来后会补跑最近一次。</p>
         </section>
-        <section class="panel diagnose-panel" id="diagnostics">
-          <div class="panel-head"><div><span class="section-tag">READ-ONLY · NO NEW BUILDS</span><h2>Jenkins URL Test</h2><p>Plugin 和 GMX 分别测试；自动打开 Chrome。你可以手动登录公司 SSO，状态检测结束直接在下方查看 PASS / FAIL / UNKNOWN。</p></div><div class="panel-icon">◎</div></div>
+        <section class="panel diagnose-panel settings-panel" id="settings"><div class="panel-head"><div><span class="section-tag">只需配置一次</span><h2>设置</h2><p>Token 和密码都保存在本机 Mac 钥匙串，不写入文件、任务或日志，页面也不会再显示。</p></div></div>
+<div class="settings-grid">
+<section class="settings-card" aria-labelledby="set-jenkins"><h3 id="set-jenkins">Jenkins</h3><div id="jenkins-token-box" class="form-grid"><label class="span-2">工号<input id="jenkins-token-user" maxlength="128" autocomplete="username" placeholder="例如 45012345"><small class="label-help">Jenkins 用户 ID，两台 Jenkins 共用。保存后自动带出，不用每次填写。</small></label><label>Plugin Jenkins Token<input id="jenkins-token-plugin" type="password" maxlength="512" autocomplete="new-password" placeholder="留空表示保留已保存的"><small class="label-help">在 Plugin Jenkins（premier01）右上角你的名字 → Configure → API Token 生成。</small></label><label>Platform Jenkins Token<input id="jenkins-token-gmx" type="password" maxlength="512" autocomplete="new-password" placeholder="留空表示保留已保存的"><small class="label-help">在 Platform Jenkins（GMX 和上传 TestFairy 所在）同样生成。</small></label></div><div class="jenkins-token-actions"><button type="button" class="ghost-button" id="jenkins-token-save">保存到钥匙串</button><button type="button" class="ghost-button" id="jenkins-token-test">测试 Token（只读）</button></div><p id="jenkins-token-status" class="diag-note" role="status"></p></section>
+<section class="settings-card" aria-labelledby="set-github"><h3 id="set-github">GitHub 与浏览器登录</h3><form id="credentials-form" class="form-grid" autocomplete="off"><label class=" span-2">GitHub Token<input name="github_token" type="password" placeholder="首次输入后保存到 Mac Keychain" autocomplete="off" maxlength="4096"><small class="label-help">首次填写 PAT 后保存到本机 Mac Keychain；留空使用已保存凭据。分支列表只由本机服务读取令牌，浏览器不会获得已保存令牌。</small></label>
+<label class=" ">Jenkins 用户名（浏览器登录用）<input name="jenkins_user" placeholder="Corporate username" autocomplete="username" maxlength="256"><small class="label-help">首次填写公司账号，须与密码同时填写；留空使用本机 Keychain。</small></label>
+<label class=" ">Jenkins 密码（浏览器登录用）<input name="jenkins_password" type="password" placeholder="••••••••" autocomplete="new-password"><small class="label-help">与用户名一起保存到本机 Keychain；留空使用已保存凭据，定时模板不保存密码。</small></label>
+</form><div class="jenkins-token-actions"><button type="button" class="ghost-button" id="credentials-save">保存到钥匙串</button></div><p id="credentials-status" class="diag-note" role="status"></p></section>
+</div>
+<section class="settings-card settings-wide" aria-labelledby="set-jira"><h3 id="set-jira">Jira 回填与邮件通知</h3><form id="jira-form" class="diagnose-form" autocomplete="off"><div class="form-grid">
+<label class="field-toggle span-2">启用 Jira 回写<input type="checkbox" name="enabled"><small class="label-help">关闭则构建成功后不做任何 Jira 操作。</small></label>
+<label class="field-toggle span-2">演练模式（只记录会做什么，不真正修改 ticket）<input type="checkbox" name="dry_run"><small class="label-help">建议先开着演练，确认下方演练结果无误后再关闭。</small></label>
+<label class="span-2">Jira 地址<input name="base_url" maxlength="512" placeholder="https://wpb-jira.systems.uk.hsbc"><small class="label-help">只填网站根地址，必须以 https 开头。</small></label>
+<label class="span-2">Jira Token<input name="token" type="password" maxlength="4096" autocomplete="new-password" placeholder="留空表示保持已保存的 Token"><small class="label-help">保存到本机 Mac 钥匙串，不写入文件、任务或日志，页面也不会再显示它。</small><span id="jira-token-status" role="status"></span></label>
+<label class="span-2">流转到的状态名称<input name="transition_name" maxlength="128"><small class="label-help">必须与 Jira 工作流里的流转名称一致，例如 In Test。</small></label>
+<label class="field-toggle span-2">转给 Reporter<input type="checkbox" name="assign_to_reporter"><small class="label-help">把 ticket 的经办人改为它的 Reporter。</small></label>
+<label class="field-toggle span-2">优先从 PR 里找 Jira 号<input type="checkbox" name="use_pr_lookup"><small class="label-help">先看 PR 的标题、分支名、描述，找不到再看提交信息；GitHub 查询失败会自动退回提交信息。</small></label>
+<label class="span-2">评论里 @ 的人（Jira 用户名）<textarea name="comment_mentions" rows="2" maxlength="2000" placeholder="44065253, 43123456"></textarea><small class="label-help">每条回填评论末尾加上 cc @这些人，他们会收到 Jira 通知。填 Jira 用户名（通常是工号），逗号、空格或换行分隔；留空就不 @ 任何人。</small></label>
+</div><div class="group-head jira-mail-head"><span>✉</span> 邮件通知（通过 Jira 发送）</div><div class="form-grid">
+<label class="field-toggle span-2">构建结束后给团队发邮件<input type="checkbox" name="mail_enabled"><small class="label-help">成功并拿到 App 链接：发 App 链接、分支、构建号和本次更新的 Jira。失败：发失败在哪一步、原因、Jenkins 链接和日志最后几行。由公司 Jira 服务器发出，不需要 Outlook。发件人是 Jira Token 的主人，他自己收不到。</small></label><label class="field-toggle span-2">同一原因连续失败只发一次<input type="checkbox" name="mail_failure_once"><small class="label-help">定时任务每 6 小时跑一次，同一个问题没修好时只通知一次；恢复成功的那封邮件会写明“之前的失败已恢复”。</small></label>
+<label class="span-2">公告单号<input name="mail_issue" maxlength="40" placeholder="TRANSACT-123456"><small class="label-help">Jira 的发邮件接口必须挂在一张单上，建一张长期开着的单专门用来发通知即可。</small></label>
+<label class="span-2">收件人（Jira 用户名）<textarea name="mail_users" rows="2" maxlength="2000" placeholder="44065253, 43123456"></textarea><small class="label-help">填 Jira 用户名（通常是工号），用逗号、空格或换行分隔，最多 50 个。想收的人随时加上再保存。Jira 没有抄送（CC），每人都是单独一封。</small></label>
+<label class="span-2">也发给这些 Jira 用户组（可选）<textarea name="mail_groups" rows="2" maxlength="2000" placeholder="paybybank-testers"></textarea><small class="label-help">填 Jira 用户组名称，每行一个或用逗号分隔；组里的人都会收到。组里加人减人不用改这里。</small></label>
+</div><div class="jira-actions"><button type="button" class="ghost-button" id="jira-mail-test">发一封测试邮件</button></div><details class="advanced-panel"><summary>更多设置 · 通常无需修改</summary><div class="advanced-body"><div class="form-grid">
+<label class="span-2">Jira 编号识别规则（正则）<input name="key_pattern" maxlength="512"><small class="label-help">默认识别 TRANSACT-210390 这种格式；在 Jira 里查不到的编号会被忽略。</small></label>
+<label>首次回溯提交数<input name="first_run_commits" type="number" min="0" max="200"><small class="label-help">0 表示首次只记录起点，不改任何 ticket。</small></label>
+<label>每轮最多处理 ticket 数<input name="max_tickets_per_run" type="number" min="1" max="200"><small class="label-help">单次构建后最多处理的 Jira 数量，防止误识别时一次改动过多。</small></label>
+<label class="span-2">流转时必填字段（例如 Bug 要选 Root Cause）<textarea name="transition_fields" rows="3" maxlength="2000" placeholder="Bug | Root Cause | 待确认"></textarea><small class="label-help">每行一条：问题类型 | 字段名 | 值。问题类型写 * 表示全部。可选值先用上面的“查询 ticket”查看。没配时，下拉类字段（如 Root Cause）自动选 Jira 里的第一个可选值；文本类必填字段没配时，只评论和转派，不改状态，并在评论里提醒手动处理。</small></label>
+<label>Jira 类型<select name="flavor"><option value="server">公司自建（Server / Data Center）</option><option value="cloud">Atlassian 云版</option></select><small class="label-help">公司自建版按用户名转给 Reporter；云版按账号 ID。</small></label>
+</div></div></details>
+<div class="jira-actions"><button type="button" class="btn btn-primary" id="jira-save">保存设置</button><button type="button" class="ghost-button" id="jira-test-connection">测试连接（只读）</button></div></form><pre id="jira-settings-result" class="terminal diagnose-terminal settings-result" role="status">尚未执行</pre></section>
+<section class="settings-card settings-wide" aria-labelledby="set-ai"><h3 id="set-ai">离线 AI（可选）</h3>
+<p class="diag-note">模型在这台 Mac 上运行，不联网、不调任何外部接口。只用来写两句英文：评论里给测试的一句说明、失败邮件里的可能原因。生成的内容先检查（只能是英文、不能太长、不能带链接或原文没有的单号），不合格就不用，退回原来的写法。关掉或没装时一切照旧。</p>
+<p id="ai-status" class="diag-note" role="status">读取中…</p>
+<form id="ai-form" class="diagnose-form" autocomplete="off"><div class="form-grid">
+<label class="span-2">模型<select name="model" id="ai-model"></select><small class="label-help" id="ai-model-help">点“一键安装”会装运行库、下载模型、核对校验值并试运行。模型放在本机 ~/.app-builder/models，更新工具不会丢。</small></label>
+</div><div class="jira-actions"><button type="button" class="btn btn-primary" id="ai-install">一键安装</button></div>
+<details class="advanced-panel"><summary>下载不了？用已经下载好的文件</summary><div class="advanced-body"><div class="form-grid">
+<label class="span-2">模型文件位置（.gguf）<input name="path" id="ai-path" maxlength="1024" placeholder="/Users/你/Downloads/microsoft_Phi-4-mini-instruct-Q4_K_M.gguf"><small class="label-help">公司网络打不开下载网站时，换个网络下载上面所选模型的 Q4_K_M.gguf 文件（链接见模型说明），然后把完整路径粘贴到这里。在访达里选中文件，按 ⌥⌘C 可以复制路径。</small></label>
+</div><div class="jira-actions"><button type="button" class="ghost-button" id="ai-use-file">使用这个文件</button></div></div></details>
+<div class="form-grid">
+<label class="field-toggle span-2">启用离线 AI<input type="checkbox" name="enabled"><small class="label-help">装好后自动打开。</small></label>
+<label class="field-toggle span-2">评论里写一句给测试的说明<input type="checkbox" name="tester_note"><small class="label-help">根据 PR 标题和描述写 “For testers: …”，邮件里也会显示。</small></label>
+<label class="field-toggle span-2">失败邮件里写可能原因和建议<input type="checkbox" name="failure_hint"><small class="label-help">根据失败步骤、原因和英文日志写一句 “Likely cause” 和 “Try”，标明是 AI 建议。</small></label>
+</div><div class="jira-actions"><button type="button" class="ghost-button" id="ai-try">试一下效果</button></div></form>
+<progress id="ai-progress" max="100" hidden></progress>
+<pre id="ai-log" class="terminal diagnose-terminal settings-result" role="status">尚未执行</pre></section>
+</section>
+<section class="panel diagnose-panel tools-panel" id="tools"><div class="panel-head"><div><span class="section-tag">出问题时用</span><h2>测试工具</h2><p>除「GMX 实测」（会真的触发构建）和设置里的测试邮件外，其余都只读。</p></div></div>
+<div class="tool-tabs" role="tablist" aria-label="测试工具">
+<button type="button" role="tab" class="tool-tab" data-tool="diagnostics">Jenkins 构建检查</button>
+<button type="button" role="tab" class="tool-tab" data-tool="live-tests">GMX 实测</button>
+<button type="button" role="tab" class="tool-tab" data-tool="testfairy-tests">App 链接</button>
+<button type="button" role="tab" class="tool-tab" data-tool="jira-tools">Jira 查单与演练</button>
+</div>
+<section class="panel diagnose-panel" id="diagnostics">
+          <div class="panel-head"><div><span class="section-tag">只读 · 不会新建构建</span><h2>Jenkins 构建检查</h2><p>Plugin 和 GMX 分别测试；自动打开 Chrome。你可以手动登录公司 SSO，状态检测结束直接在下方查看 PASS / FAIL / UNKNOWN。</p></div><div class="panel-icon">◎</div></div>
           <div class="diagnose-split">
             <div class="diag-site-card">
               <h3>Plugin Jenkins · 单元测试</h3><p>自动打开 Chrome，允许人工 SSO 登录。针对指定 Trigger 或 Callback 编号检测。</p>
               <form id="diagnose-form" data-site="plugin" class="diagnose-form">
-                <label>Plugin Jenkins URL<input name="url" type="url" required maxlength="2048" placeholder="https://…/job/release_1_3_…/2/" autocomplete="off"></label>
-                <div class="diagnose-fields"><label>Build Number（可选）<input name="build_number" type="number" min="1" max="2000000000" placeholder="例如 2"></label>
-                <label>预期结果<select name="expected"><option value="SUCCESS">SUCCESS（绿色勾）</option><option value="FAILURE">FAILURE</option><option value="ABORTED">ABORTED</option><option value="UNSTABLE">UNSTABLE</option></select></label></div>
-                <label>预期完整 Artifact Version<input name="expected_version" required maxlength="100" placeholder="例如 1.3.0" autocomplete="off"></label>
-                <label>预期 Journey SHA256<input name="journey_sha256" required minlength="64" maxlength="64" pattern="[a-fA-F0-9]{64}" autocomplete="off"></label>
-                <label>预期 DomainModel SHA256<input name="domainmodel_sha256" required minlength="64" maxlength="64" pattern="[a-fA-F0-9]{64}" autocomplete="off"></label>
+                <label>Jenkins 地址 · url<input name="url" type="url" required maxlength="2048" placeholder="https://…/job/release_1_3_…/2/" autocomplete="off"><small class="label-help">粘贴已有 Jenkins Job 或 Build 的 HTTPS 地址；只读检测，不触发构建。</small></label>
+                <div class="diagnose-fields"><label>构建编号 · build_number<input name="build_number" type="number" min="1" max="2000000000" placeholder="例如 2"><small class="label-help">可选，填正整数指定一次 Build；留空从链接或现有页面识别。</small></label>
+                <label>预期结果 · expected<select name="expected"><option value="SUCCESS">SUCCESS（绿色勾）</option><option value="FAILURE">FAILURE</option><option value="ABORTED">ABORTED</option><option value="UNSTABLE">UNSTABLE</option></select><small class="label-help">默认 SUCCESS；选择你希望这次已有构建达到的状态，用于对比检测。</small></label>
+</div>
+                <label>预期完整产物版本 · expected_version<input name="expected_version" required maxlength="100" placeholder="正式成功产物的完整版本，例如 1.3.202610110900" autocomplete="off"><small class="label-help">从正式 Plugin 成功构建的产物填写完整版本；两个依赖必须一致，不截短、不转成 1.3.0。</small></label>
+                <label>Journey 文件校验值 · journey_sha256<input name="journey_sha256" required minlength="64" maxlength="64" pattern="[a-fA-F0-9]{64}" autocomplete="off"><small class="label-help">填写 Journey 产物的 64 位十六进制 SHA256，用于核对文件内容。</small></label>
+                <label>DomainModel 文件校验值 · domainmodel_sha256<input name="domainmodel_sha256" required minlength="64" maxlength="64" pattern="[a-fA-F0-9]{64}" autocomplete="off"><small class="label-help">填写 DomainModel 产物的 64 位十六进制 SHA256，用于核对文件内容。</small></label>
                 <p class="diag-note">构建状态符合预期且版本、两个 SHA256 均一致才算 PASS；结果显示输入值、实际值和逐项匹配状态。</p>
                 <button class="btn btn-primary" type="submit">◎ 打开 Chrome · 测试 Plugin</button>
               </form>
@@ -179,9 +228,10 @@
             <div class="diag-site-card">
               <h3>GMX Jenkins · 单元测试</h3><p>只读检测现有 GMX Build，不执行初始化 #1。正式构建流程是先点一次 Build，待 Jenkins 提供 Build with Parameters 后填写参数再启动下一次构建。</p>
               <form id="diagnose-gmx-form" data-site="gmx" class="diagnose-form">
-                <label>GMX Jenkins URL<input name="url" type="url" required maxlength="2048" placeholder="粘贴浏览器地址，支持 upload%252F… 或 upload%2F…" autocomplete="off"></label>
-                <div class="diagnose-fields"><label>Build Number（可选）<input name="build_number" type="number" min="1" max="2000000000" placeholder="例如 2"></label>
-                <label>预期结果<select name="expected"><option value="SUCCESS">SUCCESS（绿色勾）</option><option value="FAILURE">FAILURE</option><option value="ABORTED">ABORTED</option><option value="UNSTABLE">UNSTABLE</option></select></label></div>
+                <label>Jenkins 地址 · url<input name="url" type="url" required maxlength="2048" placeholder="粘贴浏览器地址，支持 upload%252F… 或 upload%2F…" autocomplete="off"><small class="label-help">粘贴已有 Jenkins Job 或 Build 的 HTTPS 地址；只读检测，不触发构建。</small></label>
+                <div class="diagnose-fields"><label>构建编号 · build_number<input name="build_number" type="number" min="1" max="2000000000" placeholder="例如 2"><small class="label-help">可选，填正整数指定一次 Build；留空从链接或现有页面识别。</small></label>
+                <label>预期结果 · expected<select name="expected"><option value="SUCCESS">SUCCESS（绿色勾）</option><option value="FAILURE">FAILURE</option><option value="ABORTED">ABORTED</option><option value="UNSTABLE">UNSTABLE</option></select><small class="label-help">默认 SUCCESS；选择你希望这次已有构建达到的状态，用于对比检测。</small></label>
+</div>
                 <button class="btn btn-primary" type="submit">◎ 打开 Chrome · 测试 GMX</button>
               </form>
             </div>
@@ -192,8 +242,8 @@
           <p class="diag-note">优先使用指定 Build 的绿色状态图标，无法识别时再尝试短超时读取日志末行。检测 SUCCESS 仅说明 Jenkins 构建成功，不代表所有 Artifacts 或 GMX Upload 已校验。</p>
         </section>
         <section class="panel diagnose-panel live-tests-panel" id="live-tests">
-          <div class="panel-head"><div><span class="section-tag">ON-DEMAND · ACTUAL EXECUTION</span>
-            <h2>GMX Live Tests</h2>
+          <div class="panel-head"><div><span class="section-tag">会真实执行</span>
+            <h2>GMX 实测</h2>
             <p>输入分支名称，单独运行真实 GMX Jenkins 构建测试。</p>
           </div><div class="panel-icon">⚙</div></div>
           <div class="diagnose-split">
@@ -201,22 +251,22 @@
               <h3>GMX Jenkins Build Test</h3>
               <p>真实打开 Chrome，可人工 SSO；先普通 Build 初始化，再 Build with Parameters。第二次 Build 一旦触发并拿到编号就结束测试，不等待最终 SUCCESS。</p>
               <form id="gmx-build-live-form" data-kind="gmx-build" class="diagnose-form">
-                <label>GMX Branch<input name="branch" required maxlength="140" value="upload/UKPBB-203745-V8" autocomplete="off"></label>
-                <label>GMX Jenkins Job URL（可选）<input name="job_url" type="url" maxlength="2048" placeholder="留空自动尝试 %2F / %252F；也可粘贴浏览器完整 Job 地址" autocomplete="off"></label>
+                <label>GMX 分支 · branch<input name="branch" required maxlength="140" value="upload/UKPBB-203745-V8" autocomplete="off"><small class="label-help">填需要测试的完整分支名；保留示例分支时请先确认它确实是你的测试目标。</small></label>
+                <label>GMX Job 地址 · job_url<input name="job_url" type="url" maxlength="2048" placeholder="留空自动尝试 %2F / %252F；也可粘贴浏览器完整 Job 地址" autocomplete="off"><small class="label-help">可选；默认根据分支尝试 URL 编码，也可填写浏览器中的完整 HTTPS Job 地址。</small></label>
                 <div class="diagnose-fields">
-                  <label>Country<input name="country" value="UK" maxlength="4" required></label>
-                  <label>Project<input name="project" value="PayByBank" maxlength="80" required></label>
-                  <label>BUILD_TYPE<input name="build_type" value="Develop" maxlength="100" required></label>
-                  <label>SIGNING_REPO_BRANCH<input name="signing_repo_branch" value="master" maxlength="100" required></label>
-                  <label>CUSTOM_FOLDER（留空自动生成）<input name="custom_folder" placeholder="0_A_UK_PayByBank" maxlength="100"></label>
+                  <label>国家 / 实体 · ENTITIES (country)<select name="country" required><option value="AE">AE</option><option value="AU">AU</option><option value="BM">BM</option><option value="CIOM">CIOM</option><option value="CN">CN</option><option value="EG">EG</option><option value="EX">EX</option><option value="HK">HK</option><option value="ID">ID</option><option value="IN">IN</option><option value="LK">LK</option><option value="MO">MO</option><option value="MSB">MSB</option><option value="MT">MT</option><option value="MX">MX</option><option value="MY">MY</option><option value="PH">PH</option><option value="QA">QA</option><option value="SG">SG</option><option value="TW">TW</option><option value="UK" selected>UK</option><option value="US">US</option><option value="VN">VN</option><option value="NOT_SET">NOT_SET</option><option value="ALL">ALL</option></select><small class="label-help">默认 UK；ALL 表示全部实体，NOT_SET 表示未指定，均原样传给 Jenkins。</small></label>
+                  <label>项目名称 · project<input name="project" value="PayByBank" maxlength="80" required><small class="label-help">默认 PayByBank；填项目标识，用来生成上传目录。</small></label>
+                  <label>构建类型 · BUILD_TYPE<input name="build_type" value="Develop" maxlength="100" required><small class="label-help">默认 Develop；如需其他类型，填 Jenkins 支持的名称。</small></label>
+                  <label>签名分支 · SIGNING_REPO_BRANCH<input name="signing_repo_branch" value="master" maxlength="100" required><small class="label-help">默认 master；填签名配置仓库的分支。</small></label>
+                  <label>上传目录 · CUSTOM_FOLDER<input name="custom_folder" placeholder="0_A_UK_PayByBank" maxlength="100"><small class="label-help">默认留空，自动生成 0_A_<国家>_<项目>；填写后使用你的自定义目录。</small></label>
                 </div>
                 <div class="live-checkboxes">
-                  <label><input name="sync_upload" type="checkbox" checked> SYNC_UPLOAD</label>
-                  <label><input name="skip_test" type="checkbox" checked> SKIP_TEST</label>
-                  <label><input name="force" type="checkbox" checked> FORCE</label>
-                  <label><input name="keep_alive" type="checkbox"> KEEP_ALIVE</label>
+                  <label>同步上传 · SYNC_UPLOAD<input name="sync_upload" type="checkbox" checked><small class="label-help">默认开启：同步等待上传；关闭：触发下游上传，当前构建成功不代表上传完成。</small></label>
+                  <label>跳过测试 · SKIP_TEST<input name="skip_test" type="checkbox" checked><small class="label-help">默认开启：跳过 Unit/UI Tests；关闭：运行 Jenkins 配置的测试。</small></label>
+                  <label>强制执行 · FORCE<input name="force" type="checkbox" checked><small class="label-help">默认开启：强制完整 Pipeline；关闭：按 Jenkins 的条件执行。</small></label>
+                  <label>保留节点 · KEEP_ALIVE<input name="keep_alive" type="checkbox"><small class="label-help">默认关闭：释放节点；开启：为调试保留节点。</small></label>
                 </div>
-                <label class="live-confirm"><input name="confirm_trigger" type="checkbox" required> 我确认要真正触发 GMX 第二次 Build（测试只确认启动，不等待完成）</label>
+                <label>确认真实构建 · confirm_trigger<input name="confirm_trigger" type="checkbox" required><small class="label-help">默认未勾选：禁止提交；勾选并确认后会真正触发 GMX 第二次 Build，只验证启动，不等待完成。</small></label>
                 <button class="btn btn-primary" type="submit">▶ 打开 Chrome · 触发第二次 GMX Build</button>
               </form>
               <div id="gmx-build-live-result" class="diagnose-verdict">尚未执行 · 此测试会真实触发 Jenkins</div>
@@ -225,10 +275,20 @@
           </div>
           <p class="diag-note">Bootstrap 会执行所选仓库分支里的脚本，可能联网下载依赖；Jenkins Test 会真实触发第二次 Build，但拿到 Build Number 后立即停止测试，不等待执行完毕。两项测试均不会 Git Push，也不会验证最终上传是否成功。测试日志位于 .appbuilder/live-tests/logs/。</p>
         </section>
+<section class="panel diagnose-panel" id="testfairy-tests"><div class="panel-head"><div><span class="section-tag">STEP TEST</span><h2>App 链接</h2><p>选择历史构建，只读 GMX Console Output → Full log → 首段 upload-to-testfairy master 成功构建 → 下游完整日志中的 APP 链接；不创建或重启构建。</p></div></div><form id="tf-test-form" class="diagnose-form" autocomplete="off"><div class="form-grid"><label class="span-2">预期 APP 链接（可选）<input name="tf_test_expected" type="url" placeholder="https://testfairy.com/join/…"><small class="label-help">留空仅提取。填写后与日志中实际取得的完整链接比较；保留查询参数，不打开预期链接。</small></label><label class="span-2">搜索历史构建<input name="tf_test_search" type="search" placeholder="按任务编号、项目、国家或状态搜索"><small class="label-help">在本测试区独立搜索，不改变上方任务列表的选择。</small></label><label class="span-2">用于取链的历史任务<select name="tf_test_task"><option value="">请选择历史构建</option></select><small class="label-help">成对使用任务保存的来源 Job URL 与 Build 编号；复用任务使用原来源。信息不足会提示，不取最新包。已保存 Platform Jenkins Token 时直接读 Jenkins 接口、不打开浏览器，否则用浏览器登录；无需 TestFairy 账号密码。结果里会写明用了哪种方式。</small></label></div><button type="button" class="btn btn-primary" id="test-testfairy">提取 Jenkins APP 链接</button></form><pre id="tf-test-result" class="terminal diagnose-terminal" role="status">尚未执行</pre></section>
+<section class="panel diagnose-panel" id="jira-tools"><div class="panel-head"><div><span class="section-tag">只读</span><h2>Jira 查单与演练</h2><p>查一张单能不能流转；或用已成功的历史构建演练，看会处理哪些单。都不会修改 Jira。</p></div></div>
+
+<form id="jira-ticket-form" class="diagnose-form" autocomplete="off"><div class="form-grid"><label class="span-2">查询单个 ticket（只读）<input name="key" maxlength="40" placeholder="TRANSACT-210390"><small class="label-help">显示标题、当前状态、Reporter，以及能否流转到上面填的状态。不会修改任何内容。</small></label></div><button type="button" class="ghost-button" id="jira-lookup">查询</button></form>
+<form id="jira-preview-form" class="diagnose-form" autocomplete="off"><div class="form-grid"><label class="span-2">用已成功的历史构建演练<select name="task"><option value="">请选择已成功的构建</option></select><small class="label-help">按当前设置演练一遍：列出它会处理哪些 ticket、从哪里找到的 Jira 号。只读，不会修改 Jira，也不影响正式记录。需要本机还保留该构建的 Plugin 代码。</small></label><label>回看最近提交数<input name="recent" type="number" min="1" max="100" value="10"><small class="label-help">只看该构建最近这几个提交，范围 1–100。</small></label></div><button type="button" class="ghost-button" id="jira-preview">开始演练</button></form>
+<pre id="jira-result" class="terminal diagnose-terminal" role="status">尚未执行</pre></section>
+</section>
+
+
         <section class="footer-info"><span>MAC APP BUILDER · LOCAL CONSOLE</span><span>Built with Python · Existing CLI engine · No cloud backend</span></section>
       </div>
     </main>
   </div>
   <div id="toast" class="toast" role="status"></div>
+<dialog id="runtime-dialog" aria-labelledby="runtime-title"><div class="runtime-head"><h2 id="runtime-title">查看运行数据 · 只读</h2><button id="runtime-close" class="ghost-button">关闭</button></div><p id="runtime-task"></p><p class="hint">仅展示服务器脱敏快照；不会修改状态或触发构建。Trigger 成功不代表 Callback 成功。</p><div class="runtime-tabs"><button id="runtime-overview-tab" class="ghost-button">数据概览</button><button id="runtime-json-tab" class="ghost-button">原始 JSON（脱敏）</button><button id="runtime-copy" class="ghost-button" disabled>复制脱敏 JSON</button></div><div id="runtime-overview"></div><pre id="runtime-json" hidden></pre><p id="runtime-message" role="status"></p></dialog>
 </body>
 </html>

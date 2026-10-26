@@ -11,12 +11,12 @@ from appbuilder.config import load_config
 class TestVersions(unittest.TestCase):
     def test_job_name_conventions(self):
         c = load_config()
-        b = branch_names('1.3', '202610100030')
-        self.assertEqual('release/1.3.202610100030', b['plugin_branch'])
-        self.assertEqual('upload/auto202610100030', b['gmx_branch'])
+        b = branch_names('1.3', '202610100030', 'feature/UKPBB-203745-test')
+        self.assertEqual('release/v1.3.202610100030', b['plugin_branch'])
+        self.assertEqual('upload/UKPBB-203745-auto202610100030', b['gmx_branch'])
         urls = job_urls(c, b['plugin_branch'], b['gmx_branch'])
-        self.assertTrue(urls['plugin_job'].endswith('/job/release_1_3_202610100030/'))
-        self.assertTrue(urls['gmx_job'].endswith('/job/upload%2Fauto202610100030/'))
+        self.assertTrue(urls['plugin_job'].endswith('/job/release_v1_3_202610100030/'))
+        self.assertTrue(urls['gmx_job'].endswith('/job/upload%2FUKPBB-203745-auto202610100030/'))
 
     def test_artifacts(self):
         version = '1.3.1-alpha.1-SNAPSHOT.2'
@@ -30,8 +30,10 @@ class TestVersions(unittest.TestCase):
 
     def test_arguments(self):
         validate_args('1.3', 'develop', 'release/1.0', 'UK', 'MyProject')
+        validate_args('1.3.0', 'develop', 'develop', 'UK', 'MyProject')
+        self.assertEqual(branch_names('1.3.1', '202610140900')['plugin_branch'], 'release/v1.3.1')
         with self.assertRaises(ValueError):
-            validate_args('1.3.0', 'develop', 'develop', 'UK', 'MyProject')
+            validate_args('v1.3.1', 'develop', 'develop', 'UK', 'MyProject')
         with self.assertRaises(ValueError):
             validate_args('1.3', 'develop', 'develop', 'UK', '../bad')
 

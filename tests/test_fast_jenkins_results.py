@@ -42,6 +42,10 @@ class RawPage:
     def __init__(self, owner):
         self.owner = owner
     def locator(self, selector):
+        if selector == 'body':
+            text = ('#'+str(self.owner.callback)+'\nManual Callback ← Source #2'
+                    if self.owner.callback is not None else 'Running')
+            return SimpleNamespace(inner_text=lambda:text)
         self.owner.status_checks += 1
         return BuildStatusIcon(self.owner.heading)
 
@@ -59,7 +63,7 @@ class RawBrowser:
         self.page = RawPage(self)
         self.visits = []
         self.status_checks = 0
-    def visit(self, url):
+    def visit(self, url, **kwargs):
         self.visits.append(url)
         return self.page_code
     def find_callback(self, *args):
@@ -72,14 +76,14 @@ class FastResultTests(unittest.TestCase):
         outcome, tail = JenkinsBrowser.wait_result(browser, 'https://ci.corp/job/p/', 2)
         self.assertEqual(outcome, 'SUCCESS')
         self.assertIn('Finished: SUCCESS', tail)
-        self.assertEqual(browser.visits, ['https://ci.corp/job/p/', 'https://ci.corp/job/p/2/'])
+        self.assertEqual(browser.visits, ['https://ci.corp/job/p/'])
         self.assertEqual(browser.context.request.calls[0][1]['timeout'], 10000)
 
     def test_gmx_failure_uses_same_fast_detector(self):
         browser = RawBrowser([RawReply('Finished: FAILURE\n')])
         browser.site = 'gmx'
         self.assertEqual(JenkinsBrowser.wait_result(browser, 'https://ci.corp/job/p/', 2)[0], 'FAILURE')
-        self.assertEqual(browser.visits, ['https://ci.corp/job/p/', 'https://ci.corp/job/p/2/'])
+        self.assertEqual(browser.visits, ['https://ci.corp/job/p/'])
 
     def test_running_console_then_finishes_with_five_second_poll(self):
         browser = RawBrowser([RawReply('stage work\n'), RawReply('Finished: SUCCESS\n')])
@@ -113,14 +117,17 @@ class FastResultTests(unittest.TestCase):
         browser = RawBrowser([PlaywrightTimeout('request timeout')], heading='FAILURE')
         self.assertEqual(JenkinsBrowser.wait_result(browser, 'https://ci.corp/job/p/', 2)[0], 'FAILURE')
 
-    def test_raw_console_403_fails_fast(self):
-        browser = RawBrowser([RawReply('', 403)])
+    def test_raw_console_403_stops_after_one_read_only_retry(self):
+        browser = RawBrowser([RawReply('', 403), RawReply('', 403)])
         with self.assertRaisesRegex(NeedsAttention, 'HTTP 403'):
             JenkinsBrowser.wait_result(browser, 'https://ci.corp/job/p/', 2)
 
     def test_sso_redirect_not_confused_with_console(self):
-        browser = RawBrowser([RawReply('Finished: SUCCESS', url='https://login.company.example/sso')], heading='FAILURE')
-        self.assertEqual(JenkinsBrowser.wait_result(browser, 'https://ci.corp/job/p/', 2)[0], 'FAILURE')
+        browser = RawBrowser([RawReply('Finished: SUCCESS', url='https://login.company.example/sso'),
+                              RawReply('Finished: SUCCESS', url='https://login.company.example/sso')], heading='FAILURE')
+        with patch('appbuilder.jenkins.time.sleep'):
+            self.assertEqual(JenkinsBrowser.wait_result(browser, 'https://ci.corp/job/p/', 2)[0], 'FAILURE')
+        self.assertEqual(len(browser.context.request.calls),2)
 
     def test_nonterminal_http_404_can_fallback_to_build_page_status(self):
         browser = RawBrowser([RawReply('', 404)], heading='SUCCESS')

@@ -106,7 +106,8 @@ class ScheduleAPITests(unittest.TestCase):
             self.assertIn(fragment, data['error'])
 
     def test_validation_errors_are_400_and_nothing_is_saved(self):
-        for payload in ({'cron': '0 * * * *', 'template': {**TEMPLATE, 'jenkins_password': 'x'}},
+        for payload in ({'cron': 42, 'template': dict(TEMPLATE)},
+                        {'cron': '0 * * * *', 'template': {**TEMPLATE, 'jenkins_password': 'x'}},
                         {'cron': '0 * * * *', 'template': {**TEMPLATE, 'plugin_version': 'bad'}},
                         {'cron': '* * * * *', 'template': dict(TEMPLATE)},
                         {'cron': '0 * * * *'}):
@@ -114,6 +115,28 @@ class ScheduleAPITests(unittest.TestCase):
                 status, _ = self.call('POST', '/api/schedules', {'name': 'x', **payload})
                 self.assertEqual(status, 400)
         self.assertEqual(self.call('GET', '/api/schedules')[1]['schedules'], [])
+
+    def test_complete_template_round_trip_and_shared_issue_validation(self):
+        template = {**TEMPLATE, 'gmx_issue_key': 'UKPBB-203745',
+                    'gmx_custom_folder': 'custom_folder', 'gmx_force': False,
+                    'gmx_keep_alive': True, 'visible': True, 'verbose': False,
+                    'selector_force': '#force', 'poll_seconds': '55',
+                    'gmx_signing_repo_branch': 'release/test',
+                    'plugin_url': 'https://github.example/team/plugin'}
+        status, data = self.create(template=template)
+        self.assertEqual(status, 201, data)
+        sid = data['schedule']['id']
+        self.assertEqual({k: data['schedule']['template'][k] for k in template}, template)
+        listed = self.call('GET', '/api/schedules')[1]['schedules'][0]['template']
+        self.assertEqual({k: listed[k] for k in template}, template)
+        status, updated = self.call('POST', f'/api/schedules/{sid}/update',
+                                    {'template': listed, 'name': 'edited'})
+        self.assertEqual(status, 200, updated)
+        self.assertEqual(updated['schedule']['template'], listed)
+        bad = {**template, 'gmx_issue_key': 'wrong'}
+        with self.assertRaises(ValueError):
+            web.validate_build_parameters(bad, web.load_config())
+        self.assertEqual(self.create(template=bad)[0], 400)
 
     def test_post_requires_csrf_and_ids_are_validated(self):
         status, _ = self.call('POST', '/api/schedules', {'name': 'x'}, csrf=False)
@@ -143,36 +166,69 @@ class RealCreateBuildHandOffTests(unittest.TestCase):
             params = json.loads(tasks[0]['params'])
             self.assertEqual((params['plugin_source'], params['gmx_source'], params['project'], params['country']),
                              ('develop', 'develop', 'PayByBank', 'UK'))
-            self.assertIs(params['visible'], False)
-            self.assertTrue(params['plugin_branch'].startswith('release/1.3.'))
+            self.assertIs(params['visible'], web.form_defaults(web.load_config())['visible'])
+            self.assertTrue(params['plugin_branch'].startswith('release/v1.3.'))
             spawn.assert_called_once_with(tasks[0]['id'], wait=False)
             run = schedules.last_run(row['id'])
             self.assertEqual((run['status'], run['task_id']), ('STARTED', tasks[0]['id']))
 
-    def test_full_form_body_incl_advanced_fields_reaches_the_real_build(self):
-        body = {**TEMPLATE, 'gmx_build_type': 'Release', 'gmx_force': False, 'build_timeout_minutes': '90',
-                'visible': False, 'verbose': True}
+    def test_saved_feature_default_schedule_creates_release_task_without_rewriting_template(self):
+        from appbuilder.versions import PLUGIN_RELEASE_PARENT, PLUGIN_FEATURE_PARENT
         with tempfile.TemporaryDirectory() as tmp, patch.object(store, 'DATA', Path(tmp)), \
-                patch('appbuilder.cli.doctor_check', return_value=True), patch('appbuilder.cli.spawn'), \
-                patch('appbuilder.web.token_or_error', return_value='t'):
-            schedules.create_schedule('adv', '0 * * * *', body, now=datetime(2026, 10, 10, 10, 15))
-            schedules.tick(datetime(2026, 10, 10, 11, 0, 5))
+                patch('appbuilder.cli.doctor_check', return_value=True), \
+                patch('appbuilder.cli.spawn'), patch('appbuilder.web.token_or_error', return_value='t'):
+            template = {**TEMPLATE, 'plugin_parent': PLUGIN_FEATURE_PARENT}
+            row = schedules.create_schedule('legacy template', '0 * * * *', template, now=datetime(2026, 10, 10, 10, 15))
+            before = schedules.get_schedule(row['id'])['params']
+            self.assertEqual(schedules.tick(datetime(2026, 10, 10, 11, 0, 5)), {'queued': 1, 'started': 1})
             params = json.loads(store.task_list()[0]['params'])
-            self.assertEqual(params['gmx_parameters']['BUILD_TYPE'], 'Release')
-            self.assertIs(params['gmx_parameters']['FORCE'], False)
-            self.assertEqual(params['jenkins_settings']['build_timeout_minutes'], 90)
+            self.assertEqual(params['plugin_job'], PLUGIN_RELEASE_PARENT + 'release_v1_3_' + params['stamp'] + '/')
+            self.assertEqual(params['jenkins_settings']['plugin_parent'], PLUGIN_RELEASE_PARENT)
+            self.assertEqual(schedules.get_schedule(row['id'])['params'], before)
+
+    def test_copy_of_feature_default_and_run_now_create_release_without_mutating_source(self):
+        from appbuilder import schedule_api
+        from appbuilder.versions import PLUGIN_RELEASE_PARENT, PLUGIN_FEATURE_PARENT
+        with tempfile.TemporaryDirectory() as tmp, patch.object(store, 'DATA', Path(tmp)), \
+                patch('appbuilder.cli.doctor_check', return_value=True), \
+                patch('appbuilder.cli.spawn'), patch('appbuilder.web.token_or_error', return_value='t'):
+            source = schedules.create_schedule('old feature', '0 * * * *',
+                {**TEMPLATE, 'plugin_parent': PLUGIN_FEATURE_PARENT}, enabled=False)
+            public = schedule_api.public_schedule(source)
+            _, created = schedule_api.handle_post('/api/schedules',
+                {'name':'copied release', 'cron':public['cron'], 'template':public['template'], 'enabled':False})
+            copied = created['schedule']
+            self.assertNotEqual(copied['id'], source['id'])
+            self.assertTrue(copied['stop_after_success'])
+            self.assertEqual(copied['template']['plugin_parent'], PLUGIN_FEATURE_PARENT)
+            for row in (public, copied):
+                schedule_api.handle_post('/api/schedules/' + row['id'] + '/run-now', {})
+            self.assertEqual(schedules.dispatch_pending(), 2)
+            for task in store.task_list():
+                params = json.loads(task['params'])
+                self.assertTrue(params['plugin_branch'].startswith('release/v1.3.'))
+                self.assertEqual(params['plugin_job'], PLUGIN_RELEASE_PARENT + 'release_v1_3_' + params['stamp'] + '/')
+                self.assertEqual(params['jenkins_settings']['plugin_parent'], PLUGIN_RELEASE_PARENT)
+            self.assertEqual(schedules.get_schedule(source['id']), source)
+            self.assertEqual(json.loads(schedules.get_schedule(copied['id'])['params'])['plugin_parent'], PLUGIN_FEATURE_PARENT)
 
     def test_default_concurrency_limit_is_shared_with_manual_builds(self):
         with tempfile.TemporaryDirectory() as tmp, patch.object(store, 'DATA', Path(tmp)), \
                 patch('appbuilder.cli.doctor_check', return_value=True), \
                 patch('appbuilder.cli.spawn'), patch('appbuilder.web.token_or_error', return_value='t'):
-            schedules.create_schedule('a', '0 * * * *', dict(TEMPLATE), now=datetime(2026, 10, 10, 10, 15))
-            schedules.create_schedule('b', '5 * * * *', dict(TEMPLATE), now=datetime(2026, 10, 10, 10, 15))
-            schedules.create_schedule('c', '10 * * * *', dict(TEMPLATE), now=datetime(2026, 10, 10, 10, 15))
+            # One manual pipeline and ten due schedules share the same ten slots.
+            web.create_build(dict(TEMPLATE))
+            for i in range(10):
+                schedules.create_schedule(str(i), '0 * * * *', dict(TEMPLATE),
+                                          now=datetime(2026, 10, 10, 10, 15))
             schedules.tick(datetime(2026, 10, 10, 11, 11))
-            self.assertEqual(len(store.task_list()), 2)    # config max_parallel=2: third waits in the queue
-            pending = [r for s in schedules.list_schedules() for r in schedules.list_runs(s['id']) if r['status'] == 'PENDING']
+            self.assertEqual(len(store.task_list()), 10)
+            pending = [r for schedule in schedules.list_schedules()
+                       for r in schedules.list_runs(schedule['id']) if r['status'] == 'PENDING']
             self.assertEqual(len(pending), 1)
+            with self.assertRaisesRegex(ValueError, '并发'):
+                web.create_build(dict(TEMPLATE))
+
 
 
 if __name__ == '__main__':

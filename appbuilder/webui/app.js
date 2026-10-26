@@ -21,7 +21,7 @@ function renderTasks(){const list=state.tasks;const counts={total:list.length,ru
     const info=create('td'),name=create('strong','',t.project||'APP Build');const sub=create('small','',`${t.country} · ${t.id}`);info.append(name,sub);
     const version=create('td','',t.plugin_version||'—');const stage=create('td','',t.stage||'—');
     const date=create('td','',formatDate(t.created));const stat=create('td');stat.append(create('span','pill '+t.status.toLowerCase(),t.status.replace('_',' ')));
-    tr.append(info,version,stage,date,stat,create('td','table-action','↗'));tbody.append(tr);}
+    const actions=create('td','table-action'),inspect=create('button','ghost-button','查看运行数据');inspect.addEventListener('click',e=>{e.stopPropagation();openRuntimeData(t.id);});actions.append(inspect);tr.append(info,version,stage,date,stat,actions);tbody.append(tr);}
 }
 function renderSelection(){const row=state.tasks.find(t=>t.id===state.selected);if(!row)return;
   $('selected-subtitle').textContent=`${row.project} · ${row.country} · ${row.id}`;
@@ -32,11 +32,17 @@ function renderSelection(){const row=state.tasks.find(t=>t.id===state.selected);
       const a=create('a','jenkins-link','↗ '+link.label);a.href=target.href;a.target='_blank';a.rel='noopener noreferrer';links.append(a);
     }catch(e){/* invalid stored URL is never rendered */}
   }
-  const phases=['PLUGIN_CHECKOUT','PLUGIN_EDIT','PLUGIN_PUSH','PLUGIN_JENKINS','GMX_CHECKOUT','GMX_EDIT','GMX_LOCK','GMX_PUSH','GMX_JENKINS'];const idx=phases.indexOf(row.stage);
+  if(row.delivery?.app){
+    try{const url=new URL(row.delivery.app.share_url);if(url.protocol==='https:'&&!url.username&&!url.password&&(url.hostname==='testfairy.com'||url.hostname.endsWith('.testfairy.com'))&&url.pathname.startsWith('/join/')){
+      const a=create('a','jenkins-link','↗ APP 链接'+(row.delivery.app.app_version?' '+row.delivery.app.app_version:''));a.href=url.href;a.target='_blank';a.rel='noopener noreferrer';links.append(a);
+    }}catch(e){}
+  }
+  if(row.delivery?.jira_mail){const m=row.delivery.jira_mail,what=m.kind==='failure'?'失败通知':'新包通知';box.append(create('p','diag-note',m.status==='SENT'?'邮件 · '+what+'已通过 Jira 发给 '+m.to.length+' 人（'+m.to.join('、')+'）':m.status==='SUPPRESSED'?'邮件 · '+m.reason:'邮件 · 未发送：'+(m.reason||m.status)));}
+  const phases=['PLUGIN_CHECKOUT','PLUGIN_EDIT','PLUGIN_PUSH','PLUGIN_JENKINS','GMX_CHECKOUT','GMX_EDIT','GMX_LOCK','GMX_PUSH','GMX_JENKINS'];const idx=row.stage==='PLUGIN_PREPARE'?0:phases.indexOf(row.stage);
   $('stage-strip').querySelectorAll('div').forEach((e,i)=>{e.className='';if(row.status==='SUCCESS'||(idx>=0&&i<idx))e.className='done';else if(i===idx)e.className='current';});
   $('resume-build').hidden=['SUCCESS','RUNNING','QUEUED'].includes(row.status);
 }
-async function loadTasks(){if(state.loading)return;state.loading=true;try{const res=await api('/api/tasks');state.tasks=res.tasks||[];if(!state.selected&&state.tasks.length){state.selected=state.tasks[0].id;state.offset=0;}renderTasks();renderSelection();}catch(e){toast('任务状态刷新失败：'+e.message,true)}finally{state.loading=false;}}
+async function loadTasks(){if(state.loading)return;state.loading=true;try{const res=await api('/api/tasks');state.tasks=res.tasks||[];if(!state.selected&&state.tasks.length){state.selected=state.tasks[0].id;state.offset=0;}renderTasks();renderSelection();renderTestTasks();}catch(e){toast('任务状态刷新失败：'+e.message,true)}finally{state.loading=false;}}
 async function loadLog(reset=false){if(!state.selected)return;const selected=state.selected;if(reset)state.offset=0;
  try{const q=state.offset>0?`?offset=${state.offset}`:'';const data=await api(`/api/tasks/${encodeURIComponent(selected)}/log${q}`);if(state.selected!==selected)return;
   const terminal=$('terminal');const nearBottom=terminal.scrollTop+terminal.clientHeight>terminal.scrollHeight-75;
@@ -46,25 +52,46 @@ async function loadLog(reset=false){if(!state.selected)return;const selected=sta
   if(nearBottom||reset)terminal.scrollTop=terminal.scrollHeight;
  }catch(e){$('terminal').append(document.createTextNode('\n[WEB] '+e.message));}}
 async function loadScreens(){if(!state.selected)return;const selected=state.selected;try{const data=await api(`/api/tasks/${encodeURIComponent(selected)}/screenshots`);if(selected!==state.selected)return;const root=$('screenshots');root.replaceChildren();for(const filename of data.files){const a=create('a','',`◧ ${filename}`);a.href=`/api/tasks/${encodeURIComponent(selected)}/screenshots/${encodeURIComponent(filename)}`;a.target='_blank';a.rel='noopener noreferrer';root.append(a);}}catch(e){/* Screenshot list is optional */}}
-// Single source of truth for the build form -> request body (used by Start build AND Save schedule).
-function collectBuildBody(){const form=$('build-form');const data=new FormData(form);
-  const body={};for(const name of ['plugin_branch','gmx_branch','plugin_version','country','project_name','jenkins_user','jenkins_password','github_token',
-   'plugin_url','gmx_url','plugin_parent','gmx_parent','browser_channel','gmx_build_type','gmx_signing_repo_branch',
-   'gmx_custom_folder','discover_poll_seconds','poll_seconds','result_poll_seconds','console_settle_seconds','discover_timeout_minutes',
-   'build_timeout_minutes','callback_timeout_minutes','max_changed_lines','upload_success_pattern',
-   'selector_entities','selector_sync_upload','selector_custom_folder','selector_build_type','selector_signing_repo_branch',
-   'selector_skip_test','selector_force','selector_keep_alive'])body[name]=data.get(name)||'';
- body.visible=form.elements.visible.checked;body.verbose=form.elements.verbose.checked;
- for(const name of ['gmx_sync_upload','gmx_skip_test','gmx_force','gmx_keep_alive'])body[name]=form.elements[name].checked;
- return body;}
-async function submitBuild(evt){if(typeof scheduleSubmitHook==='function'&&scheduleSubmitHook(evt))return;evt.preventDefault();const button=$('submit-build'),form=$('build-form');const body=collectBuildBody();
+// One DOM form and one serializer for manual builds and scheduled templates.
+function buildBody(){
+ const body={};
+ for(const field of $('build-form').querySelectorAll('[data-build]'))
+   body[field.name]=field.type==='checkbox'?field.checked:field.value;
+ return body;
+}
+function applyBuildBody(body){
+ const f=$('build-form').elements;
+ for(const [key,value] of Object.entries(body))if(f[key]){
+   if(f[key].type==='checkbox')f[key].checked=Boolean(value);else f[key].value=value??'';
+ }
+ customFolderEdited=Boolean(body.gmx_custom_folder)&&body.gmx_custom_folder!==`0_A_${f.country.value}_${f.project_name.value}`;syncSummary();
+}
+async function submitBuild(evt){evt.preventDefault();
+ if($('save-as-schedule').checked)return window.scheduleEditor.submit();
+ const button=$('submit-build'),form=$('build-form'),body=buildBody();
  button.disabled=true;button.textContent='Starting build...';$('form-message').textContent='正在检查环境并创建任务...';$('form-message').classList.remove('error');
- try{const res=await api('/api/tasks',{method:'POST',body:JSON.stringify(body)});form.elements.jenkins_password.value='';form.elements.github_token.value='';form.elements.jenkins_user.value='';$('form-message').textContent='任务已创建：'+res.task.id;toast('构建任务已启动 · '+res.task.id);await refreshDoctor();await loadTasks();setSelected(res.task.id);document.getElementById('activity').scrollIntoView({behavior:'smooth',block:'start'});}
+ try{const res=await api('/api/tasks',{method:'POST',body:JSON.stringify(body)});$('form-message').textContent='任务已创建：'+res.task.id;toast('构建任务已启动 · '+res.task.id);await refreshDoctor();await loadTasks();setSelected(res.task.id);document.getElementById('activity').scrollIntoView({behavior:'smooth',block:'start'});}
  catch(e){$('form-message').textContent=e.message;$('form-message').classList.add('error');toast(e.message,true)}finally{button.disabled=false;button.textContent='▶   Start build  ↗';}}
 async function resumeTask(){const id=state.selected;if(!id)return;if(!confirm(`恢复任务 ${id}？\n将复用既有分支和 Jenkins Build，不重新创建任务。`))return;
  try{await api(`/api/tasks/${encodeURIComponent(id)}/resume`,{method:'POST',body:JSON.stringify({visible:true,verbose:true})});toast('已请求恢复任务');state.offset=0;await loadTasks();await loadLog(true);}catch(e){toast(e.message,true);}}
-async function refreshDoctor(){try{const r=await api('/api/doctor');const badge=$('doctor-badge');badge.className=r.ready?'dot-label':'dot-label bad';badge.textContent=r.ready?'● Environment ready':'● Setup required';badge.title=(r.messages||[]).join('\n');if(!r.ready)toast('环境检查：'+(r.messages||[]).slice(-1)[0],true);}catch(e){toast(e.message,true);}}
-function nav(target){document.getElementById(target).scrollIntoView({behavior:'smooth',block:'start'});document.querySelectorAll('.nav').forEach(e=>e.classList.toggle('active',e.dataset.target===target));}
+async function refreshDoctor(){try{const r=await api('/api/doctor');const badge=$('doctor-badge');badge.className=r.ready?'dot-label':'dot-label bad';badge.textContent=r.ready?'● 环境正常':'● 需要配置';badge.title=(r.messages||[]).join('\n');if(!r.ready)toast('环境检查：'+(r.messages||[]).slice(-1)[0],true);}catch(e){toast(e.message,true);}}
+const FOLD=['delivery','schedules','settings','tools'];
+FOLD.forEach(id=>{const e=document.getElementById(id);if(e)e.classList.add('fold','collapsed');});
+// Test tools are tabs inside the "测试工具" panel; old panel ids still open their tab.
+const TOOL_TABS=['diagnostics','live-tests','testfairy-tests','jira-tools'];
+function toolTab(id){TOOL_TABS.forEach(t=>{const e=document.getElementById(t);if(e)e.hidden=t!==id;});
+ document.querySelectorAll('[data-tool]').forEach(b=>{const on=b.dataset.tool===id;b.classList.toggle('active',on);b.setAttribute('aria-selected',String(on));});}
+toolTab('diagnostics');
+document.querySelectorAll('[data-tool]').forEach(b=>b.addEventListener('click',()=>toolTab(b.dataset.tool)));
+function nav(target,keepOpen){
+ if(TOOL_TABS.includes(target)){toolTab(target);target='tools';keepOpen=true;}
+ const el=document.getElementById(target);
+ if(FOLD.includes(target)){const opening=keepOpen||el.classList.contains('collapsed');
+  FOLD.forEach(id=>{const e=document.getElementById(id);if(e)e.classList.add('collapsed');});
+  if(!opening){document.querySelectorAll('.nav').forEach(e=>e.classList.remove('active'));return;}
+  el.classList.remove('collapsed');}
+ el.scrollIntoView({behavior:'smooth',block:'start'});document.querySelectorAll('.nav').forEach(e=>e.classList.toggle('active',e.dataset.target===target));
+ const label=[...document.querySelectorAll('.nav')].find(e=>e.dataset.target===target);if(label&&$('crumb'))$('crumb').textContent=label.textContent.replace(/^\S+\s*/,'').trim();}
 let customFolderEdited=false;
 function syncSummary(){
   const f=$('build-form').elements;
@@ -72,25 +99,45 @@ function syncSummary(){
   const project=(f.project_name.value||'PayByBank').trim();
   const computed=`0_A_${country}_${project}`;
   if(!customFolderEdited)f.gmx_custom_folder.value=computed;
-  $('derived-plugin').textContent=`release/${f.plugin_version.value||'1.3'}.[timestamp]`;
-  $('derived-gmx').textContent='upload/auto[timestamp]';
+  const version=f.plugin_version.value||'1.3';
+  $('derived-plugin').textContent=`release/v${version}${/^\d+\.\d+$/.test(version)?'.[timestamp]':''}`;
+  const keys=[...new Set((f.gmx_branch.value.match(/(?<![A-Za-z0-9])[A-Z]{1,10}-[0-9]+(?![A-Za-z0-9])/g)||[]))];
+  const issue=f.gmx_issue_key.value.trim()||(keys.length===1?keys[0]:'');
+  $('derived-gmx').textContent=issue?`upload/${issue}-auto[timestamp]`:'upload/AUTO-[timestamp]';
   $('derived-folder').textContent=f.gmx_custom_folder.value;
 }
+let buildDefaults={};
 function installDefaults(defaults){
-  const f=$('build-form').elements;
-  for(const [key,value] of Object.entries(defaults||{})){
-    if(key==='gmx_fields'){
-      for(const [n,v] of Object.entries(value)){
-        const field=f['selector_'+n.toLowerCase()];if(field)field.value=v;
-      }
-    }else if(key==='max_parallel'){
-      f.max_parallel_display.value=String(value);
-    }else if(f[key]&&key!=='gmx_custom_folder'&&!['gmx_sync_upload','gmx_skip_test','gmx_force','gmx_keep_alive'].includes(key)){
-      f[key].value=String(value);
-    }else if(['gmx_sync_upload','gmx_skip_test','gmx_force','gmx_keep_alive'].includes(key))f[key].checked=Boolean(value);
-  }
-  syncSummary();
+ const {gmx_fields={},max_parallel,...values}=defaults;
+ buildDefaults={...values};
+ for(const [key,value] of Object.entries(gmx_fields))buildDefaults['selector_'+key.toLowerCase()]=value;
+ applyBuildBody(buildDefaults);
+ $('build-form').elements.max_parallel_display.value=String(max_parallel);
 }
+function resetBuildForm(){
+ $('build-form').reset();applyBuildBody(buildDefaults);
+ document.querySelectorAll('#build-form details').forEach(panel=>panel.open=false);
+ reloadBranches();
+}
+const branchLoads={};
+async function loadBranches(kind){
+ const f=$('build-form').elements, url=f[kind+'_url'].value.trim();
+ const generation=(branchLoads[kind]||0)+1;branchLoads[kind]=generation;
+ const list=$(kind+'-branches'),status=$(kind+'-branch-status');list.replaceChildren();
+ let page=1,count=0;
+ status.textContent='正在读取全部分支分页…';
+ try{
+   while(true){
+     const data=await api('/api/branches',{method:'POST',body:JSON.stringify({kind,url,page})});
+     if(branchLoads[kind]!==generation)return;
+     for(const name of data.branches){const option=document.createElement('option');option.value=name;list.append(option);count++;}
+     status.textContent=`已读取 ${count} 个分支${data.has_more?'，继续下一页…':'；输入关键词搜索或手动填写完整分支。'}`;
+     if(!data.has_more)break;page++;
+   }
+ }catch(e){if(branchLoads[kind]===generation)status.textContent=`分支读取失败：${e.message}。已读取 ${count} 个；可刷新重试或手动填写。`;}
+}
+function reloadBranches(){for(const kind of ['plugin','gmx'])loadBranches(kind);}
+
 let currentDiagnostic=null;
 async function diagnoseJenkins(evt){
  evt.preventDefault();const form=evt.currentTarget,out=$('diagnose-output');
@@ -157,19 +204,21 @@ async function launchGMXLiveTest(evt){
  }catch(e){result.className='diagnose-verdict fail';result.textContent='ERROR · '+e.message;out.textContent+='\n[ERROR] '+e.message;}
  finally{btn.disabled=false;btn.textContent=previous;}
 }
-async function init(){const serverAddress=document.querySelector('.connection strong');if(serverAddress)serverAddress.textContent=window.location.host;try{const boot=await api('/api/bootstrap');state.csrf=boot.csrf;installDefaults(boot.config);$('doctor-badge').className=boot.doctor.ready?'dot-label':'dot-label bad';$('doctor-badge').textContent=boot.doctor.ready?'● Environment ready':'● Setup required';$('doctor-badge').title=boot.doctor.messages.join('\n');await loadTasks();await loadLog(true);await loadScreens();}catch(e){toast('本地服务连接失败：'+e.message,true);} }
+async function init(){const serverAddress=document.querySelector('.connection strong');if(serverAddress)serverAddress.textContent=window.location.host;try{const boot=await api('/api/bootstrap');state.csrf=boot.csrf;installDefaults(boot.config);reloadBranches();$('doctor-badge').className=boot.doctor.ready?'dot-label':'dot-label bad';$('doctor-badge').textContent=boot.doctor.ready?'● 环境正常':'● 需要配置';$('doctor-badge').title=boot.doctor.messages.join('\n');await loadTasks();await loadLog(true);await loadScreens();}catch(e){toast('本地服务连接失败：'+e.message,true);} }
 document.querySelectorAll('.nav').forEach(e=>e.addEventListener('click',()=>nav(e.dataset.target)));
 $('hero-start').addEventListener('click',()=>nav('new-build'));
-$('build-form').elements.gmx_custom_folder.addEventListener('input',()=>{customFolderEdited=true;syncSummary();});
-for(const field of ['plugin_version','country','project_name'])$('build-form').elements[field].addEventListener('input',syncSummary);
+$('build-form').elements.gmx_custom_folder.addEventListener('input',()=>{customFolderEdited=Boolean($('build-form').elements.gmx_custom_folder.value.trim());syncSummary();});
+for(const field of ['plugin_version','country','project_name','gmx_branch','gmx_issue_key'])$('build-form').elements[field].addEventListener('input',syncSummary);
 // Expand collapsed advanced editor if native form validation finds an error.
 $('build-form').addEventListener('invalid',evt=>{
-  const panel=evt.target.closest('#advanced-settings');
-  if(panel)panel.open=true;
-  const nested=evt.target.closest('.selectors-panel');
-  if(nested)nested.open=true;
+  let panel=evt.target.closest('details');
+  while(panel){panel.open=true;panel=panel.parentElement.closest('details');}
 },true);
 $('build-form').addEventListener('submit',submitBuild);
+for(const kind of ['plugin','gmx']){
+ $('build-form').elements[kind+'_url'].addEventListener('change',()=>loadBranches(kind));
+ document.querySelector(`.branch-refresh[data-kind="${kind}"]`).addEventListener('click',()=>loadBranches(kind));
+}
 $('diagnose-form').addEventListener('submit',diagnoseJenkins);
 $('diagnose-gmx-form').addEventListener('submit',diagnoseJenkins);
 $('gmx-build-live-form').addEventListener('submit',launchGMXLiveTest);
@@ -179,3 +228,55 @@ $('doctor-refresh').addEventListener('click',refreshDoctor);
 $('clear-log').addEventListener('click',()=>loadLog(true));
 setInterval(async()=>{if(!state.csrf)return;await loadTasks();await loadLog();if(state.selected)await loadScreens();},3000);
 init();
+
+
+function renderTestTasks(){
+ for(const prefix of ['tf']){
+  const f=$(prefix+'-test-form').elements,select=f[prefix+'_test_task'],selected=select.value;
+  const query=f[prefix+'_test_search'].value.trim().toLowerCase();
+  const rows=state.tasks.filter(t=>t.id===selected||[t.id,t.project,t.country,t.status,t.plugin_version].join(' ').toLowerCase().includes(query));
+  const signature=JSON.stringify(rows.map(t=>[t.id,t.project,t.country,t.status]));
+  if(select.dataset.optionsSignature===signature)continue;
+  select.dataset.optionsSignature=signature;
+  select.replaceChildren(create('option','',rows.length?'请选择历史构建':'没有匹配的历史构建'));select.options[0].value='';
+  for(const t of rows){const option=create('option','',`${t.id} · ${t.project||'APP Build'} · ${t.country||'—'} · ${t.status}`);option.value=t.id;select.append(option);}
+  select.value=selected;
+ }
+}
+for(const prefix of ['tf'])$(prefix+'-test-form').elements[prefix+'_test_search'].addEventListener('input',renderTestTasks);
+
+function deliveryDiagnostics(result){
+ const d=result.diagnostics||{},first=d.first_error;
+ return (result.link_semantics?'\n链接范围：'+result.link_semantics:'')+
+  (d.attempt_id?'\n排障编号：'+d.attempt_id:'')+
+  (first?'\n首次错误：'+[first.stage,first.type,first.message].filter(Boolean).join(' · '):'')+
+  (d.log_path?'\n详细日志（本机）：'+d.log_path:'')+
+  (d.evidence_path?'\n脱敏证据（本机）：'+d.evidence_path:'')+
+  (d.logging_error?'\n日志保存异常：'+d.logging_error:'');
+}
+
+async function runDeliveryTest(kind){
+ const f=$('tf-test-form').elements,button=$('test-testfairy'),out=$('tf-test-result');
+ const body={kind,request_id:crypto.randomUUID()};
+ Object.assign(body,{task_id:f.tf_test_task.value,expected_share_url:f.tf_test_expected.value});
+ if(!body.task_id){out.textContent='请在本测试区选择历史构建。';return;}
+ button.disabled=true;out.textContent='正在执行独立测试…';
+ try{const r=await api('/api/delivery-tests/start',{method:'POST',body:JSON.stringify(body)});
+   for(let i=0;i<360;i++){const result=await api('/api/delivery-tests/'+encodeURIComponent(r.id));out.textContent=result.status+' · '+(result.result.message||'执行中')+(result.result.final_url?'\n实际地址（已去除敏感查询参数）：'+result.result.final_url:'')+(result.result.expected_share_url?'\n预期链接：'+result.result.expected_share_url:'')+(result.result.actual_share_url?'\nAPP 链接：'+result.result.actual_share_url:'')+(result.result.source_build_url?'\n来源 GMX Build：'+result.result.source_build_url:'')+(result.result.downstream_build_url?'\n上传 Build：'+result.result.downstream_build_url:'')+deliveryDiagnostics(result.result);if(!['RUNNING','SUBMITTING'].includes(result.status))return;await new Promise(resolve=>setTimeout(resolve,1000));}
+   out.textContent+='\n等待结果超时，请稍后查看。';
+ }catch(e){out.textContent=e.message;}finally{button.disabled=false;}
+}
+$('test-testfairy').addEventListener('click',()=>runDeliveryTest('testfairy'));
+
+for(const id of ['tf-test-form'])$(id).addEventListener('submit',e=>e.preventDefault());
+
+// Each open owns a request generation; late responses cannot replace another task.
+let runtimeGeneration=0,runtimeSnapshot=null,runtimeOpener=null;
+function runtimeTab(json){$('runtime-json').hidden=!json;$('runtime-overview').hidden=json;}
+function closeRuntimeData(){runtimeGeneration++;runtimeSnapshot=null;$('runtime-dialog').close();runtimeOpener?.focus();}
+async function openRuntimeData(id){const generation=++runtimeGeneration;runtimeSnapshot=null;runtimeOpener=document.activeElement;$('runtime-copy').disabled=true;$('runtime-task').textContent=id;$('runtime-message').textContent='正在读取…';$('runtime-overview').replaceChildren();$('runtime-json').textContent='';runtimeTab(false);if(!$('runtime-dialog').open)$('runtime-dialog').showModal();try{const data=await api('/api/tasks/'+encodeURIComponent(id)+'/runtime-data');if(generation!==runtimeGeneration)return;runtimeSnapshot=JSON.stringify(data.state,null,2);$('runtime-json').textContent=runtimeSnapshot;$('runtime-task').textContent=`${data.task.id} · ${data.task.status} · ${data.task.stage} · ${formatDate(data.task.created)}`;const overview=$('runtime-overview');const completed=create('section','runtime-group');completed.append(create('h3','','执行进度 · completed'),create('pre','',JSON.stringify(data.state.completed,null,2)));overview.append(completed);const groups={'Plugin 构建关联与准备':{},'GMX 构建':{},'产物与交付':{},'历史复用':{},'阶段错误':{},'其他运行字段':{}};for(const [key,value] of Object.entries(data.state.runtime)){let label=key==='step_errors'?'阶段错误':/reuse/.test(key)?'历史复用':/artifact|lock_hash|testfairy|mail_|upload_validation/.test(key)?'产物与交付':/^plugin|^dispatch/.test(key)?'Plugin 构建关联与准备':/^gmx/.test(key)?'GMX 构建':'其他运行字段';groups[label][key]=value;}for(const [label,value] of Object.entries(groups)){if(!Object.keys(value).length)continue;const group=create('section','runtime-group');group.append(create('h3','',label));if(label==='Plugin 构建关联与准备'){const rt=data.state.runtime;group.append(create('p','',`Queue ${rt.plugin_formal_dispatch?.queue_id??'未记录'} → Trigger #${rt.plugin_formal_number??'未记录'} (${rt.plugin_formal_result??'未记录'}) → Callback #${rt.plugin_callback_number??'未记录'}`));}group.append(create('pre','',JSON.stringify(value,null,2)));overview.append(group);}$('runtime-copy').disabled=false;$('runtime-message').textContent='已读取；概览与复制使用同一份脱敏快照。';}catch(e){if(generation===runtimeGeneration)$('runtime-message').textContent=e.message;}}
+$('runtime-close').addEventListener('click',closeRuntimeData);
+$('runtime-dialog').addEventListener('cancel',e=>{e.preventDefault();closeRuntimeData();});
+$('runtime-overview-tab').addEventListener('click',()=>runtimeTab(false));
+$('runtime-json-tab').addEventListener('click',()=>runtimeTab(true));
+$('runtime-copy').addEventListener('click',async()=>{const text=runtimeSnapshot,generation=runtimeGeneration;if(text===null)return;try{await navigator.clipboard.writeText(text);if(generation===runtimeGeneration)$('runtime-message').textContent='已复制脱敏 JSON';}catch(e){if(generation===runtimeGeneration)$('runtime-message').textContent='复制失败，请从脱敏 JSON 中手动选择复制。';}});

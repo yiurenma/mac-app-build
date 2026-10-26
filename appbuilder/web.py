@@ -20,9 +20,9 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 from types import SimpleNamespace
 
-from .config import DATA, ROOT, load_config, token_or_error
-from . import __version__
-from .store import task, task_list, create_task, active_count, update_task, update_task_params, task_folder
+from .config import DATA, ROOT, load_config, token_or_error, parallel_limit
+from . import __version__, lifecycle
+from .store import task, task_list, create_task, active_count, update_task, update_task_params, task_folder, reserve_resume
 from .telemetry import safe_text
 from .versions import validate_args
 
@@ -47,6 +47,8 @@ def _jenkins_links(row, params):
         runtime = read_state(row['id']).get('runtime', {})
     except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError):
         runtime = {}
+    from .reuse_flow import effective_params
+    params = effective_params(params, runtime)
     for key, label, name in [('plugin_job', 'Plugin Job', 'plugin'),
                              ('gmx_job', 'GMX Job', 'gmx')]:
         raw = str(params.get(key, ''))
@@ -69,6 +71,12 @@ def public_task(row):
     """Never send raw params/credentials to UI."""
     params = json.loads(row['params'])
     from .cli import alive, stage_indicator
+    from .reuse_flow import effective_params
+    from .store import read_state
+    try:
+        params = effective_params(params, read_state(row['id']).get('runtime', {}))
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
     status = row['status']
     if status in ('RUNNING', 'QUEUED') and row.get('pid') and not alive(row['pid']):
         status = 'INTERRUPTED'
@@ -84,7 +92,18 @@ def public_task(row):
         'visible': bool(params.get('visible')),
         'verbose': bool(params.get('verbose')),
         'jenkins_links': _jenkins_links(row, params),
+        'delivery': delivery_result(row['id']),
     }
+
+
+def delivery_result(task_id):
+    from .store import read_state
+    try:
+        runtime=read_state(task_id).get('runtime',{})
+        # Only generated, explicitly nonsecret delivery data is exposed.
+        return {'app':runtime.get('testfairy_app'), 'jira_mail':runtime.get('jira_mail')}
+    except (OSError,ValueError):
+        return {}
 
 
 def get_doctor():
@@ -108,6 +127,10 @@ def form_defaults(config):
     j = config.get('jenkins', {})
     b = config.get('build', {})
     return {
+        'testfairy_enabled': True, 'jenkins_api': True,
+        'plugin_branch': 'develop', 'gmx_branch': 'develop',
+        'plugin_version': '1.3', 'country': 'UK', 'project_name': 'PayByBank',
+        'visible': True, 'verbose': True,
         'plugin_url': config['github']['plugin_url'],
         'gmx_url': config['github']['gmx_url'],
         'plugin_parent': j['plugin_parent'],
@@ -122,7 +145,8 @@ def form_defaults(config):
         'callback_timeout_minutes': j.get('callback_timeout_minutes', 30),
         'max_changed_lines': b.get('max_changed_lines', 100),
         'upload_success_pattern': b.get('upload_success_pattern', ''),
-        'max_parallel': b.get('max_parallel', 2),
+        'max_parallel': parallel_limit(config),
+        'gmx_issue_key': b.get('gmx_issue_key', ''),
         'gmx_build_type': j.get('gmx_defaults', {}).get('BUILD_TYPE', 'Develop'),
         'gmx_signing_repo_branch': j.get('gmx_defaults', {}).get('SIGNING_REPO_BRANCH', 'master'),
         'gmx_sync_upload': j.get('gmx_defaults', {}).get('SYNC_UPLOAD', True),
@@ -220,18 +244,13 @@ def build_preferences(body, config, country, project):
     }
 
 
-def create_build(body):
-    """Use the same validations and persistent job engine as CLI run."""
-    from .cli import create_params, doctor_check, spawn
-    from .auth import store_credentials, store_github_token
-    config = load_config()
-    github_token = str(body.get('github_token') or '').strip()
-    user = str(body.get('jenkins_user') or '').strip()
-    password = str(body.get('jenkins_password') or '')
-    if bool(user) != bool(password):
-        raise ValueError('Jenkins 账号和密码必须同时填写，或同时留空使用 Keychain')
-    if len(user) > 256 or len(password) > 4096 or len(github_token) > 4096:
-        raise ValueError('账号、密码或 Token 长度超限')
+def validate_build_parameters(body, config):
+    """Single validation path for immediate builds and saved schedule templates."""
+    from .cli import create_params
+    for key in ('visible', 'verbose', 'jenkins_api'):
+        if key in body and not isinstance(body[key], bool):
+            raise ValueError(f'{key} 必须是开关值')
+    defaults = form_defaults(config)
     country = _field(body, 'country', 30).upper()
     project = _field(body, 'project_name', 100)
     # Validate names and build version *before* creating any persistent state.
@@ -239,27 +258,65 @@ def create_build(body):
     args = SimpleNamespace(
         plugin_branch=_field(body, 'plugin_branch', 200),
         gmx_branch=_field(body, 'gmx_branch', 200),
+        gmx_issue_key=_field(body, 'gmx_issue_key', 50) if body.get('gmx_issue_key') else '',
         plugin_version=_field(body, 'plugin_version', 50),
         project_name=project, country=country,
         plugin_url=github['plugin_url'], gmx_url=github['gmx_url'],
-        visible=body.get('visible', True) is True,
-        verbose=body.get('verbose', True) is True,
+        visible=body.get('visible', defaults['visible']),
+        verbose=body.get('verbose', defaults['verbose']),
     )
     params = create_params(args, config)
     params['jenkins_settings'] = jenkins
+    params['jenkins_api'] = body.get('jenkins_api', False)   # missing means an old template: keep the browser
     params['build_settings'] = build
     params['gmx_parameters'] = gmx
+    from .testfairy import settings
+    params['testfairy'] = settings(body, config)
+    return params
+
+
+def create_build(body, *, schedule_claim=None):
+    """Use the same validations and persistent job engine as CLI run."""
+    from .cli import doctor_check, spawn
+    from .auth import store_credentials, store_github_token
+    config = load_config()
+    github_token = str(body.get('github_token') or '').strip()
+    body = dict(body)
+    jira_token = str(body.pop('jira_token', '') or '').strip()   # Keychain only; never part of task params
+    user = str(body.get('jenkins_user') or '').strip()
+    password = str(body.get('jenkins_password') or '')
+    if bool(user) != bool(password):
+        raise ValueError('Jenkins 账号和密码必须同时填写，或同时留空使用 Keychain')
+    if len(user) > 256 or len(password) > 4096 or len(github_token) > 4096 or len(jira_token) > 4096:
+        raise ValueError('账号、密码或 Token 长度超限')
+    params = validate_build_parameters(body, config)
+    from .testfairy import credentials as testfairy_credentials
+    tf_user = str(body.get('testfairy_user') or '').strip()
+    tf_password = str(body.get('testfairy_password') or '')
+    if bool(tf_user) != bool(tf_password) or len(tf_user)>256 or len(tf_password)>256:
+        raise ValueError('TestFairy 账号密码须同时填写，最长 256 字符')
+    if tf_user and not params['testfairy']['enabled']:
+        raise ValueError('请先启用 TestFairy，再填写账号密码')
+    transient = {'testfairy': [tf_user, tf_password]} if tf_user else None
+    if tf_user and params['testfairy']['save_session']:
+        testfairy_credentials(params['testfairy']['login_url'], (tf_user, tf_password))
     # Persist credentials only after all build parameters are valid.
     if github_token:
         store_github_token(github_token)
+    if jira_token:
+        from .auth import store_jira_token
+        store_jira_token(jira_token)
     if user:
         store_credentials(user, password)
     doctor_check(config, strict=True)
     token_or_error(config)
-    if active_count() >= int(config.get('build', {}).get('max_parallel', 2)):
+    if active_count() >= parallel_limit(config):
         raise ValueError('已达到并发任务上限，请先等待或恢复已有任务')
-    created = create_task(config, params)
-    spawn(created['id'], wait=False)
+    created = create_task(config, params, schedule_claim=schedule_claim) if schedule_claim is not None else create_task(config, params)
+    if transient:
+        spawn(created['id'], wait=False, transient_credentials=transient)
+    else:
+        spawn(created['id'], wait=False)
     return public_task(task(created['id']))
 
 
@@ -282,15 +339,16 @@ def resume_build(task_id, body):
     cfg = load_config()
     doctor_check(cfg, strict=True)
     token_or_error(cfg)
-    if active_count() >= int(cfg.get('build', {}).get('max_parallel', 2)):
-        raise ValueError('并发任务已达到上限')
-    if row['status'] in ('RUNNING', 'QUEUED'):
-        update_task(task_id, status='INTERRUPTED', note='旧 Worker 不在线，从 Web Console 恢复')
     # The UI keeps a browser visible by default while replaying trace.
     update_task_params(task_id,
                        visible=(True if body.get('visible', True) is True else None),
                        verbose=(True if body.get('verbose', True) is True else None))
-    spawn(task_id, wait=False)
+    previous = reserve_resume(cfg, task_id)
+    try:
+        spawn(task_id, wait=False)
+    except Exception:
+        update_task(task_id, status=previous['status'], pid=previous['pid'], note=previous['note'])
+        raise
     return public_task(task(task_id))
 
 
@@ -335,6 +393,7 @@ _DIAG_LOCK = threading.Lock()
 _DIAG_JOBS: dict[str, dict] = {}
 
 
+@lifecycle.admitted
 def start_diagnostic(url: str, *, number=None, expected='SUCCESS', site: str, expected_artifacts=None):
     from .diagnose import parse_target, run_diagnosis, validate_artifact_expectations
     expected_artifacts = validate_artifact_expectations(expected_artifacts)
@@ -397,6 +456,7 @@ _LIVE_LOCK = threading.Lock()
 _LIVE_JOBS: dict[str, dict] = {}
 
 
+@lifecycle.admitted
 def start_live_test(body):
     from .live_tests import validate_options, gmx_build_test, validate_job_url
     kind = body.get('kind')
@@ -504,7 +564,7 @@ def make_handler(csrf_token):
             try:
                 if p == '/':
                     return self._asset('index.html')
-                if p in ('/app.css', '/app.js', '/schedules.js'):
+                if p in ('/app.css', '/app.js', '/schedules.js', '/jira.js', '/jenkins-token.js', '/settings.js', '/delivery.js', '/overview.js', '/ai.js'):
                     return self._asset(p[1:])
                 if p == '/api/health':
                     return self._send({'app': 'mac-app-builder', 'service': 'web-console', 'version': __version__})
@@ -515,6 +575,12 @@ def make_handler(csrf_token):
                         'doctor': get_doctor()})
                 if p == '/api/tasks':
                     return self._send({'tasks': [public_task(r) for r in task_list()]})
+                m = re.fullmatch(r'/api/tasks/([^/]+)/runtime-data', p)
+                if m:
+                    if u.query:
+                        raise ValueError('运行数据不接受路径或查询参数')
+                    from .runtime_data import snapshot
+                    return self._send(snapshot(m[1], DATA, task))
                 m = re.fullmatch(r'/api/tasks/([^/]+)/log', p)
                 if m:
                     offset = parse_qs(u.query).get('offset', [None])[0]
@@ -537,8 +603,36 @@ def make_handler(csrf_token):
                 match = re.fullmatch(r'/api/live-tests/status/([A-Za-z0-9_-]{24,64})', p)
                 if match:
                     return self._send(poll_live_test(match[1]))
+                delivery_match = re.fullmatch(r'/api/delivery-tests/([a-f0-9-]{16,64})', p)
+                if delivery_match:
+                    from .delivery_tests import poll
+                    return self._send(poll(delivery_match[1]))
                 if p == '/api/doctor':
                     return self._send(get_doctor())
+                from .jenkins_token_api import handle_get as token_get
+                handled = token_get(p, parse_qs(u.query))
+                if handled is not None:
+                    return self._send(handled[1], status=handled[0])
+                from .credentials_api import handle_get as credentials_get
+                handled = credentials_get(p, parse_qs(u.query))
+                if handled is not None:
+                    return self._send(handled[1], status=handled[0])
+                from .ai_api import handle_get as ai_get
+                handled = ai_get(p, parse_qs(u.query))
+                if handled is not None:
+                    return self._send(handled[1], status=handled[0])
+                from .delivery_api import handle_get as delivery_get
+                handled = delivery_get(p, parse_qs(u.query))
+                if handled is not None:
+                    return self._send(handled[1], status=handled[0])
+                from .overview_api import handle_get as overview_get
+                handled = overview_get(p, parse_qs(u.query))
+                if handled is not None:
+                    return self._send(handled[1], status=handled[0])
+                from .jira_api import handle_get as jira_get
+                handled = jira_get(p, parse_qs(u.query))
+                if handled is not None:
+                    return self._send(handled[1], status=handled[0])
                 from .schedule_api import handle_get
                 handled = handle_get(p, parse_qs(u.query))
                 if handled is not None:
@@ -556,6 +650,15 @@ def make_handler(csrf_token):
             return self._send(file.read_bytes(), typ=mime)
 
         def do_POST(self):
+            from . import lifecycle
+            try:
+                with lifecycle.admission(DATA):
+                    pass
+                return self._post_admitted()
+            except RuntimeError as exc:
+                return self._failed(409, str(exc))
+
+        def _post_admitted(self):
             if not self._allowed_host() or not self._allowed_origin():
                 return self._failed(403, '跨站请求被拒绝')
             if not hmac.compare_digest(self.headers.get('X-CSRF-Token', ''), csrf_token):
@@ -569,6 +672,9 @@ def make_handler(csrf_token):
                 body = json.loads(self.rfile.read(length))
                 if not isinstance(body, dict):
                     raise ValueError('需要 JSON 对象')
+                if self.path == '/api/delivery-tests/start':
+                    from .delivery_tests import start
+                    return self._send(start(body), status=202)
                 if self.path == '/api/live-tests/start':
                     return self._send(start_live_test(body), status=202)
                 if self.path == '/api/diagnose/start':
@@ -598,11 +704,30 @@ def make_handler(csrf_token):
                                            expected=body.get('expected', 'SUCCESS'),
                                            visible=True, expected_artifacts=body.get('expected_artifacts'))
                     return self._send(result)
+                if self.path == '/api/branches':
+                    from .branches import list_branches
+                    return self._send(list_branches(body, load_config()))
                 if self.path == '/api/tasks':
                     return self._send({'task': create_build(body)}, status=201)
                 m = re.fullmatch(r'/api/tasks/([^/?]+)/resume', self.path)
                 if m:
                     return self._send({'task': resume_build(m[1], body)})
+                from .jenkins_token_api import handle_post as token_post
+                handled = token_post(self.path, body)
+                if handled is not None:
+                    return self._send(handled[1], status=handled[0])
+                from .credentials_api import handle_post as credentials_post
+                handled = credentials_post(self.path, body)
+                if handled is not None:
+                    return self._send(handled[1], status=handled[0])
+                from .ai_api import handle_post as ai_post
+                handled = ai_post(self.path, body)
+                if handled is not None:
+                    return self._send(handled[1], status=handled[0])
+                from .jira_api import handle_post as jira_post
+                handled = jira_post(self.path, body)
+                if handled is not None:
+                    return self._send(handled[1], status=handled[0])
                 from .schedule_api import handle_post
                 handled = handle_post(self.path, body)
                 if handled is not None:
@@ -618,18 +743,34 @@ def make_handler(csrf_token):
 
 
 def serve(port=8765, *, open_browser=True, server_factory=ThreadingHTTPServer):
-    """Bind loopback only; no background daemon or external connectivity."""
+    """Bind loopback, then ensure the independent scheduler is available."""
     if not isinstance(port, int) or not (1024 <= port <= 65535):
         raise ValueError('Web 端口必须在 1024–65535 之间')
     token = secrets.token_urlsafe(32)
-    with server_factory((HOST, port), make_handler(token)) as httpd:
+    from . import lifecycle
+    with lifecycle.service('web'), server_factory((HOST, port), make_handler(token)) as httpd:
+        from .scheduler import SchedulerSupervisor
+        supervisor = SchedulerSupervisor()
+        supervisor.start()
         url = f'http://{HOST}:{httpd.server_port}'
         print(f'[WEB] Mac APP Builder v{__version__} | 本地管理页面 {url}', flush=True)
         print('[WEB] 按 Ctrl+C 关闭页面服务；已经启动的后台构建不会停止。', flush=True)
         if open_browser:
             # Avoid opening a browser before server exists.
             threading.Timer(0.4, lambda: webbrowser.open(url)).start()
+        watcher_done = threading.Event()
+        def watch_stop():
+            while not watcher_done.wait(0.3):
+                if lifecycle.should_exit():
+                    httpd.shutdown()
+                    return
+        watcher = threading.Thread(target=watch_stop, daemon=True, name='web-stop-watch')
+        watcher.start()
         try:
             httpd.serve_forever(poll_interval=0.3)
         except KeyboardInterrupt:
             print('\n[WEB] 页面服务已关闭；Worker 继续后台执行。', flush=True)
+
+        finally:
+            watcher_done.set()
+            supervisor.stop()

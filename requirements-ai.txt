@@ -1,0 +1,3 @@
+# 可选：离线本地模型运行时。设置页“离线 AI → 一键安装”会自动安装；需 Xcode Command Line Tools 编译，
+# 走公司现有 pip 配置（Nexus），不会自动改用公开 PyPI。0.3.8 起支持 Phi-4-mini 和 Qwen3。
+llama-cpp-python>=0.3.8,<1

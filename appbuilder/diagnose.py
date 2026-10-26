@@ -13,6 +13,7 @@ from .jenkins import JenkinsBrowser, final_result_from_console, read_full_consol
 from .config import DATA, load_config
 from .telemetry import safe_text
 from .nexus import parse_upload_metadata
+from .versions import PLUGIN_RELEASE_PARENT, PLUGIN_FEATURE_PARENT, SHIPPED_PARENTS
 
 
 @dataclass(frozen=True)
@@ -37,8 +38,12 @@ def parse_target(url: str, config: dict, *, number: int | None = None) -> Target
         raise ValueError('Build Number 必须是正整数')
     if any(p in ('.', '..') for p in s.path.split('/')) or '\\' in s.path:
         raise ValueError('URL 路径不能包含相对路径')
-    for site in ('plugin', 'gmx'):
-        base = urlsplit(config['jenkins'][site + '_parent'])
+    parents = [(site, config['jenkins'][site + '_parent']) for site in ('plugin', 'gmx')]
+    if config['jenkins']['plugin_parent'].rstrip('/') + '/' in SHIPPED_PARENTS:
+        # Builds from before the move to the GB folder can still be checked.
+        parents.extend(('plugin', parent) for parent in SHIPPED_PARENTS)
+    for site, parent in parents:
+        base = urlsplit(parent)
         prefix = base.path.rstrip('/') + '/'
         if s.scheme != base.scheme or s.netloc.lower() != base.netloc.lower() or not s.path.startswith(prefix):
             continue

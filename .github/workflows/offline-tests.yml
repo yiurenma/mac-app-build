@@ -1,0 +1,47 @@
+name: Offline regression
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install test dependencies
+        run: |
+          python -m pip install -r requirements.txt
+          python -m playwright install --with-deps chromium
+          browser_path=$(python -c 'from playwright.sync_api import sync_playwright; p=sync_playwright().start(); print(p.chromium.executable_path); p.stop()')
+          sudo ln -sf "$browser_path" /usr/bin/chromium
+      - name: Three offline regression rounds (headless and headed via Xvfb)
+        run: xvfb-run -a ./selftest.sh
+      - name: Report failing tests as annotations
+        if: failure()
+        run: |
+          for f in docs/verification-logs/round*.txt; do
+            [ -f "$f" ] || continue
+            grep -a -E '^(ERROR|FAIL): ' "$f" | sort -u | head -20 | while read -r line; do echo "::error title=$(basename "$f")::$line"; done
+            grep -a -E '^[A-Za-z_.]*(Error|Exception)(: |$)|^AssertionError' "$f" | sort | uniq -c | head -10 | while read -r line; do echo "::error title=$(basename "$f") cause::$line"; done
+          done
+      - name: JavaScript and whitespace checks
+        run: |
+          node --check appbuilder/webui/app.js
+          node --check appbuilder/webui/schedules.js
+          git diff --check
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: offline-verification
+          path: |
+            docs/verification-logs/round*.txt
+            /tmp/mac-app-build-ui/*.png

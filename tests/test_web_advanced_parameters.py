@@ -17,7 +17,7 @@ class DefaultsTest(unittest.TestCase):
     def setUp(self):
         self.cfg = load_config()
         self.body = {
-            'plugin_branch': 'develop', 'gmx_branch': 'develop',
+            'plugin_branch': 'develop', 'gmx_branch': 'feature/UKPBB-203745-test',
             'plugin_version': '1.3', 'country': 'UK', 'project_name': 'PayByBank',
         }
 
@@ -123,7 +123,7 @@ class DefaultsTest(unittest.TestCase):
                       'discover_poll_seconds','poll_seconds','build_timeout_minutes',
                       'callback_timeout_minutes','upload_success_pattern','browser_channel'):
             self.assertIn('name="'+field+'"', html)
-            self.assertIn(field, js)
+            self.assertIn('data-build name="'+field+'"', html)
         self.assertIn('installDefaults(boot.config)', js)
         self.assertIn('if(!customFolderEdited)', js)
         self.assertNotIn('localStorage', js)

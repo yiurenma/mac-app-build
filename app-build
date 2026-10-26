@@ -4,6 +4,12 @@ set -eu
 HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 cd "$HERE"
 COMMAND=${1:-}
+# One command to update: stop this project's services, pull, then start the Web Console.
+if [ "$COMMAND" = update ]; then
+  shift
+  "$HERE/app-build" stop || { echo '[UPDATE] 停止旧服务失败，未更新。' >&2; exit 1; }
+  exec "$HERE/app-build" web --update "$@"
+fi
 # Explicit opt-in: update this tool only if its tracked worktree is clean.
 if [ "$COMMAND" = run ] || [ "$COMMAND" = resume ] || [ "$COMMAND" = web ]; then
   DRY_RUN=0

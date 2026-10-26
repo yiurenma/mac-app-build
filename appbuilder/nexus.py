@@ -111,6 +111,28 @@ def parse_upload_hashes(console, version):
     return hashes_from_rows(upload_rows(console), version)
 
 
+def parse_upload_downloads(console):
+    """Preserve exact successful-upload URLs for independent byte verification.
+
+    Parsing a URL does not establish trusted origin, availability or ownership.
+    The caller must first attribute this console to the exact successful Build.
+    """
+    metadata = parse_upload_metadata(console)
+    version = metadata['version']
+    rows = upload_rows(console)
+    result = {}
+    for name in ARTIFACTS:
+        urls = {row['artifactUrl'] for row in rows
+                if isinstance(row.get('artifactUrl'), str)
+                and unquote(urlsplit(row['artifactUrl']).path).rsplit('/', 1)[-1]
+                == f'{name}-{version}.tar.gz'}
+        if len(urls) != 1:
+            raise ValueError('每个目标产物必须有唯一下载地址，不能猜测镜像或最新版链接')
+        result[name] = {'url': next(iter(urls)), 'version': version,
+                        'sha256': metadata['hashes'][name]}
+    return result
+
+
 def hashes_from_rows(rows, version):
     found = {name: set() for name in ARTIFACTS}
     for row in rows:

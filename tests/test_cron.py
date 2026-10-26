@@ -71,5 +71,15 @@ class CronParseTests(unittest.TestCase):
         self.assertEqual(cron.minimum_interval_minutes('0,10 9 * * *', dt(2026, 10, 10)), 10)
 
 
+class LongOfflineTests(unittest.TestCase):
+    def test_latest_due_after_more_than_ten_thousand_occurrences(self):
+        from datetime import timedelta
+        start = datetime(2025, 1, 1)
+        now = start + timedelta(minutes=30 * 10001 + 17)
+        latest, missed = cron.latest_due(cron.parse('*/30 * * * *'), start, now)
+        self.assertEqual(latest, start + timedelta(minutes=30 * 10001))
+        self.assertEqual(missed, 10001)
+
+
 if __name__ == '__main__':
     unittest.main()

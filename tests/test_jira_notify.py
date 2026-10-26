@@ -1,0 +1,483 @@
+import json
+import subprocess
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+from appbuilder import jira_notify as J
+from appbuilder import local_llm as L
+
+PATTERN = J.DEFAULT_KEY
+
+
+class FakeLLM:
+    def __init__(self, answer=None):
+        self.answer = answer
+
+    def ask_json(self, system, user):
+        return self.answer
+
+
+ROOT_CAUSE = {'customfield_100': {'required': True, 'name': 'Root Cause', 'schema': {'type': 'option'},
+                                  'allowedValues': [{'id': '1', 'value': 'Code'}, {'id': '2', 'value': 'Requirement'}]}}
+
+
+class FakeJira:
+    def __init__(self, status='Dev Done', existing_comments=(), issue_type='Story', required=None):
+        self.calls = []
+        self.status = status
+        self.existing = list(existing_comments)
+        self.issue_type = issue_type
+        self.required = required or {}
+
+    def issue(self, key):
+        return {'fields': {'reporter': {'name': 'alice', 'displayName': 'Alice'}, 'status': {'name': self.status},
+                           'issuetype': {'name': self.issue_type}}}
+
+    def plan_transition(self, key, name, issue_type='', rules=()):
+        payload, missing, bad, auto = J.plan_fields(self.required, issue_type, rules)
+        return {'id': '9', 'fields': payload, 'missing': missing, 'bad': bad, 'auto': auto, 'name': name}
+
+    def do_transition(self, key, plan):
+        self.calls.append(('transition', key, plan['name'], plan['fields']))
+
+    def comments(self, key):
+        return [{'body': c} for c in self.existing]
+
+    def add_comment(self, key, text):
+        self.calls.append(('comment', key, text))
+
+    def assign(self, key, reporter):
+        self.calls.append(('assign', key, reporter['name']))
+
+
+
+def git(repo, *args):
+    subprocess.run(['git', '-C', str(repo), '-c', 'user.name=t', '-c', 'user.email=t@t', *args],
+                   check=True, capture_output=True)
+
+
+class ExtractionTests(unittest.TestCase):
+    def commits(self, *subjects):
+        return [{'sha': str(i), 'subject': s, 'body': ''} for i, s in enumerate(subjects)]
+
+    def test_subject_key_beats_body_and_unrelated_text_is_ignored(self):
+        c = [{'sha': '1', 'subject': 'PBB-12 fix title', 'body': 'see PBB-99'},
+             {'sha': '2', 'subject': 'chore: bump', 'body': ''},
+             {'sha': '3', 'subject': 'fix', 'body': 'Refs: ABC-7'}]
+        found, amb = J.tickets_from_commits(c, PATTERN)
+        self.assertEqual(sorted(found), ['ABC-7', 'PBB-12', 'PBB-99'])   # every mentioned ticket
+        self.assertEqual(amb, [])
+
+    def test_every_key_in_the_winning_tier_is_updated(self):
+        found, amb = J.tickets_from_commits(self.commits('PBB-1 PBB-2 combined'), PATTERN)
+        self.assertEqual(sorted(found), ['PBB-1', 'PBB-2'])
+        self.assertEqual(amb, [])
+
+    def test_keys_in_a_lower_tier_are_not_mixed_in(self):
+        c = [{'sha': '1', 'subject': 'PBB-1 and PBB-2 fix', 'body': 'also mentions PBB-99'}]
+        found, _ = J.tickets_from_commits(c, PATTERN)
+        self.assertEqual(sorted(found), ['PBB-1', 'PBB-2', 'PBB-99'])   # every mentioned ticket
+
+    def test_summary_falls_back_when_model_missing_or_returns_junk(self):
+        self.assertEqual(L.tester_summary(None, 'PBB-1 fix'), 'PBB-1 fix')
+        self.assertEqual(L.tester_summary(FakeLLM({'summary': 'x'}), 'PBB-1 fix'), 'PBB-1 fix')
+        self.assertIn('支付', L.tester_summary(FakeLLM({'summary': '修复支付页标题显示，请验证标题文案'}), 'PBB-1 fix'))
+
+    def test_missing_model_file_means_no_ai(self):
+        llm = L.LocalLLM('/nonexistent/model.gguf')
+        self.assertFalse(llm.available())
+        self.assertIsNone(llm.ask_json('s', 'u'))
+        self.assertIsNone(L.get_llm({'ai': {'enabled': False, 'model_path': 'x'}}))
+
+
+class GitAndFlowTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.repo = Path(self.tmp.name) / 'plugin'
+        self.repo.mkdir()
+        git(self.repo, 'init', '-q', '-b', 'develop')
+        for msg in ('PBB-1 first', 'PBB-2 second', 'no key here'):
+            (self.repo / 'f.txt').write_text(msg)
+            git(self.repo, 'add', '.')
+            git(self.repo, 'commit', '-q', '-m', msg)
+        self.shas = subprocess.run(['git', '-C', str(self.repo), 'log', '--format=%H', '--reverse'],
+                                   capture_output=True, text=True).stdout.split()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_commits_between_returns_only_new_range(self):
+        rows = J.commits_between(self.repo, self.shas[0], self.shas[2])
+        self.assertEqual([r['subject'] for r in rows], ['no key here', 'PBB-2 second'])
+        self.assertEqual(J.commits_between(self.repo, None, self.shas[2]), [])
+
+    def run_notify(self, jira_conf, ledger=None, client=None, status='SUCCESS', share='https://tf/app', folder=None):
+        data = Path(self.tmp.name) / 'data'
+        data.mkdir()
+        ledger_path = data / 'jira_ledger.json'
+        if ledger is not None:
+            ledger_path.write_text(json.dumps(ledger))
+        patched = {}
+        row = {'status': status, 'params': json.dumps({'plugin_source': 'develop', 'gmx_job': 'https://j/1',
+                                                       'plugin_url': 'https://github.example.com/org/plugin'})}
+        state = {'runtime': {'plugin_source_sha': self.shas[2], 'gmx_build_number': 7,
+                             'testfairy_app': {'share_url': share}}}
+        config = {'jira': {'enabled': True, 'base_url': 'https://jira.example.com', **jira_conf}}
+        with patch.object(J, 'LEDGER', ledger_path), patch.object(J, 'task', return_value=row), \
+                patch.object(J, 'read_state', return_value=state), \
+                patch.object(J, 'task_folder', return_value=folder or Path(self.tmp.name)), \
+                patch.object(J, 'patch_runtime', side_effect=lambda tid, **kw: patched.update(kw)):
+            J.notify_jira('T1', client=client, llm=None, config=config)
+        return patched.get('jira_report'), (json.loads(ledger_path.read_text()) if ledger_path.exists() else {})
+
+    def test_without_local_clone_commits_come_from_github(self):
+        # A reused Plugin build never clones the repo; the Jira step must still work.
+        calls = []
+
+        class FakeGitHub:
+            repo = 'org/plugin'
+            error, cache = None, {}
+
+            def __init__(self, *a, **kw):
+                self.calls = 0
+
+            def repo_get(self, path):
+                calls.append(path)
+                return {'status': 'ahead', 'commits': [
+                    {'sha': 'a1', 'commit': {'message': 'PBB-2 second\n\nbody'}},
+                    {'sha': 'a2', 'commit': {'message': 'no key here'}}]}
+
+            def for_commit(self, sha):
+                return None
+
+        empty = Path(self.tmp.name) / 'no-clone'
+        empty.mkdir()
+        jira = FakeJira()
+        with patch.object(J, 'PRLookup', FakeGitHub), patch('appbuilder.config.token_or_error', return_value='t'):
+            report, ledger = self.run_notify({'dry_run': False}, ledger={'develop': {'last_sha': self.shas[0]}},
+                                             client=jira, folder=empty)
+        self.assertEqual(calls, [f'/compare/{self.shas[0]}...{self.shas[2]}'])
+        self.assertEqual(report['status'], 'DONE')
+        self.assertEqual(jira.calls[0][1], 'PBB-2')
+        self.assertEqual(ledger['develop']['last_sha'], self.shas[2])
+
+    def test_same_source_as_last_time_reads_nothing(self):
+        jira = FakeJira()
+        empty = Path(self.tmp.name) / 'no-clone'
+        empty.mkdir()
+        with patch.object(J, 'PRLookup', side_effect=AssertionError('must not call GitHub')):
+            report, _ = self.run_notify({'dry_run': False}, ledger={'develop': {'last_sha': self.shas[2]}},
+                                        client=jira, folder=empty)
+        self.assertEqual((report['status'], report['commits_scanned'], jira.calls), ('DONE', 0, []))
+
+    def test_github_compare_that_is_not_ahead_is_refused(self):
+        api = J.GitHubCommits(lambda path: {'status': 'diverged', 'commits': []})
+        with self.assertRaisesRegex(RuntimeError, '单向前进'):
+            api.between('a', 'b')
+        rows = J.GitHubCommits(lambda path: [{'sha': 's', 'commit': {'message': 'T-1 x\ny'}}]).recent('b', 3)
+        self.assertEqual(rows, [{'sha': 's', 'author': '', 'subject': 'T-1 x', 'body': 'y'}])
+
+    def test_first_run_only_records_baseline_and_touches_nothing(self):
+        jira = FakeJira()
+        report, ledger = self.run_notify({'dry_run': False}, client=jira)
+        self.assertEqual(report['status'], 'BASELINE')
+        self.assertEqual(jira.calls, [])
+        self.assertEqual(ledger['develop']['last_sha'], self.shas[2])
+
+    def test_real_run_comments_assigns_transitions_and_advances_ledger(self):
+        jira = FakeJira()
+        report, ledger = self.run_notify({'dry_run': False}, ledger={'develop': {'last_sha': self.shas[0]}}, client=jira)
+        self.assertEqual(report['status'], 'DONE')
+        self.assertEqual([c[0] for c in jira.calls], ['comment', 'assign', 'transition'])
+        self.assertEqual(jira.calls[0][1], 'PBB-2')
+        self.assertIn('https://tf/app', jira.calls[0][2])
+        self.assertEqual(jira.calls[2][2], 'In Test')
+        self.assertEqual(jira.calls[2][3], {})
+        self.assertEqual(ledger['develop']['last_sha'], self.shas[2])
+
+    def test_missing_app_link_skips_instead_of_posting_the_jenkins_job_url(self):
+        jira = FakeJira()
+        report, ledger = self.run_notify({'dry_run': False}, ledger={'develop': {'last_sha': self.shas[0]}},
+                                         client=jira, share=None)
+        self.assertEqual(report['status'], 'SKIPPED')
+        self.assertEqual(jira.calls, [])
+        self.assertEqual(ledger['develop']['last_sha'], self.shas[0])
+
+    def test_bug_without_rule_picks_first_allowed_root_cause(self):
+        jira = FakeJira(issue_type='Bug', required=ROOT_CAUSE)
+        report, ledger = self.run_notify({'dry_run': False}, ledger={'develop': {'last_sha': self.shas[0]}}, client=jira)
+        self.assertEqual(jira.calls[2], ('transition', 'PBB-2', 'In Test', {'customfield_100': {'value': 'Code'}}))
+        self.assertEqual(report['needs_manual'], [])
+        self.assertIn('Root Cause=Code', report['tickets'][0]['steps'][-1])
+        self.assertEqual(ledger['develop']['last_sha'], self.shas[2])
+
+    def test_status_without_an_in_test_transition_is_commented_and_assigned_but_not_moved(self):
+        # Real case: tickets still in Development / Ready for Development have no 'In Test'
+        # transition. That used to fail the whole ticket (no comment either).
+        class NoInTest(FakeJira):
+            def plan_transition(self, key, name, issue_type='', rules=()):
+                error = J.NoSuchTransition('no In Test')
+                error.available = ['Ready for Test', 'No Longer Required']
+                raise error
+        jira = NoInTest(status='Development')
+        report, ledger = self.run_notify({'dry_run': False}, ledger={'develop': {'last_sha': self.shas[0]}}, client=jira)
+        self.assertEqual([c[0] for c in jira.calls], ['comment', 'assign'])
+        self.assertIn('Please move it to', jira.calls[0][2])
+        self.assertEqual(report['errors'], [])
+        self.assertIn('Ready for Test', report['needs_manual'][0]['reason'])
+        comment = jira.calls[0][2]
+        self.assertIn("*Status not changed:* 'Development' cannot move to 'In Test' directly.", comment)
+        self.assertNotIn('No Longer Required', comment)                            # the long list stays out
+        self.assertNotIn('Change:', comment)                                       # no repeated title
+        self.assertFalse(any('\u4e00' <= ch <= '\u9fff' for ch in comment))       # English only
+        self.assertIn('*Included because of*', comment)
+        self.assertIn('/commit/', comment)
+        self.assertEqual(report['status'], 'DONE')
+
+    def test_required_text_field_without_rule_is_commented_and_assigned_but_not_moved(self):
+        text = {'customfield_7': {'required': True, 'name': 'Fix Note', 'schema': {'type': 'string'}}}
+        jira = FakeJira(issue_type='Bug', required=text)
+        report, ledger = self.run_notify({'dry_run': False}, ledger={'develop': {'last_sha': self.shas[0]}}, client=jira)
+        self.assertEqual([c[0] for c in jira.calls], ['comment', 'assign'])
+        self.assertIn('Please move it to', jira.calls[0][2])
+        self.assertIn('Fix Note', report['needs_manual'][0]['reason'])
+        self.assertEqual(report['status'], 'DONE')
+
+    def test_bug_with_configured_root_cause_is_moved_with_that_value(self):
+        jira = FakeJira(issue_type='Bug', required=ROOT_CAUSE)
+        report, _ = self.run_notify({'dry_run': False, 'transition_fields': 'Bug | Root Cause | requirement'},
+                                    ledger={'develop': {'last_sha': self.shas[0]}}, client=jira)
+        self.assertEqual(jira.calls[2], ('transition', 'PBB-2', 'In Test', {'customfield_100': {'value': 'Requirement'}}))
+        self.assertEqual(report['needs_manual'], [])
+
+    def test_dry_run_changes_nothing_and_keeps_baseline(self):
+        jira = FakeJira()
+        report, ledger = self.run_notify({'dry_run': True}, ledger={'develop': {'last_sha': self.shas[0]}}, client=jira)
+        self.assertEqual(report['status'], 'DRY_RUN')
+        self.assertEqual(jira.calls, [])
+        self.assertEqual(ledger['develop']['last_sha'], self.shas[0])
+
+    def test_rerun_of_the_same_task_is_idempotent_for_comment_and_status(self):
+        jira = FakeJira(status='In Test', existing_comments=['[app-build:T1] old'])
+        report, _ = self.run_notify({'dry_run': False}, ledger={'develop': {'last_sha': self.shas[0]}}, client=jira)
+        self.assertEqual([c[0] for c in jira.calls], ['assign'])
+
+    def test_configured_people_are_mentioned_in_every_comment(self):
+        jira = FakeJira()
+        self.run_notify({'dry_run': False, 'comment_mentions': '44065253, 43123456'},
+                        ledger={'develop': {'last_sha': self.shas[0]}}, client=jira)
+        self.assertIn('\n\ncc [~44065253] [~43123456]\n{color:#97A0AF}[app-build:T1]{color}', jira.calls[0][2])
+        self.assertEqual(J.mention_line(''), '')
+        self.assertEqual(J.mention_line('abc', 'cloud'), 'cc [~accountid:abc]')
+        self.assertEqual(J.mention_line('George <g@x>'), '')          # invalid list: mention nobody
+
+    def test_another_build_with_the_same_gmx_number_still_comments(self):
+        # Every new upload branch starts at GMX #2, so the build number alone must not
+        # suppress the comment of a different build task.
+        jira = FakeJira(status='In Test', existing_comments=['[app-build:7] old', '[app-build:OTHER-TASK] older'])
+        report, _ = self.run_notify({'dry_run': False}, ledger={'develop': {'last_sha': self.shas[0]}}, client=jira)
+        self.assertEqual([c[0] for c in jira.calls], ['comment', 'assign'])
+        self.assertTrue(jira.calls[0][2].startswith('{panel:bgColor=#E9F5EE|borderColor=#B7DCC4}\n*Ready to test* · GMX #7'))
+        self.assertTrue(jira.calls[0][2].endswith('{color:#97A0AF}[app-build:T1]{color}'))
+
+    def test_failed_build_or_disabled_does_nothing(self):
+        jira = FakeJira()
+        report, _ = self.run_notify({'dry_run': False}, ledger={'develop': {'last_sha': self.shas[0]}}, client=jira, status='FAILED')
+        self.assertIsNone(report)
+        self.assertEqual(jira.calls, [])
+
+    def test_unknown_ticket_is_ignored_not_failed_and_ledger_advances(self):
+        class Missing(FakeJira):
+            def issue(self, key):
+                raise J.JiraNotFound('HTTP 404')
+        jira = Missing()
+        report, ledger = self.run_notify({'dry_run': False}, ledger={'develop': {'last_sha': self.shas[0]}}, client=jira)
+        self.assertEqual(report['status'], 'DONE')
+        self.assertEqual(report['ignored_keys'], ['PBB-2'])
+        self.assertEqual(report['errors'], [])
+        self.assertEqual(jira.calls, [])
+        self.assertEqual(ledger['develop']['last_sha'], self.shas[2])
+
+    def test_other_http_errors_still_count_as_failures(self):
+        class Broken(FakeJira):
+            def issue(self, key):
+                raise RuntimeError('HTTP 500')
+        jira = Broken()
+        report, ledger = self.run_notify({'dry_run': False}, ledger={'develop': {'last_sha': self.shas[0]}}, client=jira)
+        self.assertEqual(report['status'], 'PARTIAL')
+        self.assertEqual(report['ignored_keys'], [])
+        self.assertEqual(ledger['develop']['last_sha'], self.shas[0])
+
+    def test_http_404_maps_to_not_found_and_500_stays_runtime_error(self):
+        import urllib.error
+        client = J.JiraClient('https://jira.example.com', env={'JIRA_TOKEN': 'x'})
+        for code, expected in ((404, J.JiraNotFound), (500, RuntimeError)):
+            def boom(req, timeout=None, context=None, code=code):
+                raise urllib.error.HTTPError('u', code, 'x', {}, None)
+            with patch.object(J.urllib.request, 'urlopen', boom):
+                with self.assertRaises(expected) as caught:
+                    client.issue('UTF-8')
+            if code == 500:
+                self.assertNotIsInstance(caught.exception, J.JiraNotFound)
+
+    def test_preview_reads_recent_commits_and_never_writes(self):
+        jira = FakeJira()
+        data = Path(self.tmp.name) / 'data'
+        data.mkdir()
+        row = {'status': 'SUCCESS', 'params': json.dumps({'plugin_source': 'develop'})}
+        state = {'runtime': {'plugin_source_sha': self.shas[2], 'gmx_build_number': 7,
+                             'testfairy_app': {'share_url': 'https://tf/app'}}}
+        patched = {}
+        with patch.object(J, 'LEDGER', data / 'jira_ledger.json'), patch.object(J, 'task', return_value=row), \
+                patch.object(J, 'read_state', return_value=state), \
+                patch.object(J, 'task_folder', return_value=Path(self.tmp.name)), \
+                patch.object(J, 'patch_runtime', side_effect=lambda tid, **kw: patched.update(kw)):
+            report = J.notify_jira('T1', client=jira, llm=None, preview=5,
+                                   config={'jira': {'enabled': False, 'base_url': 'https://j.example.com'}})
+        self.assertEqual(report['status'], 'PREVIEW')
+        self.assertEqual(sorted(t['key'] for t in report['tickets']), ['PBB-1', 'PBB-2'])
+        self.assertEqual(jira.calls, [])
+        self.assertEqual(patched, {})
+        self.assertFalse((data / 'jira_ledger.json').exists())
+
+    def test_preview_refuses_unfinished_builds(self):
+        with patch.object(J, 'task', return_value={'status': 'RUNNING', 'params': '{}'}):
+            with self.assertRaises(ValueError):
+                J.notify_jira('T1', preview=5, config={})
+
+    def test_client_requires_https_and_credentials(self):
+        with self.assertRaises(ValueError):
+            J.JiraClient('http://jira.example.com', env={'JIRA_TOKEN': 'x'})
+        with self.assertRaises(ValueError):
+            J.JiraClient('https://jira.example.com', env={})
+        self.assertTrue(J.JiraClient('https://jira.example.com', env={'JIRA_TOKEN': 'x'}).auth.startswith('Bearer '))
+
+
+class FakePRs:
+    def __init__(self, mapping, error=None):
+        self.mapping, self.error, self.calls = mapping, error, 0
+
+    def for_commit(self, sha):
+        self.calls += 1
+        return self.mapping.get(sha)
+
+
+def pr(title='', body='', head=''):
+    return {'number': 1, 'title': title, 'body': body, 'head': head}
+
+
+class PRFirstTests(unittest.TestCase):
+    def test_pr_title_and_branch_win_over_commit_text(self):
+        c = [{'sha': 'a', 'subject': 'TRANSACT-1 wrong in commit', 'body': ''}]
+        found, _ = J.tickets_from_commits(c, PATTERN, None, FakePRs({'a': pr('TRANSACT-2 right', '', 'feature/x')}))
+        self.assertEqual(list(found), ['TRANSACT-2', 'TRANSACT-1'])   # the commit text's key is included too
+        self.assertEqual(found['TRANSACT-2']['source'], 'PR标题/分支')
+
+    def test_key_only_in_pr_description_is_found_when_commit_has_none(self):
+        c = [{'sha': 'a', 'subject': 'fix layout', 'body': ''}]
+        found, _ = J.tickets_from_commits(c, PATTERN, None, FakePRs({'a': pr('fix layout', 'Jira: TRANSACT-210390\nbefore/after attached')}))
+        self.assertEqual(list(found), ['TRANSACT-210390'])
+        self.assertEqual(found['TRANSACT-210390']['source'], 'PR描述')
+
+    def test_every_pr_and_commit_that_mentions_a_ticket_is_recorded_with_its_author(self):
+        c = [{'sha': 'a1', 'author': 'Alice', 'subject': 'TRANSACT-9 part one', 'body': ''},
+             {'sha': 'b2', 'author': 'Bob', 'subject': 'more work', 'body': ''}]
+        prs = FakePRs({'a1': None, 'b2': {**pr('TRANSACT-9 part two', '', 'feature/x'), 'number': 42,
+                                          'url': 'https://gh.example.com/org/repo/pull/42', 'author': 'bob-gh'}})
+        found, _ = J.tickets_from_commits(c, PATTERN, None, prs)
+        info = {**found['TRANSACT-9'], 'repo_url': 'https://gh.example.com/org/repo'}
+        lines = J.describe_refs(info)
+        self.assertEqual(lines[0], '- Commit a1 "TRANSACT-9 part one" by Alice https://gh.example.com/org/repo/commit/a1')
+        self.assertEqual(lines[1], '- PR #42 "TRANSACT-9 part two" by bob-gh https://gh.example.com/org/repo/pull/42')
+        self.assertEqual(J.repo_web_url('https://gh.example.com/org/repo.git'), 'https://gh.example.com/org/repo')
+
+    def test_branch_name_counts_as_pr_title_tier(self):
+        c = [{'sha': 'a', 'subject': 'fix', 'body': ''}]
+        found, _ = J.tickets_from_commits(c, PATTERN, None, FakePRs({'a': pr('fix', '', 'feature/TRANSACT-77-title')}))
+        self.assertEqual(list(found), ['TRANSACT-77'])
+
+    def test_no_pr_falls_back_to_commit_text(self):
+        c = [{'sha': 'a', 'subject': 'TRANSACT-5 direct push', 'body': ''}]
+        found, _ = J.tickets_from_commits(c, PATTERN, None, FakePRs({}))
+        self.assertEqual(list(found), ['TRANSACT-5'])
+        self.assertEqual(found['TRANSACT-5']['source'], '提交标题')
+
+    def test_two_keys_in_pr_description_are_both_updated(self):
+        c = [{'sha': 'a', 'subject': 'fix', 'body': ''}]
+        found, amb = J.tickets_from_commits(c, PATTERN, None, FakePRs({'a': pr('fix', 'TRANSACT-1 and TRANSACT-2')}))
+        self.assertEqual(sorted(found), ['TRANSACT-1', 'TRANSACT-2'])
+        self.assertEqual(amb, [])
+
+    def test_api_base_for_enterprise_and_public_github(self):
+        self.assertEqual(J.github_api_base('https://alm-github.systems.uk.hsbc/mobile/paybybank-ios-plugin'),
+                         ('https://alm-github.systems.uk.hsbc/api/v3', 'mobile/paybybank-ios-plugin'))
+        self.assertEqual(J.github_api_base('https://github.com/o/r.git'), ('https://api.github.com', 'o/r'))
+        with self.assertRaises(ValueError):
+            J.github_api_base('http://x/o/r')
+
+    def test_lookup_failure_disables_further_calls_and_is_reported(self):
+        import urllib.error
+        lookup = J.PRLookup('https://h.example/o/r', 'tok')
+        def boom(path):
+            raise urllib.error.HTTPError('u', 403, 'forbidden', {}, None)
+        lookup._get = boom
+        self.assertIsNone(lookup.for_commit('a'))
+        self.assertIn('403', lookup.error)
+        self.assertIsNone(lookup.for_commit('b'))
+        self.assertEqual(lookup.calls, 1)
+
+    def test_pr_author_login_is_shown_by_its_github_name(self):
+        lookup = J.PRLookup('https://h.example/o/r', 'tok')
+        paths = []
+
+        def get(path):
+            paths.append(path)
+            if path.startswith('/users/'):
+                return {'name': 'Glenn Li'} if path == '/users/45521793' else {}
+            return [{'number': 180, 'title': 'TRANSACT-1: Fix x', 'merged_at': 'x', 'head': {'ref': 'b'},
+                     'user': {'login': '45521793' if 'a' in path else '999'}}]
+        lookup._get = get
+        found, _ = J.tickets_from_commits([{'sha': 'a', 'subject': 's', 'body': ''},
+                                           {'sha': 'b', 'subject': 's', 'body': ''}], PATTERN, None, lookup)
+        authors = [r['pr']['author'] for r in found['TRANSACT-1']['refs']]
+        self.assertEqual(authors, ['Glenn Li', '999'])                 # no name on GitHub: keep the login
+        found, _ = J.tickets_from_commits([{'sha': 'a', 'subject': 's', 'body': ''}], PATTERN, None, lookup)
+        self.assertEqual(paths.count('/users/45521793'), 1)            # one lookup per person
+
+    def test_comment_is_one_box_then_sources_then_actions(self):
+        items = J.ref_items({'refs': [{'sha': 'a', 'subject': '', 'author': '',
+                                       'pr': {'number': 180, 'title': 'TRANSACT-1: Fix [x] *now*', 'url': 'https://g/pull/180',
+                                              'author': 'Glenn Li'}}]}, 'TRANSACT-1')
+        self.assertEqual(items[0]['title'], 'Fix [x] *now*')            # own key dropped from the title
+        text = J.comment_text('[app-build:T9]', 'https://tf/app', 2, 'release/v1.3.1', items, '', 'cc [~a]')
+        self.assertEqual(text.split('\n'), [
+            '{panel:bgColor=#E9F5EE|borderColor=#B7DCC4}', '*Ready to test* · GMX #2 · release/v1.3.1',
+            '*[Install from TestFairy|https://tf/app]*', '{panel}', '*Included because of*',
+            '* [PR #180|https://g/pull/180] Fix \\[x\\] \\*now\\* · Glenn Li', '', 'cc [~a]',
+            '{color:#97A0AF}[app-build:T9]{color}'])
+
+    def test_lookup_prefers_the_merged_pull_request(self):
+        lookup = J.PRLookup('https://h.example/o/r', 'tok')
+        lookup._get = lambda path: [{'number': 1, 'title': 'open one', 'head': {'ref': 'a'}},
+                                    {'number': 2, 'title': 'merged one', 'merged_at': 'x', 'head': {'ref': 'b'}}]
+        self.assertEqual(lookup.for_commit('s')['title'], 'merged one')
+
+
+class FieldRuleTests(unittest.TestCase):
+    def test_rules_parse_match_type_and_validate_allowed_values(self):
+        rules = J.parse_field_rules('# comment\nBug | Root Cause | Code\n* | Root Cause | Requirement\n')
+        self.assertEqual(J.plan_fields(ROOT_CAUSE, 'Bug', rules)[0], {'customfield_100': {'value': 'Code'}})
+        self.assertEqual(J.plan_fields(ROOT_CAUSE, 'Story', rules)[0], {'customfield_100': {'value': 'Requirement'}})
+        self.assertEqual(J.plan_fields(ROOT_CAUSE, 'Bug', [])[:2], ({'customfield_100': {'value': 'Code'}}, []))
+        self.assertEqual(J.plan_fields(ROOT_CAUSE, 'Bug', [])[3], ['Root Cause=Code'])
+        _, _, bad, _ = J.plan_fields(ROOT_CAUSE, 'Bug', J.parse_field_rules('Bug | Root Cause | Weather'))
+        self.assertIn('Code', bad[0])
+        text = {'customfield_7': {'required': True, 'name': 'Fix Note', 'schema': {'type': 'string'}}}
+        self.assertEqual(J.plan_fields(text, 'Bug', J.parse_field_rules('Fix Note | done'))[0], {'customfield_7': 'done'})
+        with self.assertRaises(ValueError):
+            J.parse_field_rules('only one part')
+
+
+if __name__ == '__main__':
+    unittest.main()

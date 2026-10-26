@@ -139,20 +139,26 @@ def next_runs(expression, after, count=5):
     return runs
 
 
-def latest_due(spec, first_due, now, *, cap=10000):
+def latest_due(spec, first_due, now):
     """Collapse every occurrence in [first_due, now] into the most recent one.
 
     Returns ``(latest, missed)`` where ``missed`` counts the earlier occurrences
     that are intentionally not replayed.
     """
-    latest, count, cursor = first_due, 0, first_due
-    while count < cap:
-        following = next_after(spec, cursor)
-        if following is None or following > now:
-            break
-        latest, cursor = following, following
-        count += 1
-    return latest, count
+    # Count by calendar day, so a long sleep is never truncated to the first
+    # 10,000 occurrences. Even years offline still catch up only the latest.
+    day = first_due.replace(hour=0, minute=0, second=0, microsecond=0)
+    latest, count = first_due, 0
+    while day.date() <= now.date():
+        if day.month in spec.months and _day_matches(spec, day):
+            for hour in spec.hours:
+                for minute in spec.minutes:
+                    candidate = day.replace(hour=hour, minute=minute)
+                    if first_due <= candidate <= now:
+                        latest = candidate
+                        count += 1
+        day += timedelta(days=1)
+    return latest, max(0, count - 1)
 
 
 def minimum_interval_minutes(expression, after, *, samples=200):
