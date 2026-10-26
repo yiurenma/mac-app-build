@@ -96,5 +96,6 @@ jobs:
         run: |
           st=$(docker ps -a --format '{{.Status}}' | tr '\n' ' ')
           lg=$(docker logs ab 2>&1 | tail -25 | tr '\n' '|' | cut -c1-1500)
-          ex=$(docker exec ab sh -c 'ps aux | head -15; which xvfb-run python3 git' 2>&1 | tr '\n' '|' | cut -c1-800)
-          echo "::error title=container::state=[$st] logs=[$lg] ps=[$ex]"
+          echo "::error title=container::state=[$st] logs=[$lg]"
+          fg=$(docker run --rm app-builder sh -c 'timeout 15 python3 -m appbuilder web --no-open 2>&1; echo rc=$?' | tr '\n' '|' | cut -c1-1500)
+          echo "::error title=foreground-web::$fg"
