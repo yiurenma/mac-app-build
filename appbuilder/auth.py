@@ -19,43 +19,49 @@ class CredentialError(RuntimeError):
     pass
 
 
+def _keychain_write(service, account, secret, label):
+    """Store one secret: macOS Keychain, else OS keyring (see secretstore)."""
+    if sys.platform == 'darwin':
+        result = subprocess.run(['security', 'add-generic-password', '-U', '-s', service, '-a', account, '-w', secret],
+                                text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if result.returncode:
+            raise CredentialError(f'{label}保存到 Mac Keychain 失败；请检查钥匙串访问权限')
+        return
+    from . import secretstore
+    if not secretstore.write(service, account, secret):
+        raise CredentialError(
+            f'{label}无法保存：本机没有可用的系统凭据库（可 pip install keyring）。'
+            f'服务器/Docker 请改用环境变量 {secretstore.env_name(service, account)}'
+            f'（或 {secretstore.env_name(service, account)}_FILE 指向密钥文件）')
+
+
+def _keychain_read(service, account):
+    if sys.platform == 'darwin':
+        result = subprocess.run(['security', 'find-generic-password', '-s', service, '-a', account, '-w'],
+                                text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        return (result.stdout.strip() or None) if result.returncode == 0 else None
+    from . import secretstore
+    return secretstore.read(service, account)
+
+
 def store_credentials(username: str, password: str):
     username = str(username or '').strip()
     if not username or not password:
         raise CredentialError('必须同时提供 Jenkins 用户名和密码')
-    if sys.platform != 'darwin':
-        raise CredentialError('自动保存 Jenkins 凭据目前仅支持 macOS Keychain')
-    # Keychain receives a password exactly once; it is never written to files,
-    # task state, Git commits or terminal logs. Avoid shell=True.
-    proc = subprocess.run(
-        ['security', 'add-generic-password', '-U', '-s', SERVICE, '-a', username, '-w', password],
-        text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    if proc.returncode:
-        raise CredentialError('无法将 Jenkins 凭据写入 Mac Keychain；请检查钥匙串访问权限')
+    # The password is handed to the credential store exactly once; it is never
+    # written to files, task state, Git commits or terminal logs. No shell=True.
+    _keychain_write(SERVICE, username, password, 'Jenkins 凭据')
     # Separately stored account name is not a secret; don't persist password.
-    proc = subprocess.run(['security', 'add-generic-password', '-U', '-s', SERVICE + '.account',
-                           '-a', 'default', '-w', username], text=True,
-                          stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    if proc.returncode:
-        raise CredentialError('已保存密码但无法保存 Jenkins 账号索引，请检查 Mac Keychain')
+    _keychain_write(SERVICE + '.account', 'default', username, 'Jenkins 账号索引')
 
 
 def read_credentials():
     """Return (username, password), or None when not configured."""
-    if sys.platform != 'darwin':
+    username = _keychain_read(SERVICE + '.account', 'default')
+    if not username:
         return None
-    name = subprocess.run(['security', 'find-generic-password', '-s', SERVICE + '.account',
-                           '-a', 'default', '-w'], text=True,
-                          stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    if name.returncode or not name.stdout.strip():
-        return None
-    username = name.stdout.strip()
-    pwd = subprocess.run(['security', 'find-generic-password', '-s', SERVICE,
-                          '-a', username, '-w'], text=True,
-                         stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    if pwd.returncode or not pwd.stdout.strip():
-        return None
-    return username, pwd.stdout.rstrip('\n')
+    pwd = _keychain_read(SERVICE, username)
+    return (username, pwd.rstrip('\n')) if pwd else None
 
 
 def approved_login_host(url: str, jenkins_url: str, extra_hosts=()):
@@ -208,80 +214,35 @@ GITHUB_SERVICE = 'mac-app-builder.github-token'
 
 
 def store_github_token(token: str):
-    """Store PAT in local Keychain; never in browser storage, source or task params."""
+    """Store PAT in the credential store; never in browser storage, source or task params."""
     token = str(token or '').strip()
     if not token or len(token) > 4096 or '\n' in token or '\r' in token:
         raise CredentialError('GitHub PAT 不能为空、过长或包含换行')
-    if sys.platform != 'darwin':
-        raise CredentialError('保存 GitHub PAT 目前仅支持 macOS Keychain')
-    result = subprocess.run(
-        ['security', 'add-generic-password', '-U', '-s', GITHUB_SERVICE,
-         '-a', 'enterprise', '-w', token],
-        text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    if result.returncode:
-        raise CredentialError('GitHub PAT 保存到 Mac Keychain 失败')
+    _keychain_write(GITHUB_SERVICE, 'enterprise', token, 'GitHub PAT ')
 
 
 def read_github_token():
     """Read locally stored PAT without printing it or copying it to task DB."""
-    if sys.platform != 'darwin':
-        return None
-    result = subprocess.run(
-        ['security', 'find-generic-password', '-s', GITHUB_SERVICE,
-         '-a', 'enterprise', '-w'],
-        text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    if result.returncode:
-        return None
-    return result.stdout.strip() or None
+    return _keychain_read(GITHUB_SERVICE, 'enterprise')
 
 
 JIRA_SERVICE = 'mac-app-builder.jira-token'
 
 
 def store_jira_token(token: str):
-    """Store the Jira PAT in the local Keychain; never in the page, task params or logs."""
+    """Store the Jira PAT in the credential store; never in the page, task params or logs."""
     token = str(token or '').strip()
     if not token or len(token) > 4096 or '\n' in token or '\r' in token:
         raise CredentialError('Jira Token 不能为空、过长或包含换行')
-    if sys.platform != 'darwin':
-        raise CredentialError('保存 Jira Token 目前仅支持 macOS Keychain')
-    result = subprocess.run(
-        ['security', 'add-generic-password', '-U', '-s', JIRA_SERVICE, '-a', 'enterprise', '-w', token],
-        text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    if result.returncode:
-        raise CredentialError('Jira Token 保存到 Mac Keychain 失败')
+    _keychain_write(JIRA_SERVICE, 'enterprise', token, 'Jira Token ')
 
 
 def read_jira_token():
-    if sys.platform != 'darwin':
-        return None
-    result = subprocess.run(
-        ['security', 'find-generic-password', '-s', JIRA_SERVICE, '-a', 'enterprise', '-w'],
-        text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    return (result.stdout.strip() or None) if result.returncode == 0 else None
+    return _keychain_read(JIRA_SERVICE, 'enterprise')
 
 
 JENKINS_API_SERVICE = 'mac-app-builder.jenkins-api-token'
 JENKINS_API_SITES = ('plugin', 'gmx')   # two different Jenkins servers, one token each
-
-
-def _keychain_write(service, account, secret, label):
-    if sys.platform != 'darwin':
-        raise CredentialError(f'保存{label}目前仅支持 macOS Keychain')
-    result = subprocess.run(['security', 'add-generic-password', '-U', '-s', service, '-a', account, '-w', secret],
-                            text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    if result.returncode:
-        raise CredentialError(f'{label}保存到 Mac Keychain 失败')
-
-
-def _keychain_read(service, account):
-    if sys.platform != 'darwin':
-        return None
-    result = subprocess.run(['security', 'find-generic-password', '-s', service, '-a', account, '-w'],
-                            text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    return (result.stdout.strip() or None) if result.returncode == 0 else None
-
-
 def store_jenkins_api_token(site: str, token: str):
     """Jenkins user API token for one Jenkins server (plugin or gmx); Keychain only."""
     if site not in JENKINS_API_SITES:

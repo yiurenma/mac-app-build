@@ -293,6 +293,10 @@ mac-app-builder/
 - 若 Jenkins 页面布局特殊，可在 `config.yaml` 配置 `jenkins.gmx_fields` 下的三个 CSS 选择器。必须分别唯一匹配实际控件；未能安全识别会停下。
 - **关于 iOS 版本限制：** 需求中 `BUNDLE_VERSION_SHORT=1.3.202610100030` 的第三段是长时间戳，可能不符合 Apple 的公开版本号发布约束；上线前应由项目负责人员确认内部构建/签名流程兼容。
 
+## Linux / Docker
+
+除 macOS 外也支持 Linux 服务器与 Docker：凭据走 keyring 或环境变量，调度器用 `systemd --user`。详见 `docs/29-Linux与Docker部署.md`。
+
 ## 7. 离线测试
 
 ```bash

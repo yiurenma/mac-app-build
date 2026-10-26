@@ -328,10 +328,13 @@ def main(argv=None):
                 raise SystemExit(0)
         elif a.scheduler_command == 'install':
             path = scheduler.install()
-            print(f'[SCHEDULER] 已安装并启动 LaunchAgent：{path}', flush=True)
-            print('[SCHEDULER] 之后登录 Mac 会自动运行；日志：.appbuilder/scheduler.log', flush=True)
+            kind = 'systemd 用户服务' if sys.platform.startswith('linux') else 'LaunchAgent'
+            print(f'[SCHEDULER] 已安装并启动 {kind}：{path}', flush=True)
+            print('[SCHEDULER] 之后开机/登录会自动运行；日志：.appbuilder/scheduler.log', flush=True)
+            if sys.platform.startswith('linux'):
+                print('[SCHEDULER] 服务器上无人登录也要常驻：sudo loginctl enable-linger $USER', flush=True)
         elif a.scheduler_command == 'uninstall':
-            print('[SCHEDULER] 已移除 LaunchAgent' if scheduler.uninstall() else '[SCHEDULER] 未安装 LaunchAgent', flush=True)
+            print('[SCHEDULER] 已移除常驻服务' if scheduler.uninstall() else '[SCHEDULER] 未安装常驻服务', flush=True)
         else:
             from . import schedules
             beat = scheduler.heartbeat_status()

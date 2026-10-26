@@ -297,9 +297,51 @@ def _launchctl(*args):
                           stderr=subprocess.STDOUT)
 
 
+SYSTEMD_UNIT = 'mac-app-builder-scheduler.service'
+
+
+def systemd_unit_path():
+    base = Path(os.environ.get('XDG_CONFIG_HOME') or Path.home() / '.config')
+    return base / 'systemd' / 'user' / SYSTEMD_UNIT
+
+
+def build_systemd_unit(python=None, root=None, data=None):
+    python = python or sys.executable
+    root = Path(root or ROOT)
+    data = Path(data or DATA)
+    env = ['PYTHONUNBUFFERED=1', 'PATH=' + os.environ.get('PATH', '/usr/local/bin:/usr/bin:/bin')]
+    if os.environ.get('APP_BUILDER_CONFIG'):
+        env.append('APP_BUILDER_CONFIG=' + os.environ['APP_BUILDER_CONFIG'])
+    lines = ['[Unit]', 'Description=APP Builder scheduled builds', 'After=network-online.target', '',
+             '[Service]', f'WorkingDirectory={root}',
+             f'ExecStart={python} -m appbuilder scheduler run',
+             *[f'Environment="{e}"' for e in env],
+             'Restart=always', 'RestartSec=10',
+             f'StandardOutput=append:{data / "scheduler.log"}',
+             f'StandardError=append:{data / "scheduler.log"}', '',
+             '[Install]', 'WantedBy=default.target', '']
+    return '\n'.join(lines)
+
+
+def _systemctl(*args):
+    return subprocess.run(['systemctl', '--user', *args], capture_output=True, text=True)
+
+
 def install():
+    if sys.platform.startswith('linux'):
+        if not shutil.which('systemctl'):
+            raise RuntimeError('未找到 systemctl；容器/无 systemd 环境请直接前台运行 ./app-build scheduler run')
+        DATA.mkdir(parents=True, exist_ok=True)
+        path = systemd_unit_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(build_systemd_unit(), encoding='utf-8')
+        _systemctl('daemon-reload')
+        result = _systemctl('enable', '--now', SYSTEMD_UNIT)
+        if result.returncode != 0:
+            raise RuntimeError('systemctl --user enable 失败：' + (result.stderr or result.stdout).strip())
+        return path
     if sys.platform != 'darwin':
-        raise RuntimeError('LaunchAgent 仅支持 macOS；其他系统请直接运行 ./app-build scheduler run')
+        raise RuntimeError('常驻安装仅支持 macOS(LaunchAgent) 与 Linux(systemd --user)；其他系统请直接运行 ./app-build scheduler run')
     DATA.mkdir(parents=True, exist_ok=True)
     path = plist_path()
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -315,8 +357,18 @@ def install():
 
 
 def uninstall():
+    if sys.platform.startswith('linux'):
+        path = systemd_unit_path()
+        if shutil.which('systemctl'):
+            _systemctl('disable', '--now', SYSTEMD_UNIT)
+        existed = path.exists()
+        if existed:
+            path.unlink()
+            if shutil.which('systemctl'):
+                _systemctl('daemon-reload')
+        return existed
     if sys.platform != 'darwin':
-        raise RuntimeError('LaunchAgent 仅支持 macOS')
+        raise RuntimeError('常驻卸载仅支持 macOS 与 Linux')
     _launchctl('bootout', f'gui/{os.getuid()}/{LABEL}')
     path = plist_path()
     existed = path.exists()
