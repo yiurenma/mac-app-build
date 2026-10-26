@@ -91,11 +91,9 @@ jobs:
           sleep 20
           docker exec ab python3 -m appbuilder scheduler status | tee /tmp/status.txt
           grep -q "在线" /tmp/status.txt
-      - name: Container log (always)
-        if: always()
+      - name: Container log (on failure)
+        if: failure()
         run: |
           st=$(docker ps -a --format '{{.Status}}' | tr '\n' ' ')
           lg=$(docker logs ab 2>&1 | tail -25 | tr '\n' '|' | cut -c1-1500)
           echo "::error title=container::state=[$st] logs=[$lg]"
-          fg=$(docker run --rm app-builder sh -c 'timeout 15 python3 -m appbuilder web --no-open 2>&1; echo rc=$?' | tr '\n' '|' | cut -c1-1500)
-          echo "::error title=foreground-web::$fg"
