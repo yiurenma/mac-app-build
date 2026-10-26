@@ -64,6 +64,9 @@ def args_parser():
     web.add_argument('--port', type=int, default=8765, help='本地页面端口（默认 8765）')
     web.add_argument('--no-open', action='store_true', help='只启动服务，不自动打开浏览器')
     web.add_argument('--update', action='store_true', help='启动前由 ./app-build 安全更新源码')
+    clean = sub.add_parser('cleanup', help='清理已完成任务的 Git 工作副本（plugin/ gmx/）以释放磁盘；默认只预览')
+    clean.add_argument('--apply', action='store_true', help='确认执行删除（不加则只预览）')
+    clean.add_argument('--keep-days', type=int, default=7, help='未成功的任务保留多少天以便恢复（默认 7）')
     sched = sub.add_parser('scheduler', help='定时任务调度器（按 cron 自动创建构建）')
     sched_sub = sched.add_subparsers(dest='scheduler_command', required=True)
     sched_sub.add_parser('run', help='前台运行调度器（LaunchAgent 使用此命令）')
@@ -229,6 +232,26 @@ def main(argv=None):
         doctor_check(load_config(), strict=False)
         from .web import serve
         serve(port=a.port, open_browser=not a.no_open)
+        return
+    if a.command == 'cleanup':
+        from . import cleanup
+        runs, work, other = cleanup.breakdown()
+        print(f'[CLEANUP] .appbuilder/runs：{runs} 个任务；Git 工作副本 {cleanup.human(work)}，日志/截图/状态等 {cleanup.human(other)}', flush=True)
+        items = cleanup.plan(keep_days=max(0, a.keep_days))
+        if not items:
+            print('[CLEANUP] 没有可清理的工作副本。', flush=True)
+            return
+        for item in sorted(items, key=lambda i: -i['bytes']):
+            print(f"{item['task_id']:23s} {item['status']:<16s} {cleanup.human(item['bytes']):>9s}  {item['reason']}", flush=True)
+        total = sum(i['bytes'] for i in items)
+        if not a.apply:
+            print(f'[CLEANUP] 预览：{len(items)} 个任务，可释放约 {cleanup.human(total)}。'
+                  '只会删除 plugin/ 与 gmx/，保留日志、截图和结果；确认后加 --apply 执行。', flush=True)
+            return
+        result = cleanup.apply(items)
+        print(f"[CLEANUP] 已清理 {result['tasks']} 个任务，释放 {cleanup.human(result['freed'])}", flush=True)
+        for err in result['errors']:
+            print('[CLEANUP] 失败：' + err, flush=True)
         return
     if a.command == 'scheduler':
         from . import scheduler

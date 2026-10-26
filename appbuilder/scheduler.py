@@ -25,6 +25,7 @@ from .config import DATA, ROOT
 
 LABEL = 'com.mac-app-builder.scheduler'
 INTERVAL_SECONDS = 15
+CLEANUP_EVERY_SECONDS = 3600
 ONLINE_WITHIN_SECONDS = 60
 LAUNCHD_PATH = '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin'
 
@@ -61,6 +62,21 @@ class AlreadyRunning(RuntimeError):
     pass
 
 
+def _auto_cleanup():
+    """Free git work copies of finished scheduled tasks; never let it stop the scheduler."""
+    try:
+        from . import cleanup
+        from .config import load_config
+        result = cleanup.auto_cleanup(load_config())
+        if result and (result['freed'] or result['errors']):
+            print(time.strftime('%Y-%m-%d %H:%M:%S'),
+                  f"[CLEANUP] 已清理 {result['tasks']} 个定时任务的工作副本，释放 {cleanup.human(result['freed'])}"
+                  + (f"；{len(result['errors'])} 项失败: {result['errors'][:3]}" if result['errors'] else ''), flush=True)
+    except Exception:  # noqa: BLE001
+        print(time.strftime('%Y-%m-%d %H:%M:%S'), '[CLEANUP] 自动清理失败（不影响调度）：', flush=True)
+        traceback.print_exc()
+
+
 def run_forever(interval=INTERVAL_SECONDS, *, max_loops=None, sleep=time.sleep, start=None):
     """Poll for due schedules until stopped. Exactly one instance may run."""
     DATA.mkdir(parents=True, exist_ok=True)
@@ -75,7 +91,11 @@ def run_forever(interval=INTERVAL_SECONDS, *, max_loops=None, sleep=time.sleep, 
         try:
             print(f'[SCHEDULER] 启动 v{__version__} pid={os.getpid()}；每 {interval}s 检查一次到期任务', flush=True)
             loops = 0
+            last_cleanup = 0.0
             while not stopping:
+                if time.monotonic() - last_cleanup >= CLEANUP_EVERY_SECONDS:
+                    last_cleanup = time.monotonic()
+                    _auto_cleanup()
                 try:
                     write_heartbeat()
                     result = schedules.tick(start=start)
