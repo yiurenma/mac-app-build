@@ -114,7 +114,8 @@ class ProcessLifecycleTests(unittest.TestCase):
                     p.wait(timeout=5)
                 os.kill(scheduler_pid, 0)
                 third = spawn('web', '--port', str(port()), '--no-open')
-                time.sleep(.6)
+                wait_for(lambda: (root / 'process.log').read_text().count('本地管理页面') >= 3)   # slow runners
+                time.sleep(.3)
                 self.assertIsNone(third.poll())
                 self.assertEqual(heartbeat()['pid'], scheduler_pid)
                 self.assertEqual((root / 'process.log').read_text().count('本地管理页面'), 3)
