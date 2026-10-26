@@ -1,0 +1,80 @@
+name: Cross-platform
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  linux:
+    name: Linux full suite (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04, ubuntu-24.04-arm]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: |
+          python -m pip install -r requirements.txt keyring
+          python -m playwright install --with-deps chromium
+          browser_path=$(python -c 'from playwright.sync_api import sync_playwright; p=sync_playwright().start(); print(p.chromium.executable_path); p.stop()')
+          sudo ln -sf "$browser_path" /usr/bin/chromium
+      - name: Full unittest suite under Xvfb
+        run: xvfb-run -a python -m unittest discover -s tests
+
+  non-browser:
+    name: Non-browser tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    # macOS is the original target. Windows is NOT supported yet: informational only.
+    continue-on-error: ${{ matrix.os == 'windows-latest' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r requirements.txt
+      - name: Run every test file that does not launch a browser
+        shell: python
+        run: |
+          import pathlib, subprocess, sys
+          files = [p.name for p in sorted(pathlib.Path('tests').glob('test_*.py'))
+                   if 'sync_playwright' not in p.read_text(encoding='utf-8')]
+          failed = []
+          for name in files:
+              r = subprocess.run([sys.executable, '-m', 'unittest', 'discover', '-s', 'tests', '-p', name])
+              if r.returncode:
+                  failed.append(name)
+          print(f'{len(files)} files, failed: {failed}')
+          sys.exit(1 if failed else 0)
+
+  docker:
+    name: Docker image builds and serves the console
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t app-builder .
+      - name: Start container (host network) and probe
+        run: |
+          docker run -d --name ab --network host app-builder
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8765/ || true)
+            [ "$code" = 200 ] && break
+            sleep 2
+          done
+          echo "console HTTP $code"
+          docker exec ab python3 -m appbuilder scheduler status
+          docker logs ab | tail -30
+          [ "$code" = 200 ]
