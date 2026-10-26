@@ -36,17 +36,8 @@ CREATE TABLE IF NOT EXISTS schedule_runs (
     created TEXT NOT NULL, started TEXT, UNIQUE(schedule_id, planned));
 '''
 
+# Only used to build the short summary in the list; the template itself keeps ALL form fields.
 BASIC_KEYS = ('plugin_branch', 'gmx_branch', 'plugin_version', 'country', 'project_name')
-OPTIONAL_TEXT = ('plugin_url', 'gmx_url', 'plugin_parent', 'gmx_parent', 'browser_channel',
-                 'gmx_build_type', 'gmx_signing_repo_branch', 'gmx_custom_folder',
-                 'upload_success_pattern',
-                 'selector_entities', 'selector_sync_upload', 'selector_custom_folder',
-                 'selector_build_type', 'selector_signing_repo_branch', 'selector_skip_test',
-                 'selector_force', 'selector_keep_alive')
-OPTIONAL_INT = ('discover_poll_seconds', 'poll_seconds', 'result_poll_seconds',
-                'console_settle_seconds', 'discover_timeout_minutes', 'build_timeout_minutes',
-                'callback_timeout_minutes', 'max_changed_lines')
-OPTIONAL_BOOL = ('visible', 'verbose', 'gmx_sync_upload', 'gmx_skip_test', 'gmx_force', 'gmx_keep_alive')
 SECRET_KEYS = ('jenkins_user', 'jenkins_password', 'github_token')
 
 
@@ -70,43 +61,41 @@ def _parse_iso(text):
 
 
 def validate_template(body, config=None):
-    """Return a cleaned, validated build-parameter template (never any secret)."""
+    """Return a cleaned, validated copy of the New-build form body (never any secret).
+
+    There is deliberately NO list of allowed fields here: the schedule form IS the
+    New build form, so a field added to that form later is stored and replayed
+    automatically. Correctness comes from running the very same validators that
+    ``create_build`` uses, so a saved template cannot fail validation at 3 a.m.
+    """
     from .web import _field, build_preferences
     from .versions import validate_args
     if not isinstance(body, dict):
         raise ValueError('构建参数必须是对象')
     if any(key in body for key in SECRET_KEYS):
         raise ValueError('定时任务不保存账号、密码或 Token；请使用已保存在 Mac Keychain 的凭据')
+    if len(body) > 100:
+        raise ValueError('构建参数过多')
     config = config or load_config()
-    allowed = set(BASIC_KEYS) | set(OPTIONAL_TEXT) | set(OPTIONAL_INT) | set(OPTIONAL_BOOL)
-    unknown = sorted(set(body) - allowed)
-    if unknown:
-        raise ValueError(f'不支持的构建参数: {", ".join(unknown)}')
     template = {}
-    for key in BASIC_KEYS:
-        template[key] = _field(body, key, 200 if 'branch' in key else 100)
-    template['country'] = template['country'].upper()
-    for key in OPTIONAL_TEXT:
-        value = body.get(key)
-        if value in (None, ''):
-            continue
-        if not isinstance(value, str):
-            raise ValueError(f'{key} 必须是文本')
-        template[key] = value.strip()
-    for key in OPTIONAL_INT:
-        value = body.get(key)
-        if value in (None, ''):
-            continue
-        if isinstance(value, bool) or not isinstance(value, (int, str)):
-            raise ValueError(f'{key} 必须是整数')
+    for key, value in body.items():
+        if not isinstance(key, str) or not key or len(key) > 64:
+            raise ValueError('构建参数名称无效')
+        if value is None or value == '':
+            continue            # empty = "use the default", exactly like the New build form
+        if isinstance(value, (dict, list, tuple, set)):
+            raise ValueError(f'{key} 必须是文本、数字或开关值')
+        if isinstance(value, str):
+            if len(value) > 4096:
+                raise ValueError(f'{key} 过长')
+            value = value.strip()
         template[key] = value
-    for key in OPTIONAL_BOOL:
-        if key in body:
-            if not isinstance(body[key], bool):
-                raise ValueError(f'{key} 必须是开关值')
-            template[key] = body[key]
-    # Same validators the New build form uses, so a saved template cannot fail
-    # parameter validation later at 3 a.m.
+    for key in ('visible', 'verbose'):
+        if key in template and not isinstance(template[key], bool):
+            raise ValueError(f'{key} 必须是开关值')
+    for key in BASIC_KEYS:
+        template[key] = _field(template, key, 200 if 'branch' in key else 100)
+    template['country'] = template['country'].upper()
     build_preferences(template, config, template['country'], template['project_name'])
     validate_args(template['plugin_version'], template['plugin_branch'], template['gmx_branch'],
                   template['country'], template['project_name'])
@@ -200,6 +189,12 @@ def list_runs(schedule_id, limit=20):
         return [dict(r) for r in db.execute(
             'SELECT * FROM schedule_runs WHERE schedule_id=? ORDER BY planned DESC, id DESC LIMIT ?',
             (schedule_id, int(limit)))]
+
+
+def scheduled_task_ids():
+    """Task ids created by schedules (used to scope unattended disk cleanup)."""
+    with closing(connect()) as db, db:
+        return {r[0] for r in db.execute('SELECT task_id FROM schedule_runs WHERE task_id IS NOT NULL')}
 
 
 def last_run(schedule_id):

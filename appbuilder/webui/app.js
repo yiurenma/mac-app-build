@@ -46,8 +46,9 @@ async function loadLog(reset=false){if(!state.selected)return;const selected=sta
   if(nearBottom||reset)terminal.scrollTop=terminal.scrollHeight;
  }catch(e){$('terminal').append(document.createTextNode('\n[WEB] '+e.message));}}
 async function loadScreens(){if(!state.selected)return;const selected=state.selected;try{const data=await api(`/api/tasks/${encodeURIComponent(selected)}/screenshots`);if(selected!==state.selected)return;const root=$('screenshots');root.replaceChildren();for(const filename of data.files){const a=create('a','',`◧ ${filename}`);a.href=`/api/tasks/${encodeURIComponent(selected)}/screenshots/${encodeURIComponent(filename)}`;a.target='_blank';a.rel='noopener noreferrer';root.append(a);}}catch(e){/* Screenshot list is optional */}}
-async function submitBuild(evt){evt.preventDefault();const button=$('submit-build'),form=$('build-form');const data=new FormData(form);
- const body={};for(const name of ['plugin_branch','gmx_branch','plugin_version','country','project_name','jenkins_user','jenkins_password','github_token',
+// Single source of truth for the build form -> request body (used by Start build AND Save schedule).
+function collectBuildBody(){const form=$('build-form');const data=new FormData(form);
+  const body={};for(const name of ['plugin_branch','gmx_branch','plugin_version','country','project_name','jenkins_user','jenkins_password','github_token',
    'plugin_url','gmx_url','plugin_parent','gmx_parent','browser_channel','gmx_build_type','gmx_signing_repo_branch',
    'gmx_custom_folder','discover_poll_seconds','poll_seconds','result_poll_seconds','console_settle_seconds','discover_timeout_minutes',
    'build_timeout_minutes','callback_timeout_minutes','max_changed_lines','upload_success_pattern',
@@ -55,6 +56,8 @@ async function submitBuild(evt){evt.preventDefault();const button=$('submit-buil
    'selector_skip_test','selector_force','selector_keep_alive'])body[name]=data.get(name)||'';
  body.visible=form.elements.visible.checked;body.verbose=form.elements.verbose.checked;
  for(const name of ['gmx_sync_upload','gmx_skip_test','gmx_force','gmx_keep_alive'])body[name]=form.elements[name].checked;
+ return body;}
+async function submitBuild(evt){if(typeof scheduleSubmitHook==='function'&&scheduleSubmitHook(evt))return;evt.preventDefault();const button=$('submit-build'),form=$('build-form');const body=collectBuildBody();
  button.disabled=true;button.textContent='Starting build...';$('form-message').textContent='正在检查环境并创建任务...';$('form-message').classList.remove('error');
  try{const res=await api('/api/tasks',{method:'POST',body:JSON.stringify(body)});form.elements.jenkins_password.value='';form.elements.github_token.value='';form.elements.jenkins_user.value='';$('form-message').textContent='任务已创建：'+res.task.id;toast('构建任务已启动 · '+res.task.id);await refreshDoctor();await loadTasks();setSelected(res.task.id);document.getElementById('activity').scrollIntoView({behavior:'smooth',block:'start'});}
  catch(e){$('form-message').textContent=e.message;$('form-message').classList.add('error');toast(e.message,true)}finally{button.disabled=false;button.textContent='▶   Start build  ↗';}}

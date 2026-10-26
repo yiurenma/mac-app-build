@@ -149,6 +149,19 @@ class RealCreateBuildHandOffTests(unittest.TestCase):
             run = schedules.last_run(row['id'])
             self.assertEqual((run['status'], run['task_id']), ('STARTED', tasks[0]['id']))
 
+    def test_full_form_body_incl_advanced_fields_reaches_the_real_build(self):
+        body = {**TEMPLATE, 'gmx_build_type': 'Release', 'gmx_force': False, 'build_timeout_minutes': '90',
+                'visible': False, 'verbose': True}
+        with tempfile.TemporaryDirectory() as tmp, patch.object(store, 'DATA', Path(tmp)), \
+                patch('appbuilder.cli.doctor_check', return_value=True), patch('appbuilder.cli.spawn'), \
+                patch('appbuilder.web.token_or_error', return_value='t'):
+            schedules.create_schedule('adv', '0 * * * *', body, now=datetime(2026, 10, 10, 10, 15))
+            schedules.tick(datetime(2026, 10, 10, 11, 0, 5))
+            params = json.loads(store.task_list()[0]['params'])
+            self.assertEqual(params['gmx_parameters']['BUILD_TYPE'], 'Release')
+            self.assertIs(params['gmx_parameters']['FORCE'], False)
+            self.assertEqual(params['jenkins_settings']['build_timeout_minutes'], 90)
+
     def test_default_concurrency_limit_is_shared_with_manual_builds(self):
         with tempfile.TemporaryDirectory() as tmp, patch.object(store, 'DATA', Path(tmp)), \
                 patch('appbuilder.cli.doctor_check', return_value=True), \

@@ -120,6 +120,20 @@
                 <label>Password<input name="jenkins_password" type="password" placeholder="••••••••" autocomplete="new-password"></label>
               </div>
               <div class="switches"><label class="switch-row"><input type="checkbox" name="visible" checked><span class="toggle"></span><span>Visible Chrome<small>显示 Playwright 浏览器操作</small></span></label><label class="switch-row"><input type="checkbox" name="verbose" checked><span class="toggle"></span><span>Full action trace<small>记录 Git、Playwright、Shell 操作</small></span></label></div>
+              <div class="schedule-block" id="schedule-block">
+                <label class="switch-row"><input type="checkbox" id="schedule-toggle"><span class="toggle"></span><span>保存为定时任务<small>不立即构建；按 cron 自动重复运行，参数与上方表单一致</small></span></label>
+                <div id="schedule-fields" hidden>
+                  <input type="hidden" name="schedule_edit_id" disabled>
+                  <div class="form-grid">
+                    <label>任务名称<input name="schedule_name" maxlength="60" placeholder="例如 工作日早间构建" disabled></label>
+                    <label>Cron（分 时 日 月 周）<input name="schedule_cron" maxlength="100" placeholder="0 9 * * 1-5" spellcheck="false" disabled></label>
+                  </div>
+                  <p id="cron-preview" class="diag-note">输入 cron 后在这里预览接下来 5 次运行时间。</p>
+                  <label class="switch-row"><input type="checkbox" name="schedule_enabled" checked disabled><span class="toggle"></span><span>创建后立即启用</span></label>
+                  <p class="diag-note">定时任务不保存账号、密码和 Token，运行时使用 Mac Keychain 中已保存的凭据（先正常 Start build 一次即可保存）。无人值守时建议关闭上方 Visible Chrome，打开定时开关时已自动取消勾选。</p>
+                  <button class="ghost-button" id="schedule-cancel" type="button" hidden>取消编辑</button>
+                </div>
+              </div>
               <button class="btn btn-primary submit-btn" id="submit-build" type="submit">▶ &nbsp; Start build <span>↗</span></button>
               <p id="form-message" role="status" class="form-message"></p>
             </form>
@@ -137,27 +151,8 @@
         </section>
         <section class="panel table-panel" id="history"><div class="panel-head history-head"><div><span class="section-tag">BUILD HISTORY</span><h2>Recent builds</h2></div><button class="ghost-button" id="refresh-tasks">↻ Refresh</button></div><div class="table-wrap"><table><thead><tr><th>BUILD / PROJECT</th><th>VERSION</th><th>PIPELINE STAGE</th><th>CREATED</th><th>STATUS</th><th></th></tr></thead><tbody id="tasks-body"><tr><td class="empty-row" colspan="6">Loading tasks...</td></tr></tbody></table></div></section>
         <section class="panel diagnose-panel schedules-panel" id="schedules">
-          <div class="panel-head"><div><span class="section-tag">RECURRING BUILDS</span><h2>Schedules</h2><p>输入 cron，由独立调度器按时自动创建构建。错过的时间只补跑最近一次；并发已满时排队等待，不会丢弃。账号密码使用 Mac Keychain，定时任务不保存任何密码。</p></div><div class="panel-icon">⏱</div></div>
+          <div class="panel-head"><div><span class="section-tag">RECURRING BUILDS</span><h2>Schedules</h2><p>在 New build 表单底部打开「保存为定时任务」，填入 cron 即可，参数与手动构建完全一致。错过的时间只补跑最近一次；并发已满时排队等待，不会丢弃。</p></div><div class="panel-icon">⏱</div></div>
           <div id="scheduler-status" class="diagnose-verdict unknown">调度器状态读取中…</div>
-          <form id="schedule-form" class="diagnose-form" autocomplete="off">
-            <input type="hidden" name="edit_id">
-            <div class="diagnose-fields">
-              <label>名称<input name="name" required maxlength="60" placeholder="例如 工作日早间构建"></label>
-              <label>Cron（分 时 日 月 周）<input name="cron" required maxlength="100" placeholder="0 9 * * 1-5" spellcheck="false"></label>
-            </div>
-            <p id="cron-preview" class="diag-note">输入 cron 后在这里预览接下来 5 次运行时间。</p>
-            <div class="diagnose-fields">
-              <label>Plugin Source Branch<input name="plugin_branch" required maxlength="200" value="develop"></label>
-              <label>GMX Source Branch<input name="gmx_branch" required maxlength="200" value="develop"></label>
-              <label>Plugin Version<input name="plugin_version" required maxlength="50" value="1.3"></label>
-              <label>Country / Entity<input name="country" required maxlength="30" value="UK"></label>
-              <label>Project Name<input name="project_name" required maxlength="100" value="PayByBank"></label>
-            </div>
-            <label class="diag-check"><input type="checkbox" name="visible"> 运行时显示 Chrome 窗口（默认关闭，适合无人值守）</label>
-            <label class="diag-check"><input type="checkbox" name="enabled" checked> 创建后立即启用</label>
-            <div class="sched-buttons"><button class="btn btn-primary" id="schedule-submit" type="submit">＋ 创建定时任务</button><button class="ghost-button" id="schedule-cancel" type="button" hidden>取消编辑</button></div>
-            <p id="schedule-message" class="form-message" role="status"></p>
-          </form>
           <div class="table-wrap"><table><thead><tr><th>NAME</th><th>CRON</th><th>NEXT RUN</th><th>LAST RUN</th><th>ENABLED</th><th>ACTIONS</th></tr></thead><tbody id="schedules-body"><tr><td class="empty-row" colspan="6">Loading schedules...</td></tr></tbody></table></div>
           <div id="schedule-runs" class="schedule-runs" hidden>
             <div class="log-heading"><span id="schedule-runs-title">RUN HISTORY</span><button class="subtle-btn" id="schedule-runs-close" type="button">✕ 关闭</button></div>

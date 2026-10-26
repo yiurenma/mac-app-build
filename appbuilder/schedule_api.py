@@ -34,7 +34,7 @@ def public_schedule(row):
     run = schedules.last_run(row['id'])
     return {'id': row['id'], 'name': row['name'], 'cron': row['cron'], 'enabled': bool(row['enabled']),
             'next_run': row['next_run'], 'created': row['created'],
-            'template': {k: template.get(k) for k in schedules.BASIC_KEYS} | {'visible': bool(template.get('visible', False))},
+            'template': template,    # non-secret form values; the page re-fills the New build form from it
             'last_run': _public_run(run) if run else None}
 
 

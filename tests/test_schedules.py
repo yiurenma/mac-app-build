@@ -45,6 +45,16 @@ class ValidationTests(SchedulerCase):
         self.assertEqual(row['next_run'], '2026-10-10T11:00:00')
         self.assertEqual(json.loads(row['params'])['country'], 'UK')
 
+    def test_template_keeps_every_form_field_so_future_fields_need_no_schedule_change(self):
+        form_body = {**TEMPLATE, 'gmx_build_type': 'Release', 'poll_seconds': '60', 'gmx_force': False,
+                     'visible': False, 'verbose': True, 'some_future_form_field': 'kept', 'empty_one': ''}
+        row = schedules.create_schedule('x', '0 * * * *', form_body, now=dt(2026, 10, 10, 10, 15), config=CONFIG)
+        saved = json.loads(row['params'])
+        self.assertEqual(saved['gmx_build_type'], 'Release')
+        self.assertEqual(saved['some_future_form_field'], 'kept')
+        self.assertIs(saved['gmx_force'], False)
+        self.assertNotIn('empty_one', saved)          # empty means "use the default"
+
     def test_secrets_are_refused_not_stored(self):
         for key in ('jenkins_password', 'jenkins_user', 'github_token'):
             with self.subTest(key=key), self.assertRaisesRegex(ValueError, 'Keychain'):
@@ -54,7 +64,9 @@ class ValidationTests(SchedulerCase):
         with self.assertRaises(ValueError):
             schedules.create_schedule('x', '0 * * * *', {**TEMPLATE, 'plugin_version': 'abc'}, config=CONFIG)
         with self.assertRaises(ValueError):
-            schedules.create_schedule('x', '0 * * * *', {**TEMPLATE, 'bogus': 1}, config=CONFIG)
+            schedules.create_schedule('x', '0 * * * *', {**TEMPLATE, 'poll_seconds': {'a': 1}}, config=CONFIG)
+        with self.assertRaises(ValueError):
+            schedules.create_schedule('x', '0 * * * *', {**TEMPLATE, 'gmx_force': 'yes'}, config=CONFIG)  # real validator
         with self.assertRaises(cron.CronError):
             schedules.create_schedule('x', 'nope', dict(TEMPLATE), config=CONFIG)
         with self.assertRaisesRegex(cron.CronError, '最小'):

@@ -71,3 +71,6 @@
 .sched-link{cursor:pointer;text-decoration:underline;text-decoration-color:#3b5368}
 .schedule-runs{margin-top:22px}
 .sched-off td{opacity:.55}
+
+.schedule-block{margin:18px 0 6px;padding:16px 18px;border:1px dashed #35556a;border-radius:12px;background:#0e1b2d}
+.schedule-block .form-grid{margin-top:14px}
