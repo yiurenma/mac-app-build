@@ -69,12 +69,19 @@ jobs:
       - name: Start container (host network) and probe
         run: |
           docker run -d --name ab --network host app-builder
+          code=000
           for i in $(seq 1 30); do
             code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8765/ || true)
             [ "$code" = 200 ] && break
             sleep 2
           done
           echo "console HTTP $code"
-          docker exec ab python3 -m appbuilder scheduler status
-          docker logs ab | tail -30
+          docker ps -a
+          docker exec ab python3 -m appbuilder scheduler status || true
+          docker logs ab 2>&1 | tail -40 | while IFS= read -r line; do echo "::notice title=container log::$line"; done
           [ "$code" = 200 ]
+      - name: Scheduler heartbeat is online
+        run: |
+          sleep 20
+          docker exec ab python3 -m appbuilder scheduler status | tee /tmp/status.txt
+          grep -q "在线" /tmp/status.txt

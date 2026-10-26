@@ -8,4 +8,5 @@ COPY . .
 ENV PYTHONUNBUFFERED=1
 VOLUME ["/app/.appbuilder"]
 # Secrets come from APPBUILDER_SECRET_* env vars or *_FILE (Docker secrets), never the image.
-CMD ["sh", "-c", "python3 -m appbuilder scheduler run & exec xvfb-run -a python3 -m appbuilder web --no-open"]
+# Web first: its start-up hand-over retires "old" schedulers, so the scheduler must come after it.
+CMD ["xvfb-run", "-a", "sh", "-c", "python3 -m appbuilder web --no-open & sleep 8; exec python3 -m appbuilder scheduler run"]
