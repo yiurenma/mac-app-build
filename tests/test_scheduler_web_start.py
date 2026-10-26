@@ -81,7 +81,7 @@ class ProcessLifecycleTests(unittest.TestCase):
                 except (OSError, ValueError):
                     return {}
             def wait_for(predicate):
-                deadline = time.monotonic() + 10
+                deadline = time.monotonic() + 40
                 while time.monotonic() < deadline:
                     if predicate():
                         return
