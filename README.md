@@ -298,6 +298,8 @@ mac-app-builder/
 ```bash
 ./selftest.sh       # 推荐：自动重复三遍并写 docs/verification-logs
 .venv/bin/python -m unittest discover -s tests -v
+# 无显示器的 Linux/CI/沙箱：headed 浏览器测试需要虚拟显示，否则会连带报错
+xvfb-run -a python3 -m unittest discover -s tests
 .venv/bin/python -m compileall -q appbuilder
 ./app-build run --plugin-branch develop --plugin-version 1.3 \
   --gmx-branch develop --project-name Demo --dry-run
