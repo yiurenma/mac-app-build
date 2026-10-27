@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from playwright.sync_api import sync_playwright
 from appbuilder.testfairy import (origin,settings,expected_build,parse_candidate,share_url,mail_preview,TestFairyBrowser)
 from appbuilder.jenkins import NeedsAttention
+from chromium_path import CHROMIUM
 
 BASE='https://hsbc-mobilex.testfairy.com'
 JOB='https://gmx.corp.hsbc/job/release/job/upload%2FABC-1/'
@@ -60,7 +61,7 @@ class MetadataTests(unittest.TestCase):
 class BrowserTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.p=sync_playwright().start();cls.browser=cls.p.chromium.launch(executable_path='/usr/bin/chromium',headless=True,args=['--no-sandbox'])
+        cls.p=sync_playwright().start();cls.browser=cls.p.chromium.launch(executable_path=CHROMIUM,headless=True,args=['--no-sandbox'])
     @classmethod
     def tearDownClass(cls):cls.browser.close();cls.p.stop()
     def setUp(self):

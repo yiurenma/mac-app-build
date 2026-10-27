@@ -6,6 +6,7 @@ import unittest
 from unittest.mock import patch
 from playwright.sync_api import sync_playwright
 from appbuilder.jenkins import JenkinsBrowser, NeedsAttention, _observe_page, _dispatch_evidence
+from chromium_path import CHROMIUM
 
 JOB='https://ci.fixture.invalid/job/release/'
 class ReadinessFixtures:
@@ -15,7 +16,7 @@ class ReadinessFixtures:
         if not cls.headless and not os.environ.get('DISPLAY'):
             raise unittest.SkipTest('Headed Chromium requires DISPLAY; strict suite rejects skips')
         cls.engine=sync_playwright().start()
-        cls.browser=cls.engine.chromium.launch(executable_path='/usr/bin/chromium',headless=cls.headless,args=['--no-sandbox'])
+        cls.browser=cls.engine.chromium.launch(executable_path=CHROMIUM,headless=cls.headless,args=['--no-sandbox'])
     @classmethod
     def tearDownClass(cls):cls.browser.close();cls.engine.stop()
     def setUp(self):

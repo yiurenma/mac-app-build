@@ -2,6 +2,7 @@
 import unittest
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
 from appbuilder.jenkins import JenkinsBrowser, NeedsAttention
+from chromium_path import CHROMIUM
 
 
 class CheckboxLabels(unittest.TestCase):
@@ -10,7 +11,7 @@ class CheckboxLabels(unittest.TestCase):
         cls.engine = sync_playwright().start()
         try:
             cls.browser = cls.engine.chromium.launch(
-                executable_path='/usr/bin/chromium', headless=True, args=['--no-sandbox'])
+                executable_path=CHROMIUM, headless=True, args=['--no-sandbox'])
         except Exception:
             cls.engine.stop()
             raise

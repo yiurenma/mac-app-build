@@ -14,6 +14,7 @@ from urllib.parse import urlsplit
 from playwright.sync_api import Error, TimeoutError, sync_playwright
 from appbuilder.auth import submit_recognized_login
 from appbuilder.jenkins import JenkinsBrowser
+from chromium_path import CHROMIUM
 
 HOST = 'https://jenkins.auth-fixture.invalid'
 TARGET = HOST + '/job/release/job/feature%2Fready/42/'
@@ -27,7 +28,7 @@ class AuthReadinessFixtures:
     def setUpClass(cls):
         cls.engine = sync_playwright().start()
         try:
-            cls.browser = cls.engine.chromium.launch(executable_path='/usr/bin/chromium',
+            cls.browser = cls.engine.chromium.launch(executable_path=CHROMIUM,
                                                      headless=cls.headless, args=['--no-sandbox'])
         except Error:
             cls.engine.stop()

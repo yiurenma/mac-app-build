@@ -7,6 +7,7 @@ import unittest
 from playwright.sync_api import sync_playwright
 from appbuilder.testfairy import TestFairyBrowser
 from appbuilder.jenkins import NeedsAttention
+from chromium_path import CHROMIUM
 
 BASE='https://hsbc-mobilex.testfairy.com'
 
@@ -14,7 +15,7 @@ class ReadinessTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.engine=sync_playwright().start()
-        cls.browser=cls.engine.chromium.launch(executable_path='/usr/bin/chromium',headless=True,args=['--no-sandbox'])
+        cls.browser=cls.engine.chromium.launch(executable_path=CHROMIUM,headless=True,args=['--no-sandbox'])
     @classmethod
     def tearDownClass(cls):cls.browser.close();cls.engine.stop()
     def setUp(self):

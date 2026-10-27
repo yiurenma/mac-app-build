@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 from playwright.sync_api import sync_playwright, expect
 from appbuilder import schedules, store, web
+from chromium_path import CHROMIUM
 
 
 class SharedBuildUIFixture:
@@ -39,7 +40,7 @@ class SharedBuildUIFixture:
         self.addCleanup(self.server.server_close)
         self.addCleanup(self.server.shutdown)
         self.engine = sync_playwright().start(); self.addCleanup(self.engine.stop)
-        self.browser = self.engine.chromium.launch(executable_path='/usr/bin/chromium', headless=self.headless,
+        self.browser = self.engine.chromium.launch(executable_path=CHROMIUM, headless=self.headless,
                                                    args=['--no-sandbox'])
         self.addCleanup(self.browser.close)
         self.page = self.browser.new_page(viewport={'width': 1440, 'height': 1000})

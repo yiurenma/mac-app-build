@@ -3,6 +3,7 @@ from pathlib import Path
 from playwright.sync_api import sync_playwright
 from appbuilder.testfairy import TestFairyBrowser,parse_candidate
 from appbuilder.jenkins import NeedsAttention
+from chromium_path import CHROMIUM
 BASE='https://offline-share.testfairy.com'
 EXPECTED={'path':'IOS_Upload','folder':'IOS_Upload','number':2,'sha':'b'*40,'build_url':'https://jenkins.fixture.invalid/job/upload/2/'}
 META='3.76.0 (130425) Build number: 2 Build URL: https://jenkins.fixture.invalid/job/upload/2/ Folder Param: IOS_Upload CommitSHA: '+'b'*40
@@ -11,7 +12,7 @@ class ShareFixtures:
     @classmethod
     def setUpClass(cls):
         if not cls.headless and not os.environ.get('DISPLAY'):raise unittest.SkipTest('DISPLAY required')
-        cls.engine=sync_playwright().start();cls.browser=cls.engine.chromium.launch(executable_path='/usr/bin/chromium',headless=cls.headless,args=['--no-sandbox'])
+        cls.engine=sync_playwright().start();cls.browser=cls.engine.chromium.launch(executable_path=CHROMIUM,headless=cls.headless,args=['--no-sandbox'])
     @classmethod
     def tearDownClass(cls):cls.browser.close();cls.engine.stop()
     def setUp(self):

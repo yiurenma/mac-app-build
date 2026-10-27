@@ -4,6 +4,7 @@ import unittest
 from unittest.mock import patch,Mock
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 from appbuilder.jenkins import JenkinsBrowser,NeedsAttention,_dispatch_or_reconcile
+from chromium_path import CHROMIUM
 
 JOB='https://jenkins.invalid/job/release%252F123/'
 
@@ -11,7 +12,7 @@ class DispatchTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.engine=sync_playwright().start()
-        cls.browser=cls.engine.chromium.launch(executable_path='/usr/bin/chromium',headless=True,args=['--no-sandbox'])
+        cls.browser=cls.engine.chromium.launch(executable_path=CHROMIUM,headless=True,args=['--no-sandbox'])
     @classmethod
     def tearDownClass(cls):cls.browser.close();cls.engine.stop()
     def setUp(self):

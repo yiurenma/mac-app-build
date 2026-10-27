@@ -17,6 +17,7 @@ from unittest.mock import patch
 from playwright.sync_api import sync_playwright
 from appbuilder import jenkins
 import test_nexus_lock as nexus_fixture
+from chromium_path import CHROMIUM
 
 
 class QueueHTTPFixture:
@@ -30,7 +31,7 @@ class QueueHTTPFixture:
                         '-out',str(root/'cert'),'-days','1','-subj','/CN=localhost'],
                        check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         cls.engine = sync_playwright().start()
-        cls.browser = cls.engine.chromium.launch(executable_path='/usr/bin/chromium',
+        cls.browser = cls.engine.chromium.launch(executable_path=CHROMIUM,
             headless=not cls.headed, args=['--no-sandbox'])
         cls.cert, cls.key = root/'cert', root/'key'
 

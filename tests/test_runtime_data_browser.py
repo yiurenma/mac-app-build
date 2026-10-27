@@ -10,6 +10,7 @@ from pathlib import Path
 from unittest.mock import patch
 from playwright.sync_api import sync_playwright
 from appbuilder import web
+from chromium_path import CHROMIUM
 
 A='202610141200-abcdef';B='202610141201-abcdef'
 class RuntimeBrowserTests(unittest.TestCase):
@@ -29,7 +30,7 @@ class RuntimeBrowserTests(unittest.TestCase):
                     with sync_playwright() as p:
                         for visible in (False,True):
                             with self.subTest(visible=visible):
-                                browser=p.chromium.launch(executable_path='/usr/bin/chromium',headless=not visible,args=['--no-sandbox'])
+                                browser=p.chromium.launch(executable_path=CHROMIUM,headless=not visible,args=['--no-sandbox'])
                                 context=browser.new_context(viewport={'width':1440,'height':1050},permissions=['clipboard-read','clipboard-write'])
                                 page=context.new_page();page.route('**/api/bootstrap',lambda route:route.fulfill(status=400,json={'error':'fixture'}))
                                 base=f'http://127.0.0.1:{server.server_port}'

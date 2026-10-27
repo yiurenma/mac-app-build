@@ -7,6 +7,7 @@ from unittest.mock import patch
 from playwright.sync_api import sync_playwright
 from appbuilder.testfairy import TestFairyBrowser, parse_candidate
 from appbuilder.jenkins import NeedsAttention
+from chromium_path import CHROMIUM
 
 BASE='https://hsbc-mobilex.testfairy.com'
 EXPECTED={'path':'IOS_Upload/IOS_Develop/0_A_UK_PayByBank','folder':'0_A_UK_PayByBank','number':2,
@@ -26,7 +27,7 @@ class VersionTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.engine=sync_playwright().start()
-        cls.browser=cls.engine.chromium.launch(executable_path='/usr/bin/chromium',headless=True,args=['--no-sandbox'])
+        cls.browser=cls.engine.chromium.launch(executable_path=CHROMIUM,headless=True,args=['--no-sandbox'])
     @classmethod
     def tearDownClass(cls):cls.browser.close();cls.engine.stop()
     def setUp(self):

@@ -10,6 +10,7 @@ import unittest
 from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
 from playwright.sync_api import sync_playwright
 from appbuilder.jenkins import JenkinsBrowser
+from chromium_path import CHROMIUM
 
 class ModeTimingTests(unittest.TestCase):
     @classmethod
@@ -50,7 +51,7 @@ class ModeTimingTests(unittest.TestCase):
         self.addCleanup(self.server.server_close);self.addCleanup(self.server.shutdown)
         self.job=f'https://127.0.0.1:{self.server.server_port}/job/demo/'
     def worker(self,headless=True,slow_mo=0):
-        browser=self.engine.chromium.launch(executable_path='/usr/bin/chromium',headless=headless,slow_mo=slow_mo,args=['--no-sandbox'])
+        browser=self.engine.chromium.launch(executable_path=CHROMIUM,headless=headless,slow_mo=slow_mo,args=['--no-sandbox'])
         self.addCleanup(browser.close)
         context=browser.new_context(ignore_https_errors=True);self.addCleanup(context.close)
         worker=JenkinsBrowser.__new__(JenkinsBrowser);worker.page=context.new_page();worker.site='plugin';worker.visible=not headless

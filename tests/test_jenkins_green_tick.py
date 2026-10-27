@@ -3,6 +3,7 @@ import unittest
 from types import SimpleNamespace
 from playwright.sync_api import sync_playwright
 from appbuilder.jenkins import JenkinsBrowser, result_from_status_markup
+from chromium_path import CHROMIUM
 
 
 PAGE_TEMPLATE = '''
@@ -26,7 +27,7 @@ class JenkinsGreenTickDOMTests(unittest.TestCase):
     def setUpClass(cls):
         cls.playwright = sync_playwright().start()
         cls.browser = cls.playwright.chromium.launch(
-            executable_path='/usr/bin/chromium', headless=True, args=['--no-sandbox'])
+            executable_path=CHROMIUM, headless=True, args=['--no-sandbox'])
 
     @classmethod
     def tearDownClass(cls):
