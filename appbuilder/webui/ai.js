@@ -17,7 +17,8 @@ function render(s){
   f.provider.value=cop?'copilot':'local';
   el('ai-local-block').hidden=cop;el('ai-copilot-block').hidden=!cop;
   el('ai-provider-help').textContent=cop?'VS Code 插件：'+(s.copilot&&s.copilot.note||'未知'):'模型在这台 Mac 上运行，不联网。';
-  f.enabled.checked=!!s.enabled;f.tester_note.checked=s.features.tester_note!==false;f.failure_hint.checked=s.features.failure_hint!==false;
+  f.enabled.checked=!!s.enabled;f.tester_note.checked=s.features.tester_note!==false;f.failure_hint.checked=s.features.failure_hint!==false;f.pr_context.checked=s.features.pr_context!==false;
+  el('ai-pr-context-row').hidden=!cop;
   const parts=[];
   if(cop){
     parts.push('VS Code 插件：'+((s.copilot&&s.copilot.ok)?'在运行':'未检测到'));
@@ -51,7 +52,7 @@ function init(){
   if(!el('ai-form'))return;
   el('ai-install').addEventListener('click',()=>post('/api/ai/install',{model:el('ai-model').value}));
   el('ai-use-file').addEventListener('click',()=>post('/api/ai/use-file',{path:el('ai-path').value}));
-  for(const name of ['enabled','tester_note','failure_hint']){
+  for(const name of ['enabled','tester_note','failure_hint','pr_context']){
     el('ai-form').elements[name].addEventListener('change',async e=>{
       if(!await post('/api/ai/settings',{[name]:e.target.checked}))e.target.checked=!e.target.checked;
       else toast('已保存');
@@ -67,6 +68,19 @@ function init(){
   el('ai-provider').addEventListener('change',async e=>{
     if(await post('/api/ai/settings',{provider:e.target.value}))toast('已保存');
   });
+  async function tryPr(send){
+    const url=el('ai-pr-url').value.trim();
+    if(!url){el('ai-log').textContent='先粘贴一个 PR 链接';return;}
+    el('ai-log').textContent=send?'读取 PR 并交给 AI（Copilot 第一次可能要你在 VS Code 里点“允许”）…':'读取 PR…';
+    try{
+      const r=await api('/api/ai/try-pr',{method:'POST',body:JSON.stringify({url,send})});
+      const st=r.stats||{};
+      const scope=r.full_context?('标题、描述、'+(st.commits||0)+' 条提交、'+(st.files||0)+' 个文件、'+(st.patched||0)+' 段代码差异'):'标题和描述';
+      el('ai-log').textContent=(send?'For testers:\n  '+r.tester_note+'\n\n':'')+'发给：'+r.to+'；内容：'+scope+'；共约 '+r.chars+' 字'+(r.cut?'（下面只显示前 6000 字）':'')+'\n\n'+r.sent;
+    }catch(e){el('ai-log').textContent=e.message;}
+  }
+  el('ai-pr-preview').addEventListener('click',()=>tryPr(false));
+  el('ai-pr-try').addEventListener('click',()=>tryPr(true));
   el('ai-form').addEventListener('submit',e=>e.preventDefault());
   const wait=setInterval(()=>{if(typeof state!=='undefined'&&state.csrf){clearInterval(wait);load();}},300);
 }

@@ -438,6 +438,47 @@ class SharedBuildUITests(SharedBuildUIFixture, unittest.TestCase):
         self.assertEqual(posts,[('settings',{'provider':'copilot'}),('settings',{'enabled':True}),('settings',{'provider':'local'})])
         self.assertFalse(self.errors,self.errors)
 
+    def test_ai_card_tries_one_real_pr_with_preview_and_result(self):
+        p=self.page;posts=[]
+        st={'enabled':True,'provider':'copilot','copilot':{'ok':True,'note':'插件在运行'},'model':'','model_path':'','model_ok':False,
+            'model_note':'','runtime':'','features':{'tester_note':True,'failure_hint':True,'pr_context':True},
+            'models':{'phi4-mini':{'label':'x','licence':'MIT','source':'https://e.com'}},'model_dir':'/m','job':{'running':False,'log':[]}}
+        def handle(route):
+            path=route.request.url.split('/api/ai/')[1]
+            if route.request.method=='POST':
+                body=json.loads(route.request.post_data or '{}');posts.append((path,body))
+                if path=='try-pr':
+                    if 'bad' in body['url']:
+                        return route.fulfill(status=400,json={'error':'请粘贴 PR 链接'})
+                    out={'to':'VS Code Copilot','title':'T','full_context':True,'stats':{'commits':2,'files':3,'patched':2},
+                         'chars':1234,'sent':'Title: T\nChanged files:\n- A.swift','cut':False}
+                    if body.get('send',True): out['tester_note']='Check the consent screen.'
+                    return route.fulfill(json=out)
+            return route.fulfill(json=st)
+        p.route('**/api/ai/**',handle)
+        p.reload();expect(p.locator('#plugin-branches option')).to_have_count(101)
+        self.show('settings')
+        expect(p.locator('#ai-pr-context-row')).to_be_visible()
+        p.locator('#ai-pr-url').fill('')
+        p.locator('#ai-pr-try').click()
+        expect(p.locator('#ai-log')).to_contain_text('先粘贴一个 PR 链接')
+        p.locator('#ai-pr-url').fill('https://git.example.com/o/r/pull/9')
+        p.locator('#ai-pr-preview').click()
+        expect(p.locator('#ai-log')).to_contain_text('2 条提交、3 个文件、2 段代码差异')
+        expect(p.locator('#ai-log')).to_contain_text('A.swift')
+        expect(p.locator('#ai-log')).not_to_contain_text('For testers')
+        p.locator('#ai-pr-try').click()
+        expect(p.locator('#ai-log')).to_contain_text('For testers:')
+        expect(p.locator('#ai-log')).to_contain_text('Check the consent screen.')
+        p.locator('#ai-pr-url').fill('bad')
+        p.locator('#ai-pr-try').click()
+        expect(p.locator('#ai-log')).to_contain_text('请粘贴 PR 链接')
+        p.locator('#ai-form [name=pr_context]').uncheck()
+        self.assertEqual([x for x in posts if x[0]=='try-pr'][:2],
+                         [('try-pr',{'url':'https://git.example.com/o/r/pull/9','send':False}),('try-pr',{'url':'https://git.example.com/o/r/pull/9','send':True})])
+        self.assertIn(('settings',{'pr_context':False}),posts)
+        self.assertFalse(self.errors,self.errors)
+
     def test_jira_panel_saves_mail_settings_and_sends_a_test_email(self):
         p=self.page;posts={}
         settings={'settings':{'enabled':True,'dry_run':True,'base_url':'https://jira.example.com','transition_name':'In Test',

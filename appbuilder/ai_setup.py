@@ -45,7 +45,7 @@ MODELS = {
 }
 DEFAULT_MODEL = 'phi4-mini'
 PROVIDERS = ('local', 'copilot')      # local GGUF model, or VS Code Copilot through the bridge extension
-FEATURES = ('tester_note', 'failure_hint')
+FEATURES = ('tester_note', 'failure_hint', 'pr_context')
 _JOB_LOCK = threading.Lock()
 _JOB = {'running': False, 'step': '', 'progress': None, 'log': [], 'error': '', 'finished': ''}
 
@@ -91,6 +91,7 @@ def effective(config):
         ai['provider'] = 'local'
     ai.setdefault('tester_note', True)
     ai.setdefault('failure_hint', True)
+    ai.setdefault('pr_context', True)
     ai['model'] = page.get('model', '')
     return ai
 

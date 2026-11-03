@@ -144,16 +144,27 @@ def clean_sentence(text, source, limit=220):
     return text
 
 
-def tester_note(llm, title, body=''):
+def tester_note_prompt(title, body='', extra='', rich=False):
+    """(system, user, source) exactly as sent. `extra` (commits, files, diff) is only used for
+    models that can take it (rich); small local models keep the short input."""
+    cap = 8000 if rich else 2500
+    extra = (extra or '')[:30000] if rich else ''
+    system = ('You help software testers. From a pull request, write ONE plain English sentence (max 30 '
+              'words) saying what changed and what a tester should check. Use only facts in the text. '
+              'No links, no ticket numbers, no markdown. Output only JSON: {"note": "<sentence>"}.')
+    user = f'Title: {title}\nDescription:\n{(body or "")[:cap]}'
+    if extra:
+        system = system.replace('Use only facts in the text.', 'The text also lists commits, changed files and code changes. Use only facts in the text.')
+        user += '\n\n' + extra
+    return system, user, f'{title}\n{(body or "")[:cap]}\n{extra}'
+
+
+def tester_note(llm, title, body='', extra=''):
     """One sentence for testers: what changed and what to check. None when unsure."""
     if not llm or not (title or '').strip():
         return None
-    source = f'{title}\n{(body or "")[:2500]}'
-    data = llm.ask_json(
-        'You help software testers. From a pull request, write ONE plain English sentence (max 30 '
-        'words) saying what changed and what a tester should check. Use only facts in the text. '
-        'No links, no ticket numbers, no markdown. Output only JSON: {"note": "<sentence>"}.',
-        f'Title: {title}\nDescription:\n{(body or "")[:2500]}')
+    system, user, source = tester_note_prompt(title, body, extra, rich=bool(getattr(llm, 'rich', False)))
+    data = llm.ask_json(system, user)
     return clean_sentence((data or {}).get('note'), source)
 
 

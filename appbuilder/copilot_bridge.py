@@ -73,6 +73,7 @@ def check(info=None):
 
 class CopilotLLM:
     model_path = None
+    rich = True            # big context: can be given the whole pull request
 
     def __init__(self, info=None, timeout=TIMEOUT):
         self.info, self.timeout = info, timeout

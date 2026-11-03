@@ -241,6 +241,7 @@ def tickets_from_commits(commits, pattern, llm=None, prs=None):
             for key in dict.fromkeys(regex.findall(text or '')):
                 info = found.setdefault(key, {**c, 'subject': (pr['title'] if pr and pr['title'] else c['subject']),
                                               'pr_body': (pr.get('body') or '') if pr else '',
+                                              'pr_number': pr.get('number') if pr else None,
                                               'source': name, 'refs': []})
                 if all(r['sha'] != ref['sha'] for r in info['refs']):
                     info['refs'].append(ref)
@@ -557,7 +558,8 @@ def process_ticket(client, key, info, link, build_label, conf, llm, dry_run, gmx
     if conf.get('ai_tester_note') and llm:
         from .local_llm import tester_note
         try:
-            note = tester_note(llm, _without_key(info.get('subject', ''), key), info.get('pr_body') or info.get('body', ''))
+            note = tester_note(llm, _without_key(info.get('subject', ''), key), info.get('pr_body') or info.get('body', ''),
+                               info.get('pr_context', ''))
         except Exception:
             note = None
     if note:
@@ -699,6 +701,19 @@ def _notify_jira(task_id, client=None, llm=None, config=None, preview=None):
     repo_url = repo_web_url(params.get('plugin_url') or (config.get('github') or {}).get('plugin_url', ''))
     for info in found.values():
         info['repo_url'] = repo_url
+    if prs and getattr(llm, 'rich', False) and hasattr(prs, 'repo_get') and \
+            (feature_on(config, 'pr_context') or preview is not None):
+        from .pr_context import fetch
+        context_cache = {}
+        for info in found.values():
+            number = info.get('pr_number')
+            if number and conf.get('ai_tester_note'):
+                if number not in context_cache:
+                    try:
+                        context_cache[number] = fetch(prs.repo_get, number)[0]
+                    except Exception:  # noqa: BLE001 - the note just uses title and description
+                        context_cache[number] = ''
+                info['pr_context'] = context_cache[number]
     keys = list(found)                       # every mentioned ticket; only unknown keys are skipped
     if len(keys) > conf['max_tickets_per_run']:
         action('JIRA', f'本次提到 {len(keys)} 张 ticket，超过提醒值 {conf["max_tickets_per_run"]}；仍全部处理')

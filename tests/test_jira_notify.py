@@ -321,6 +321,49 @@ class GitAndFlowTests(unittest.TestCase):
             if code == 500:
                 self.assertNotIsInstance(caught.exception, J.JiraNotFound)
 
+    def test_copilot_style_llm_gets_the_whole_pull_request_but_a_small_model_does_not(self):
+        asked = []
+
+        class LLM:
+            def __init__(self, rich): self.rich = rich
+            def ask_json(self, system, user):
+                asked.append((self.rich, user)); return {'note': 'Check the first fix on the login screen.'}
+
+        class RichPRs(FakePRs):
+            def __init__(self, *a, **k):
+                one = {'number': 7, 'title': 'PBB-1 fix login', 'body': 'Fixes the login title.', 'head': 'f', 'author': ''}
+                super().__init__({sha: one for sha in self.shas})
+            def repo_get(self, path):
+                return [{'commit': {'message': 'PBB-1 first'}}] if 'commits' in path else \
+                       [{'filename': 'Login.swift', 'status': 'modified', 'additions': 1, 'deletions': 0, 'patch': '+title = "Hi"'}]
+            def display_name(self, login): return login
+            error = None
+
+        def run(rich, features=None):
+            data = Path(self.tmp.name) / f'data-{int(rich)}'
+            data.mkdir()
+            row = {'status': 'SUCCESS', 'params': json.dumps({'plugin_source': 'develop', 'plugin_url': 'https://github.example.com/org/plugin'})}
+            state = {'runtime': {'plugin_source_sha': self.shas[2], 'gmx_build_number': 7, 'testfairy_app': {'share_url': 'https://tf/app'}}}
+            RichPRs.shas = self.shas
+            with patch.object(J, 'LEDGER', data / 'l.json'), patch.object(J, 'task', return_value=row), \
+                    patch.object(J, 'read_state', return_value=state), patch.object(J, 'task_folder', return_value=Path(self.tmp.name)), \
+                    patch.object(J, 'patch_runtime'), patch.object(J, 'PRLookup', RichPRs), \
+                    patch('appbuilder.config.token_or_error', return_value='t'):
+                return J.notify_jira('T1', client=FakeJira(), llm=LLM(rich), preview=5,
+                                     config={'jira': {'enabled': False, 'base_url': 'https://j.example.com'}, 'github': {'plugin_url': 'https://github.example.com/org/plugin'}})
+
+        report = run(rich=True)
+        rich_user = [u for r, u in asked if r][0]
+        self.assertIn('Fixes the login title.', rich_user)
+        self.assertIn('Login.swift (modified, +1 -0)', rich_user)
+        self.assertIn('PBB-1 first', rich_user)
+        self.assertEqual(report['tickets'][0]['tester_note'], 'Check the first fix on the login screen.')
+        asked.clear()
+        run(rich=False)
+        small_user = asked[0][1]
+        self.assertIn('Fixes the login title.', small_user)
+        self.assertNotIn('Login.swift', small_user)
+
     def test_preview_reads_recent_commits_and_never_writes(self):
         jira = FakeJira()
         data = Path(self.tmp.name) / 'data'
