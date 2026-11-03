@@ -21,7 +21,7 @@ Terminal alternative: `./app-build vscode-bridge install | status | uninstall`.
 - `POST /ask {system, user}` → `vscode.lm.selectChatModels({vendor:'copilot'})` → answer text.
 - Every request needs `Authorization: Bearer <token>` and a loopback `Host`; any request with an
   `Origin` header (i.e. from a web page) is refused. Questions are handled one at a time.
-- VS Code must be open and signed in. If it is not, APP Builder silently falls back to its plain rules.
+- VS Code must be running and signed in when the AI is asked. If it is closed, APP Builder opens it in the background (`open -g -j -a "Visual Studio Code"` on a Mac; switch off in Settings), waits up to ~60 s for the extension, and otherwise silently falls back to its plain rules (no retry for 5 minutes).
 
 Settings: `appBuilderBridge.enabled`, `appBuilderBridge.vendor` (default `copilot`), `appBuilderBridge.family`.
 

@@ -9,6 +9,11 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
+import subprocess
+import sys
+import threading
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -17,6 +22,10 @@ from .telemetry import action, safe_text
 
 INFO = Path(os.environ.get('APP_BUILDER_BRIDGE_INFO') or Path.home() / '.app-builder' / 'vscode-bridge.json')
 TIMEOUT = 100
+START_WAIT = float(os.environ.get('APP_BUILDER_VSCODE_WAIT') or 60)    # seconds to wait for a cold start
+RETRY_AFTER = 300                                                     # do not relaunch more often than this after a failure
+_START_LOCK = threading.Lock()
+_LAST_FAILED = [0.0]
 EXTENSION_DIR = Path(__file__).resolve().parent.parent / 'vscode-extension'
 
 
@@ -71,19 +80,76 @@ def check(info=None):
     return {'ok': True, 'note': '插件在运行'}
 
 
+def _launch_command():
+    """Command that opens VS Code in the background, or None. APP_BUILDER_VSCODE_LAUNCH overrides."""
+    custom = os.environ.get('APP_BUILDER_VSCODE_LAUNCH')
+    if custom:
+        import shlex
+        return shlex.split(custom)
+    if sys.platform == 'darwin':
+        for name in ('Visual Studio Code', 'Visual Studio Code - Insiders'):
+            if any(os.path.isdir(os.path.join(base, name + '.app'))
+                   for base in ('/Applications', os.path.expanduser('~/Applications'))):
+                return ['open', '-g', '-j', '-a', name]      # background and hidden: no focus stealing
+        return None
+    code = shutil.which('code')
+    return [code] if code else None
+
+
+def ensure_running(wait=None, *, sleep=time.sleep, now=time.monotonic):
+    """True when the extension answers. Opens VS Code in the background if it is not running,
+    then waits for the extension. After a failed attempt it does not try again for a while,
+    so one closed VS Code cannot slow down every ticket."""
+    if check()['ok']:
+        return True
+    with _START_LOCK:
+        if check()['ok']:
+            return True
+        if _LAST_FAILED[0] and now() - _LAST_FAILED[0] < RETRY_AFTER:
+            return False
+        command = _launch_command()
+        if not command:
+            _LAST_FAILED[0] = now()
+            return False
+        action('AI', '正在后台打开 VS Code，等待 Copilot 插件就绪…')
+        try:
+            subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                             start_new_session=True)
+        except OSError as exc:
+            action('AI', safe_text(f'无法打开 VS Code: {exc}; 使用纯规则'))
+            _LAST_FAILED[0] = now()
+            return False
+        deadline = now() + (START_WAIT if wait is None else wait)
+        while now() < deadline:
+            if check()['ok']:
+                _LAST_FAILED[0] = 0.0
+                return True
+            sleep(1)
+        action('AI', 'VS Code 没有在时限内就绪（可能还没登录 Copilot）；使用纯规则')
+        _LAST_FAILED[0] = now()
+        return False
+
+
 class CopilotLLM:
     model_path = None
     rich = True            # big context: can be given the whole pull request
 
-    def __init__(self, info=None, timeout=TIMEOUT):
-        self.info, self.timeout = info, timeout
+    def __init__(self, info=None, timeout=TIMEOUT, auto_start=False):
+        self.info, self.timeout, self.auto_start = info, timeout, auto_start
 
     def available(self):
         return check(self.info)['ok']
 
+    def _ready(self):
+        if check(self.info)['ok']:
+            return True
+        return bool(self.auto_start and self.info is None and ensure_running())
+
     def ask_json(self, system, user):
         """Parsed JSON object or None. The model is asked for JSON in the prompt itself."""
         try:
+            if not self._ready():
+                raise ConnectionError('VS Code 插件没有响应')
             out = _call('POST', '/ask', {'system': system, 'user': user}, timeout=self.timeout, info=self.info)
             text = str(out.get('text') or '')
             match = re.search(r'\{.*\}', text, re.S)

@@ -84,7 +84,8 @@ def get_llm(config):
         return None
     if ai.get('provider') == 'copilot':
         from .copilot_bridge import CopilotLLM
-        return _CACHE.setdefault(('copilot',), CopilotLLM())
+        auto = bool(ai.get('auto_start_vscode', True))
+        return _CACHE.setdefault(('copilot', auto), CopilotLLM(auto_start=auto))
     path = ai.get('model_path') or ''
     if not path:
         return None

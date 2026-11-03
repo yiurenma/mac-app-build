@@ -17,8 +17,8 @@ function render(s){
   f.provider.value=cop?'copilot':'local';
   el('ai-local-block').hidden=cop;el('ai-copilot-block').hidden=!cop;
   el('ai-provider-help').textContent=cop?'VS Code 插件：'+(s.copilot&&s.copilot.note||'未知'):'模型在这台 Mac 上运行，不联网。';
-  f.enabled.checked=!!s.enabled;f.tester_note.checked=s.features.tester_note!==false;f.failure_hint.checked=s.features.failure_hint!==false;f.pr_context.checked=s.features.pr_context!==false;
-  el('ai-pr-context-row').hidden=!cop;
+  f.enabled.checked=!!s.enabled;f.tester_note.checked=s.features.tester_note!==false;f.failure_hint.checked=s.features.failure_hint!==false;f.pr_context.checked=s.features.pr_context!==false;f.auto_start_vscode.checked=s.features.auto_start_vscode!==false;
+  el('ai-pr-context-row').hidden=!cop;el('ai-autostart-row').hidden=!cop;
   const parts=[];
   if(cop){
     parts.push('VS Code 插件：'+((s.copilot&&s.copilot.ok)?'在运行':'未检测到'));
@@ -52,7 +52,7 @@ function init(){
   if(!el('ai-form'))return;
   el('ai-install').addEventListener('click',()=>post('/api/ai/install',{model:el('ai-model').value}));
   el('ai-use-file').addEventListener('click',()=>post('/api/ai/use-file',{path:el('ai-path').value}));
-  for(const name of ['enabled','tester_note','failure_hint','pr_context']){
+  for(const name of ['enabled','tester_note','failure_hint','pr_context','auto_start_vscode']){
     el('ai-form').elements[name].addEventListener('change',async e=>{
       if(!await post('/api/ai/settings',{[name]:e.target.checked}))e.target.checked=!e.target.checked;
       else toast('已保存');

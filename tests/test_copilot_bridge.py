@@ -149,6 +149,95 @@ class SettingsTests(unittest.TestCase):
                              'Check the consent screen and a full transfer.')
 
 
+class AutoStartTests(unittest.TestCase):
+    """VS Code is opened in the background when the AI needs it - like the browser for builds."""
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(); self.addCleanup(self.tmp.cleanup)
+        self.info = Path(self.tmp.name) / 'bridge.json'
+        for p in (patch.object(copilot_bridge, 'INFO', self.info), patch.dict(os.environ, {}, clear=False)):
+            p.start(); self.addCleanup(p.stop)
+        os.environ.pop('APP_BUILDER_VSCODE_LAUNCH', None)
+        copilot_bridge._LAST_FAILED[0] = 0.0; self.addCleanup(lambda: copilot_bridge._LAST_FAILED.__setitem__(0, 0.0))
+        self.launches = []
+        self.bridges = []
+
+    def fake_popen(self, start_bridge=True):
+        def popen(command, **kwargs):
+            self.launches.append((command, kwargs))
+            if start_bridge:
+                b = FakeBridge(lambda body: (200, {'text': '{"note": "Check login."}'})); self.bridges.append(b)
+                self.addCleanup(b.close)
+                b.info_file(self.tmp.name)               # the extension writes bridge.json once VS Code is up
+        return patch.object(copilot_bridge.subprocess, 'Popen', popen)
+
+    def test_launch_command_is_background_and_hidden_on_a_mac(self):
+        with tempfile.TemporaryDirectory() as apps:
+            (Path(apps) / 'Visual Studio Code.app').mkdir()
+            with patch.object(copilot_bridge.sys, 'platform', 'darwin'), patch.object(copilot_bridge.os.path, 'expanduser', lambda p: apps), \
+                    patch.object(copilot_bridge.os.path, 'isdir', lambda p: Path(p).is_dir() and str(p).startswith(apps)):
+                self.assertEqual(copilot_bridge._launch_command(), ['open', '-g', '-j', '-a', 'Visual Studio Code'])
+            with patch.object(copilot_bridge.sys, 'platform', 'darwin'), patch.object(copilot_bridge.os.path, 'isdir', lambda p: False):
+                self.assertIsNone(copilot_bridge._launch_command())
+        with patch.dict(os.environ, {'APP_BUILDER_VSCODE_LAUNCH': 'my-launcher --quiet'}):
+            self.assertEqual(copilot_bridge._launch_command(), ['my-launcher', '--quiet'])
+
+    def test_ask_opens_vscode_waits_for_the_extension_and_answers(self):
+        with patch.dict(os.environ, {'APP_BUILDER_VSCODE_LAUNCH': 'launcher'}), self.fake_popen():
+            out = copilot_bridge.CopilotLLM(auto_start=True).ask_json('s', 'u')
+        self.assertEqual(out, {'note': 'Check login.'})
+        self.assertEqual(len(self.launches), 1)
+        self.assertEqual(self.launches[0][0], ['launcher'])
+        self.assertTrue(self.launches[0][1]['start_new_session'])          # survives this process, not tied to it
+
+    def test_not_launched_when_already_running_or_switched_off(self):
+        b = FakeBridge(lambda body: (200, {'text': '{"a": 1}'})); self.addCleanup(b.close)
+        b.info_file(self.tmp.name)
+        with patch.dict(os.environ, {'APP_BUILDER_VSCODE_LAUNCH': 'launcher'}), self.fake_popen():
+            self.assertEqual(copilot_bridge.CopilotLLM(auto_start=True).ask_json('s', 'u'), {'a': 1})
+        self.assertEqual(self.launches, [])
+        self.info.unlink()
+        with patch.dict(os.environ, {'APP_BUILDER_VSCODE_LAUNCH': 'launcher'}), self.fake_popen():
+            self.assertIsNone(copilot_bridge.CopilotLLM(auto_start=False).ask_json('s', 'u'))
+        self.assertEqual(self.launches, [])
+
+    def test_failure_falls_back_quietly_and_is_not_retried_for_a_while(self):
+        clock = [1000.0]
+        def sleep(n): clock[0] += n
+        def now(): return clock[0]
+        with patch.dict(os.environ, {'APP_BUILDER_VSCODE_LAUNCH': 'launcher'}), self.fake_popen(start_bridge=False):
+            self.assertFalse(copilot_bridge.ensure_running(5, sleep=sleep, now=now))
+            self.assertEqual(len(self.launches), 1)
+            self.assertGreaterEqual(clock[0] - 1000, 5)                      # waited, then gave up
+            self.assertFalse(copilot_bridge.ensure_running(5, sleep=sleep, now=now))   # still inside the cool-down
+            self.assertEqual(len(self.launches), 1)
+            clock[0] += copilot_bridge.RETRY_AFTER + 1
+            copilot_bridge.ensure_running(1, sleep=sleep, now=now)
+            self.assertEqual(len(self.launches), 2)
+
+    def test_no_way_to_launch_means_no_ai_not_an_error(self):
+        with patch.object(copilot_bridge, '_launch_command', return_value=None):
+            self.assertIsNone(copilot_bridge.CopilotLLM(auto_start=True).ask_json('s', 'u'))
+        with patch.dict(os.environ, {'APP_BUILDER_VSCODE_LAUNCH': 'x'}), patch.object(copilot_bridge.subprocess, 'Popen', side_effect=OSError('nope')):
+            copilot_bridge._LAST_FAILED[0] = 0.0
+            self.assertIsNone(copilot_bridge.CopilotLLM(auto_start=True).ask_json('s', 'u'))
+
+    def test_setting_controls_the_flag_and_defaults_on(self):
+        with patch.object(ai_setup, 'SETTINGS_FILE', Path(self.tmp.name) / 'ai.json'):
+            ai_setup.save({'enabled': True, 'provider': 'copilot'})
+            local_llm._CACHE.clear()
+            self.assertTrue(local_llm.get_llm({}).auto_start)
+            ai_setup.save({'auto_start_vscode': False})
+            local_llm._CACHE.clear()
+            self.assertFalse(local_llm.get_llm({}).auto_start)
+            local_llm._CACHE.clear()
+
+    def test_the_settings_status_check_never_launches_anything(self):
+        with patch.dict(os.environ, {'APP_BUILDER_VSCODE_LAUNCH': 'launcher'}), self.fake_popen():
+            self.assertFalse(copilot_bridge.check()['ok'])
+            self.assertFalse(copilot_bridge.CopilotLLM().available())
+        self.assertEqual(self.launches, [])
+
+
 class InstallerTests(unittest.TestCase):
     def test_install_copies_the_extension_and_replaces_old_versions(self):
         with tempfile.TemporaryDirectory() as home:

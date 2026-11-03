@@ -36,6 +36,31 @@ def free_port():
         return s.getsockname()[1]
 
 
+def serve_forever(code_server, work):
+    """Stand-in for `open -g -j -a "Visual Studio Code"`: start VS Code's core and a client, stay up."""
+    work = Path(work)
+    port = free_port()
+    env = {**os.environ, 'HOME': str(work)}
+    server = subprocess.Popen([code_server, '--auth', 'none', '--bind-addr', f'127.0.0.1:{port}',
+                               '--user-data-dir', str(work / 'user'), '--extensions-dir', str(work / 'ext'),
+                               '--disable-telemetry', '--disable-update-check', str(work)], env=env,
+                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    for _ in range(60):
+        try:
+            urllib.request.urlopen(f'http://127.0.0.1:{port}/healthz', timeout=2).read()
+            break
+        except OSError:
+            time.sleep(1)
+    from playwright.sync_api import sync_playwright
+    sys.path.insert(0, str(ROOT / 'tests'))
+    from chromium_path import CHROMIUM
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=CHROMIUM, headless=True, args=['--no-sandbox'])
+        browser.new_page().goto(f'http://127.0.0.1:{port}/?folder={work}')
+        time.sleep(3600)
+    server.terminate()
+
+
 def main(code_server):
     work = Path(tempfile.mkdtemp(prefix='bridge-e2e-'))
     ext_dir, user_dir = work / 'ext', work / 'user'
@@ -113,10 +138,42 @@ def main(code_server):
         log.close()
     # code-server kills its extension host hard, so the file may remain; the client must then ignore it.
     check('after VS Code exits the client no longer sees a bridge', not copilot_bridge.check(info)['ok'])
+    # Phase 2: VS Code is closed; the AI asks, the launcher opens it, the question is answered.
+    launcher = subprocess.list2cmdline([sys.executable, str(Path(__file__).resolve()), '--launch', code_server, str(work)])
+    import shlex
+    launch_env = {'APP_BUILDER_BRIDGE_INFO': str(info), 'APP_BUILDER_VSCODE_LAUNCH': ' '.join(
+        shlex.quote(x) for x in [sys.executable, str(Path(__file__).resolve()), '--launch', code_server, str(work)]),
+        'APP_BUILDER_VSCODE_WAIT': '120', 'HOME': str(work)}
+    copilot_bridge.INFO = info
+    copilot_bridge._LAST_FAILED[0] = 0.0
+    old = {k: os.environ.get(k) for k in launch_env}
+    os.environ.update(launch_env)
+    copilot_bridge.START_WAIT = 120
+    started = time.time()
+    try:
+        answer = copilot_bridge.CopilotLLM(auto_start=True, timeout=90).ask_json('Output only JSON.', 'auto start please')
+    finally:
+        for k, v in old.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+    check('AI call with VS Code closed opens it by itself and gets an answer', bool(answer) and answer.get('note', '').startswith('FAKE:'), answer)
+    print(f'     (cold start + answer took {time.time() - started:.0f}s)')
+    import signal
+    for line in subprocess.run(['pgrep', '-f', 'run.py --launch'], capture_output=True, text=True).stdout.split():
+        try:
+            os.kill(int(line), signal.SIGKILL)
+        except (ProcessLookupError, ValueError):
+            pass
+    subprocess.run(['pkill', '-9', '-f', str(work)], capture_output=True)
     shutil.rmtree(work, ignore_errors=True)
     print('RESULT: ' + ('FAILED ' + ', '.join(failures) if failures else 'all passed'))
     return 1 if failures else 0
 
 
 if __name__ == '__main__':
-    sys.exit(main(sys.argv[1]))
+    if sys.argv[1] == '--launch':
+        serve_forever(sys.argv[2], sys.argv[3])
+    else:
+        sys.exit(main(sys.argv[1]))
