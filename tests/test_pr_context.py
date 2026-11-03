@@ -174,3 +174,10 @@ class TicketFocusTests(unittest.TestCase):
     def test_wiki_text_escapes_hyphen_so_no_strikethrough(self):
         from appbuilder import jira_notify
         self.assertEqual(jira_notify.wiki_text('A-1: x - y'), 'A\\-1: x \\- y')
+
+    def test_ticket_description_goes_to_rich_models_only(self):
+        _, rich, source = local_llm.tester_note_prompt('PR', 'b', rich=True, ticket='Greyed', ticket_body='Steps: enter amount then pick bank')
+        _, small, _ = local_llm.tester_note_prompt('PR', 'b', rich=False, ticket='Greyed', ticket_body='Steps: enter amount then pick bank')
+        self.assertIn('Ticket description:\nSteps: enter amount', rich)
+        self.assertNotIn('Ticket description', small)
+        self.assertIn('enter amount', source)

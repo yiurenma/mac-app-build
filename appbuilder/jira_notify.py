@@ -570,7 +570,8 @@ def process_ticket(client, key, info, link, build_label, conf, llm, dry_run, gmx
         from .local_llm import tester_note
         try:
             note = tester_note(llm, _without_key(info.get('subject', ''), key), info.get('pr_body') or info.get('body', ''),
-                               info.get('pr_context', ''), ticket=result['summary'])
+                               info.get('pr_context', ''), ticket=result['summary'],
+                               ticket_body=str(fields.get('description') or ''))
         except Exception:
             note = None
     if note:
