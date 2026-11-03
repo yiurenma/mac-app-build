@@ -10,7 +10,7 @@ const TOKEN_TEXT={keychain:'已保存在 Mac 钥匙串',env:'使用环境变量 
 function fill(data){
   const f=form(),s=data.settings;
   f.enabled.checked=!!s.enabled;f.dry_run.checked=!!s.dry_run;f.base_url.value=s.base_url||'';
-  f.transition_name.value=s.transition_name||'';f.assign_to_reporter.checked=!!s.assign_to_reporter;
+  f.transition_name.value=s.transition_name||'';f.skip_statuses.value=s.skip_statuses??'Done';f.assign_to_reporter.checked=!!s.assign_to_reporter;
   f.use_pr_lookup.checked=!!s.use_pr_lookup;f.key_pattern.value=s.key_pattern||'';
   f.first_run_commits.value=s.first_run_commits??0;f.max_tickets_per_run.value=s.max_tickets_per_run??40;
   f.flavor.value=s.flavor||'server';f.transition_fields.value=s.transition_fields||'';f.token.value='';
@@ -42,7 +42,7 @@ async function loadTasks(){
 async function save(){
   const f=form(),body={
     enabled:f.enabled.checked,dry_run:f.dry_run.checked,base_url:f.base_url.value.trim(),
-    transition_name:f.transition_name.value.trim(),assign_to_reporter:f.assign_to_reporter.checked,
+    transition_name:f.transition_name.value.trim(),skip_statuses:f.skip_statuses.value,assign_to_reporter:f.assign_to_reporter.checked,
     use_pr_lookup:f.use_pr_lookup.checked,key_pattern:f.key_pattern.value.trim(),
     first_run_commits:parseInt(f.first_run_commits.value,10),max_tickets_per_run:parseInt(f.max_tickets_per_run.value,10),
     flavor:f.flavor.value,transition_fields:f.transition_fields.value,

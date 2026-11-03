@@ -168,6 +168,7 @@
 <label class="span-2">Jira 地址<input name="base_url" maxlength="512" placeholder="https://wpb-jira.systems.uk.hsbc"><small class="label-help">只填网站根地址，必须以 https 开头。</small></label>
 <label class="span-2">Jira Token<input name="token" type="password" maxlength="4096" autocomplete="new-password" placeholder="留空表示保持已保存的 Token"><small class="label-help">保存到本机 Mac 钥匙串，不写入文件、任务或日志，页面也不会再显示它。</small><span id="jira-token-status" role="status"></span></label>
 <label class="span-2">流转到的状态名称<input name="transition_name" maxlength="128"><small class="label-help">必须与 Jira 工作流里的流转名称一致，例如 In Test。</small></label>
+<label class="span-2">这些状态的 ticket 不更新<input name="skip_statuses" maxlength="300" placeholder="Done"><small class="label-help">ticket 当前处于这些状态时，不评论、不改经办人、不流转，也不出现在邮件里。多个用逗号分隔，例如 Done, Closed。留空表示都更新。状态名要和 Jira 里显示的一致（不分大小写）。</small></label>
 <label class="field-toggle span-2">转给 Reporter<input type="checkbox" name="assign_to_reporter"><small class="label-help">把 ticket 的经办人改为它的 Reporter。</small></label>
 <label class="field-toggle span-2">优先从 PR 里找 Jira 号<input type="checkbox" name="use_pr_lookup"><small class="label-help">先看 PR 的标题、分支名、描述，找不到再看提交信息；GitHub 查询失败会自动退回提交信息。</small></label>
 <label class="span-2">评论里 @ 的人（Jira 用户名）<textarea name="comment_mentions" rows="2" maxlength="2000" placeholder="44065253, 43123456"></textarea><small class="label-help">每条回填评论末尾加上 cc @这些人，他们会收到 Jira 通知。填 Jira 用户名（通常是工号），逗号、空格或换行分隔；留空就不 @ 任何人。</small></label>

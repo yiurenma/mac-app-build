@@ -62,6 +62,7 @@ jira:
   flavor: "server"          # server=按用户名指派；cloud=按 accountId 指派
   key_pattern: '\b[A-Z][A-Z0-9]{1,9}-\d{1,7}\b'
   transition_name: "In Test"
+  skip_statuses: "Done"      # 处于这些状态（逗号分隔）的 ticket 完全不动；留空=都更新
   assign_to_reporter: true
   first_run_commits: 0      # 0=首次只记录基线；>0=首次回溯最近 N 个提交
   max_tickets_per_run: 40

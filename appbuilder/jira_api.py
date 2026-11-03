@@ -68,6 +68,8 @@ def _clean(body):
         M.parse_users(out['mail_users'])                     # raises ValueError naming the bad names
     if 'mail_groups' in out:
         M.parse_groups(out['mail_groups'])
+    if 'skip_statuses' in out and len(out['skip_statuses']) > 300:
+        raise ValueError('不更新的状态列表太长')
     if 'transition_name' in out and not out['transition_name']:
         raise ValueError('流转名称不能为空')
     if 'first_run_commits' in out and not 0 <= out['first_run_commits'] <= 200:

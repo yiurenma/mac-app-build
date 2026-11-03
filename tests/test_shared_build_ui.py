@@ -447,6 +447,8 @@ class SharedBuildUITests(SharedBuildUIFixture, unittest.TestCase):
             path=route.request.url.split('/api/ai/')[1]
             if route.request.method=='POST':
                 body=json.loads(route.request.post_data or '{}');posts.append((path,body))
+                if path=='settings':
+                    st['features'].update({k:v for k,v in body.items() if k in st['features']})
                 if path=='try-pr':
                     if 'bad' in body['url']:
                         return route.fulfill(status=400,json={'error':'请粘贴 PR 链接'})

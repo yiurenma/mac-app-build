@@ -152,7 +152,10 @@ def _jira_line(runtime):
     report = runtime.get('jira_report') or {}
     status = report.get('status')
     if status in ('DONE', 'PARTIAL', 'DRY_RUN'):
-        return None if (report.get('tickets') or report.get('errors')) else 'No new tickets since the last build.'
+        if report.get('tickets') or report.get('errors'):
+            return None
+        return ('Tickets that were already finished were left unchanged.' if report.get('skipped')
+                else 'No new tickets since the last build.')
     if status == 'BASELINE':
         return 'Jira: first run, only the starting point was recorded. Tickets are updated from the next build.'
     return 'Jira was not updated for this build.'

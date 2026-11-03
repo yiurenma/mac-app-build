@@ -56,6 +56,15 @@ class SettingsTests(unittest.TestCase):
                 A.save_settings(bad)
         self.assertFalse(self.file.exists())
 
+    def test_skip_statuses_default_save_empty_and_length_limit(self):
+        self.assertEqual(A.public_settings()['settings']['skip_statuses'], 'Done')
+        out = A.save_settings({'skip_statuses': 'Done, Closed'})
+        self.assertEqual(out['settings']['skip_statuses'], 'Done, Closed')
+        out = A.save_settings({'skip_statuses': ''})
+        self.assertEqual(out['settings']['skip_statuses'], '')           # empty = update everything
+        with self.assertRaises(ValueError):
+            A.save_settings({'skip_statuses': 'x' * 301})
+
     def test_token_goes_to_keychain_and_is_never_returned_or_written(self):
         with patch('appbuilder.auth.store_jira_token') as store:
             out = A.save_settings({'enabled': True, 'token': 'SECRET-PAT'})

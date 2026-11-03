@@ -321,6 +321,54 @@ class GitAndFlowTests(unittest.TestCase):
             if code == 500:
                 self.assertNotIsInstance(caught.exception, J.JiraNotFound)
 
+    def test_finished_tickets_are_left_completely_alone(self):
+        for status in ('Done', 'done', ' DONE '):
+            with self.subTest(status=status):
+                jira = FakeJira(status=status)
+                self.tearDown(); self.setUp()
+                report, ledger = self.run_notify({'dry_run': False}, ledger={'develop': {'last_sha': self.shas[0]}}, client=jira)
+                self.assertEqual(jira.calls, [])                       # no comment, no assignment, no transition
+                self.assertEqual(report['tickets'], [])
+                self.assertEqual(sorted(x['key'] for x in report['skipped']), ['PBB-2'])
+                self.assertEqual(report['skipped'][0]['status'].strip().lower(), 'done')
+                self.assertEqual(report['status'], 'DONE')
+                self.assertEqual(ledger['develop']['last_sha'], self.shas[2])   # still counted as processed
+
+    def test_skip_list_is_configurable_and_can_be_emptied(self):
+        jira = FakeJira(status='Closed')
+        report, _ = self.run_notify({'dry_run': False, 'skip_statuses': 'Done, Closed'}, ledger={'develop': {'last_sha': self.shas[0]}}, client=jira)
+        self.assertEqual(jira.calls, [])
+        self.assertEqual(len(report['skipped']), 1)
+        self.tearDown(); self.setUp()
+        jira = FakeJira(status='Done')
+        report, _ = self.run_notify({'dry_run': False, 'skip_statuses': ''}, ledger={'develop': {'last_sha': self.shas[0]}}, client=jira)
+        self.assertTrue(any(c[0] == 'comment' for c in jira.calls))     # empty list = update everything, as before
+        self.assertEqual(report['skipped'], [])
+
+    def test_other_statuses_are_still_updated_and_a_mixed_run_only_skips_the_finished_one(self):
+        class Mixed(FakeJira):
+            def issue(self, key):
+                data = super().issue(key)
+                data['fields']['status']['name'] = 'Done' if key == 'PBB-1' else 'Dev Done'
+                return data
+        jira = Mixed()
+        report, _ = self.run_notify({'dry_run': False, 'first_run_commits': 5}, client=jira)
+        keys_commented = {c[1] for c in jira.calls if c[0] == 'comment'}
+        self.assertNotIn('PBB-1', keys_commented)
+        self.assertIn('PBB-2', keys_commented)
+        self.assertEqual([x['key'] for x in report['skipped']], ['PBB-1'])
+
+    def test_skip_status_parsing(self):
+        self.assertEqual(J.skip_status_list('Done, Closed;\nWon\'t Do'), {'done', 'closed', "won't do"})
+        self.assertEqual(J.skip_status_list(''), set())
+        self.assertEqual(J.settings({})['skip_statuses'], 'Done')
+
+    def test_mail_says_so_when_everything_was_already_finished(self):
+        from appbuilder import jira_mail as M
+        line = M._jira_line({'jira_report': {'status': 'DONE', 'tickets': [], 'errors': [], 'skipped': [{'key': 'X-1'}]}})
+        self.assertIn('already finished', line)
+        self.assertIn('No new tickets', M._jira_line({'jira_report': {'status': 'DONE', 'tickets': [], 'errors': []}}))
+
     def test_copilot_style_llm_gets_the_whole_pull_request_but_a_small_model_does_not(self):
         asked = []
 

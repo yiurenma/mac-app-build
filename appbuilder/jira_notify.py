@@ -28,7 +28,7 @@ EDITABLE = {'enabled': bool, 'dry_run': bool, 'base_url': str, 'transition_name'
             'use_pr_lookup': bool, 'key_pattern': str, 'first_run_commits': int, 'max_tickets_per_run': int,
             'flavor': str, 'transition_fields': str,
             'mail_enabled': bool, 'mail_issue': str, 'mail_users': str, 'mail_failure_once': bool,
-            'comment_mentions': str, 'mail_groups': str}
+            'comment_mentions': str, 'mail_groups': str, 'skip_statuses': str}
 
 
 def _type_ok(key, value):
@@ -65,6 +65,7 @@ def settings(config):
     j.setdefault('mail_failure_once', True)     # 同一原因连续失败只发一次，恢复成功时再发
     j.setdefault('comment_mentions', '')        # 评论里 @ 的 Jira 用户名，逗号/空格/换行分隔
     j.setdefault('mail_groups', '')             # 也按 Jira 用户组发邮件，逗号/换行分隔（组名可含空格）
+    j.setdefault('skip_statuses', 'Done')       # 处于这些状态的 ticket 完全不动（不评论、不转经办人、不流转）
     return j
 
 
@@ -520,6 +521,11 @@ def mention_line(text, flavor='server'):
     return 'cc ' + ' '.join(f'[~accountid:{u}]' if flavor == 'cloud' else f'[~{u}]' for u in users)
 
 
+def skip_status_list(text):
+    """'Done, Closed' / one per line -> lower-case names."""
+    return {part.strip().lower() for part in re.split(r'[,，;；\n]+', text or '') if part.strip()}
+
+
 def process_ticket(client, key, info, link, build_label, conf, llm, dry_run, gmx_build=None, branch=''):
     # The marker identifies THIS build task, so a ticket gets one comment per build it is in.
     # (The GMX build number alone is not unique: every new upload branch starts at #2.)
@@ -535,6 +541,11 @@ def process_ticket(client, key, info, link, build_label, conf, llm, dry_run, gmx
     reporter = fields.get('reporter') or {}
     status = (fields.get('status') or {}).get('name', '')
     issue_type = (fields.get('issuetype') or {}).get('name', '')
+    if status.strip().lower() in skip_status_list(conf.get('skip_statuses', 'Done')):
+        # Finished tickets are left exactly as they are: no comment, no reassignment, no transition.
+        result['skipped'] = f'状态是 {status}，不更新'
+        result['status'] = status
+        return result
     items = ref_items(info, key)
     result['ref_items'] = items
     result['refs'] = describe_refs(info, key)
@@ -718,14 +729,19 @@ def _notify_jira(task_id, client=None, llm=None, config=None, preview=None):
     if len(keys) > conf['max_tickets_per_run']:
         action('JIRA', f'本次提到 {len(keys)} 张 ticket，超过提醒值 {conf["max_tickets_per_run"]}；仍全部处理')
     dry = bool(conf['dry_run'])
-    results, errors, ignored = [], [], []
+    results, errors, ignored, skipped = [], [], [], []
     if keys:
         client = client or JiraClient(conf.get('base_url', ''), flavor=conf['flavor'],
                                       timeout=conf['timeout_seconds'], ca_bundle=conf.get('ca_bundle'))
     for key in keys:
         try:
-            results.append(process_ticket(client, key, found[key], link, task_id, conf, llm, dry, gmx_build=build,
-                                          branch=params.get('plugin_branch', '')))
+            outcome = process_ticket(client, key, found[key], link, task_id, conf, llm, dry, gmx_build=build,
+                                     branch=params.get('plugin_branch', ''))
+            if outcome.get('skipped'):
+                skipped.append({'key': key, 'status': outcome.get('status', ''), 'summary': outcome.get('summary', '')})
+                action('JIRA', f'{key} {outcome["skipped"]}')
+            else:
+                results.append(outcome)
         except UnknownTicket:
             ignored.append(key)
             action('JIRA', f'{key} 在 Jira 中查不到，已忽略')
@@ -736,7 +752,7 @@ def _notify_jira(task_id, client=None, llm=None, config=None, preview=None):
               'at': datetime.now().isoformat(timespec='seconds'), 'link': link, 'build': build,
               'transition': conf['transition_name'],
               'commits_scanned': len(commits), 'tickets': results,
-              'errors': errors, 'ignored_keys': ignored, 'ambiguous_commits': ambiguous, 'from': old, 'to': source_sha,
+              'errors': errors, 'ignored_keys': ignored, 'skipped': skipped, 'ambiguous_commits': ambiguous, 'from': old, 'to': source_sha,
               'needs_manual': [{'key': r['key'], 'reason': r['manual'] + (' (available: ' + ', '.join(r['available']) + ')' if r.get('available') else '')}
                              for r in results if r.get('manual')],
               'ticket_sources': {k: found[k].get('source') for k in keys},
