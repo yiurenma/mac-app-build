@@ -188,11 +188,16 @@
 <p class="diag-note">模型在这台 Mac 上运行，不联网、不调任何外部接口。只用来写两句英文：评论里给测试的一句说明、失败邮件里的可能原因。生成的内容先检查（只能是英文、不能太长、不能带链接或原文没有的单号），不合格就不用，退回原来的写法。关掉或没装时一切照旧。</p>
 <p id="ai-status" class="diag-note" role="status">读取中…</p>
 <form id="ai-form" class="diagnose-form" autocomplete="off"><div class="form-grid">
+<label class="span-2">用哪种 AI<select name="provider" id="ai-provider"><option value="local">本机离线模型（需下载约 2.5 GB）</option><option value="copilot">VS Code 里的 Copilot（不用下载模型）</option></select><small class="label-help" id="ai-provider-help"></small></label>
+</div>
+<div id="ai-local-block"><div class="form-grid">
 <label class="span-2">模型<select name="model" id="ai-model"></select><small class="label-help" id="ai-model-help">点“一键安装”会装运行库、下载模型、核对校验值并试运行。模型放在本机 ~/.app-builder/models，更新工具不会丢。</small></label>
 </div><div class="jira-actions"><button type="button" class="btn btn-primary" id="ai-install">一键安装</button></div>
 <details class="advanced-panel"><summary>下载不了？用已经下载好的文件</summary><div class="advanced-body"><div class="form-grid">
 <label class="span-2">模型文件位置（.gguf）<input name="path" id="ai-path" maxlength="1024" placeholder="/Users/你/Downloads/microsoft_Phi-4-mini-instruct-Q4_K_M.gguf"><small class="label-help">公司网络打不开下载网站时，换个网络下载上面所选模型的 Q4_K_M.gguf 文件（链接见模型说明），然后把完整路径粘贴到这里。在访达里选中文件，按 ⌥⌘C 可以复制路径。</small></label>
 </div><div class="jira-actions"><button type="button" class="ghost-button" id="ai-use-file">使用这个文件</button></div></div></details>
+</div>
+<p id="ai-copilot-block" class="diag-note" hidden>用法：先在终端执行 <code>./app-build vscode-bridge install</code>，重启 VS Code 并登录 Copilot，第一次调用时点“允许”。发出去的只有英文的 PR 标题/描述和英文失败日志片段，会经过 VS Code 发给公司的 Copilot 服务；请确认公司规定允许。</p>
 <div class="form-grid">
 <label class="field-toggle span-2">启用离线 AI<input type="checkbox" name="enabled"><small class="label-help">装好后自动打开。</small></label>
 <label class="field-toggle span-2">评论里写一句给测试的说明<input type="checkbox" name="tester_note"><small class="label-help">根据 PR 标题和描述写 “For testers: …”，邮件里也会显示。</small></label>

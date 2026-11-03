@@ -406,6 +406,38 @@ class SharedBuildUITests(SharedBuildUIFixture, unittest.TestCase):
         self.assertEqual(posts[:2],[('install',{'model':'qwen3-4b'}),('settings',{'failure_hint':False})])
         self.assertFalse(self.errors,self.errors)
 
+    def test_ai_card_switches_to_vscode_copilot_and_back(self):
+        p=self.page;posts=[]
+        models={'phi4-mini':{'label':'Phi-4-mini','licence':'MIT','source':'https://example.com'}}
+        st={'enabled':False,'provider':'local','copilot':{'ok':False,'note':'没有检测到 VS Code 插件：先安装插件并打开 VS Code'},
+            'model':'','model_path':'','model_ok':False,'model_note':'','runtime':'','features':{'tester_note':True,'failure_hint':True},
+            'models':models,'model_dir':'/Users/g/.app-builder/models','job':{'running':False,'log':[]}}
+        def handle(route):
+            path=route.request.url.split('/api/ai/')[1]
+            if route.request.method=='POST':
+                body=json.loads(route.request.post_data or '{}');posts.append((path,body))
+                if path=='settings':
+                    for k in ('provider','enabled'):
+                        if k in body: st[k]=body[k]
+                    st['copilot']={'ok':True,'note':'插件在运行'}
+            return route.fulfill(json=st)
+        p.route('**/api/ai/**',handle)
+        p.reload();expect(p.locator('#plugin-branches option')).to_have_count(101)
+        self.show('settings')
+        expect(p.locator('#ai-local-block')).to_be_visible()
+        expect(p.locator('#ai-copilot-block')).to_be_hidden()
+        p.locator('#ai-provider').select_option('copilot')
+        expect(p.locator('#ai-copilot-block')).to_be_visible()
+        expect(p.locator('#ai-local-block')).to_be_hidden()
+        expect(p.locator('#ai-status')).to_contain_text('VS Code 插件：在运行')
+        expect(p.locator('#ai-provider-help')).to_contain_text('插件在运行')
+        p.locator('#ai-form [name=enabled]').check()
+        expect(p.locator('#ai-status')).to_contain_text('状态：已启用')
+        p.locator('#ai-provider').select_option('local')
+        expect(p.locator('#ai-local-block')).to_be_visible()
+        self.assertEqual(posts,[('settings',{'provider':'copilot'}),('settings',{'enabled':True}),('settings',{'provider':'local'})])
+        self.assertFalse(self.errors,self.errors)
+
     def test_jira_panel_saves_mail_settings_and_sends_a_test_email(self):
         p=self.page;posts={}
         settings={'settings':{'enabled':True,'dry_run':True,'base_url':'https://jira.example.com','transition_name':'In Test',

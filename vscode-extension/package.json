@@ -1,0 +1,31 @@
+{
+  "name": "copilot-bridge",
+  "displayName": "APP Builder Copilot Bridge",
+  "publisher": "app-builder",
+  "version": "0.1.0",
+  "description": "Lets the local APP Builder console ask VS Code's Copilot model one short question at a time. Listens on 127.0.0.1 only, token protected.",
+  "license": "UNLICENSED",
+  "engines": { "vscode": "^1.95.0" },
+  "main": "./extension.js",
+  "activationEvents": ["onStartupFinished"],
+  "extensionKind": ["ui", "workspace"],
+  "capabilities": {
+    "untrustedWorkspaces": { "supported": true },
+    "virtualWorkspaces": true
+  },
+  "contributes": {
+    "commands": [
+      { "command": "appBuilderBridge.status", "title": "APP Builder Bridge: Show status" },
+      { "command": "appBuilderBridge.restart", "title": "APP Builder Bridge: Restart" }
+    ],
+    "configuration": {
+      "title": "APP Builder Bridge",
+      "properties": {
+        "appBuilderBridge.enabled": { "type": "boolean", "default": true, "description": "Run the local bridge for APP Builder." },
+        "appBuilderBridge.vendor": { "type": "string", "default": "copilot", "description": "Language model vendor to use." },
+        "appBuilderBridge.family": { "type": "string", "default": "", "description": "Optional model family (empty = first available)." }
+      }
+    }
+  },
+  "scripts": { "test": "node --test test/bridge.test.js" }
+}

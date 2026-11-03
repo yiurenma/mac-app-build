@@ -1,0 +1,9 @@
+{
+  "name": "fake-model",
+  "publisher": "app-builder-test",
+  "version": "0.0.1",
+  "engines": { "vscode": "^1.104.0" },
+  "main": "./extension.js",
+  "activationEvents": ["onStartupFinished"],
+  "contributes": { "languageModelChatProviders": [{ "vendor": "appbuilder-fake", "displayName": "App Builder test model" }] }
+}

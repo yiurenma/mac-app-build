@@ -13,7 +13,7 @@ def try_it():
     from .local_llm import get_llm, tester_note, failure_hint
     llm = get_llm(load_config())
     if not llm:
-        raise ValueError('离线 AI 还没有启用')
+        raise ValueError('AI 还没有启用')
     note = tester_note(llm, *SAMPLE)
     hint = failure_hint(llm, 'GMX build', 'Jenkins build #2 finished with result FAILURE.',
                         ['error: No signing certificate "iOS Distribution" found',
@@ -36,7 +36,10 @@ def handle_post(path, body):
             return 200, S.start('file', str(body.get('path') or '').strip())
         if path == '/api/ai/settings':
             values = {k: body[k] for k in ('enabled', *S.FEATURES) if isinstance(body.get(k), bool)}
-            if values.get('enabled') and not S.saved().get('model_path'):
+            if body.get('provider') in S.PROVIDERS:
+                values['provider'] = body['provider']
+            provider = values.get('provider') or S.saved().get('provider', 'local')
+            if values.get('enabled') and provider == 'local' and not S.saved().get('model_path'):
                 raise ValueError('请先安装或选择模型文件')
             S.save(values)
             from . import local_llm

@@ -13,11 +13,20 @@ function render(s){
   const m=s.models[sel.value];
   el('ai-model-help').textContent='点“一键安装”会装运行库、下载模型、核对校验值并试运行。模型放在 '+s.model_dir+'，更新工具不会丢。模型说明：'+(m?m.source:'');
   const f=el('ai-form').elements;
+  const cop=s.provider==='copilot';
+  f.provider.value=cop?'copilot':'local';
+  el('ai-local-block').hidden=cop;el('ai-copilot-block').hidden=!cop;
+  el('ai-provider-help').textContent=cop?'VS Code 插件：'+(s.copilot&&s.copilot.note||'未知'):'模型在这台 Mac 上运行，不联网。';
   f.enabled.checked=!!s.enabled;f.tester_note.checked=s.features.tester_note!==false;f.failure_hint.checked=s.features.failure_hint!==false;
   const parts=[];
-  parts.push('运行库：'+(s.runtime?'已安装 '+s.runtime:'未安装'));
-  parts.push('模型：'+(s.model_ok?s.model_path:(s.model_note||'未安装')));
-  parts.push('状态：'+(s.enabled&&s.model_ok&&s.runtime?'已启用':'未启用'));
+  if(cop){
+    parts.push('VS Code 插件：'+((s.copilot&&s.copilot.ok)?'在运行':'未检测到'));
+    parts.push('状态：'+(s.enabled&&s.copilot&&s.copilot.ok?'已启用':'未启用'));
+  }else{
+    parts.push('运行库：'+(s.runtime?'已安装 '+s.runtime:'未安装'));
+    parts.push('模型：'+(s.model_ok?s.model_path:(s.model_note||'未安装')));
+    parts.push('状态：'+(s.enabled&&s.model_ok&&s.runtime?'已启用':'未启用'));
+  }
   el('ai-status').textContent=parts.join(' · ');
   const j=s.job||{};
   el('ai-install').disabled=el('ai-use-file').disabled=!!j.running;
@@ -54,6 +63,9 @@ function init(){
       const h=r.failure_hint;
       el('ai-log').textContent='示例 PR → For testers:\n  '+r.tester_note+'\n\n示例失败（签名证书找不到）→\n  '+(typeof h==='string'?h:'Likely cause: '+h.cause+'\n  Try: '+h.fix);
     }catch(e){el('ai-log').textContent=e.message;}
+  });
+  el('ai-provider').addEventListener('change',async e=>{
+    if(await post('/api/ai/settings',{provider:e.target.value}))toast('已保存');
   });
   el('ai-form').addEventListener('submit',e=>e.preventDefault());
   const wait=setInterval(()=>{if(typeof state!=='undefined'&&state.csrf){clearInterval(wait);load();}},300);

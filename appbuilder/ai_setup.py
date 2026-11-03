@@ -44,6 +44,7 @@ MODELS = {
                  'source': 'https://huggingface.co/Qwen/Qwen3-4B'},
 }
 DEFAULT_MODEL = 'phi4-mini'
+PROVIDERS = ('local', 'copilot')      # local GGUF model, or VS Code Copilot through the bridge extension
 FEATURES = ('tester_note', 'failure_hint')
 _JOB_LOCK = threading.Lock()
 _JOB = {'running': False, 'step': '', 'progress': None, 'log': [], 'error': '', 'finished': ''}
@@ -63,6 +64,8 @@ def saved():
             out[key] = data[key]
     if isinstance(data.get('model_path'), str):
         out['model_path'] = data['model_path']
+    if data.get('provider') in PROVIDERS:
+        out['provider'] = data['provider']
     if data.get('model') in MODELS or data.get('model') == 'custom':
         out['model'] = data['model']
     return out
@@ -81,9 +84,11 @@ def effective(config):
     """config['ai'] with the page's settings on top (the page wins)."""
     ai = dict((config or {}).get('ai') or {})
     page = saved()
-    for key in ('enabled', 'model_path', *FEATURES):
+    for key in ('enabled', 'model_path', 'provider', *FEATURES):
         if key in page:
             ai[key] = page[key]
+    if ai.get('provider') not in PROVIDERS:
+        ai['provider'] = 'local'
     ai.setdefault('tester_note', True)
     ai.setdefault('failure_hint', True)
     ai['model'] = page.get('model', '')
@@ -92,7 +97,8 @@ def effective(config):
 
 def feature_on(config, name):
     ai = effective(config)
-    return bool(ai.get('enabled') and ai.get('model_path') and ai.get(name))
+    ready = ai.get('model_path') or ai.get('provider') == 'copilot'
+    return bool(ai.get('enabled') and ready and ai.get(name))
 
 
 # ---- checks -------------------------------------------------------------------------------
@@ -134,7 +140,9 @@ def status():
             model_note = str(exc)
     with _JOB_LOCK:
         job = {k: (list(v) if isinstance(v, list) else v) for k, v in _JOB.items()}
+    from . import copilot_bridge
     return {'enabled': bool(page.get('enabled')), 'model': page.get('model', ''), 'model_path': path,
+            'provider': page.get('provider', 'local'), 'copilot': copilot_bridge.check(),
             'model_ok': model_ok, 'model_note': model_note, 'runtime': runtime_version(),
             'features': {k: page.get(k, True) for k in FEATURES},
             'models': {k: {'label': v['label'], 'licence': v['licence'], 'source': v['source']} for k, v in MODELS.items()},

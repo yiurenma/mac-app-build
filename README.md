@@ -297,6 +297,10 @@ mac-app-builder/
 
 除 macOS 外也支持 Linux 服务器与 Docker：凭据走 keyring 或环境变量，调度器用 `systemd --user`。详见 `docs/29-Linux与Docker部署.md`。
 
+## VS Code Copilot 作为 AI 来源
+
+不想下载本地模型时，可让两句英文 AI 说明走 VS Code 里的 Copilot：`./app-build vscode-bridge install`，重启 VS Code，在设置页选择。插件在 `vscode-extension/`，说明见其中的 README。
+
 ## 7. 离线测试
 
 ```bash

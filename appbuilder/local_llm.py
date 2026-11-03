@@ -82,6 +82,9 @@ def get_llm(config):
     ai = effective(config)
     if not ai.get('enabled'):
         return None
+    if ai.get('provider') == 'copilot':
+        from .copilot_bridge import CopilotLLM
+        return _CACHE.setdefault(('copilot',), CopilotLLM())
     path = ai.get('model_path') or ''
     if not path:
         return None

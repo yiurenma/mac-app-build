@@ -116,3 +116,25 @@ jobs:
           st=$(docker ps -a --format '{{.Status}}' | tr '\n' ' ')
           lg=$(docker logs ab 2>&1 | tail -25 | tr '\n' '|' | cut -c1-1500)
           echo "::error title=container::state=[$st] logs=[$lg]"
+
+  vscode-extension:
+    name: VS Code extension (unit + real extension host)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --test vscode-extension/test/bridge.test.js
+      - name: Install Chromium and code-server (VS Code core)
+        run: |
+          python -m pip install -r requirements.txt
+          python -m playwright install --with-deps chromium
+          mkdir /tmp/cs && cd /tmp/cs && npm install code-server --ignore-scripts --no-audit --no-fund
+          cd node_modules/code-server/lib/vscode && npm install --omit=dev --ignore-scripts --no-audit --no-fund --legacy-peer-deps
+      - name: Run the bridge inside a real VS Code extension host with a fake model
+        run: python vscode-extension/test/e2e/run.py /tmp/cs/node_modules/.bin/code-server

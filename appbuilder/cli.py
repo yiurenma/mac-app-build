@@ -73,6 +73,8 @@ def args_parser():
     web.add_argument('--port', type=int, default=8765, help='本地页面端口（默认 8765）')
     web.add_argument('--no-open', action='store_true', help='只启动服务，不自动打开浏览器')
     web.add_argument('--update', action='store_true', help='启动前由 ./app-build 安全更新源码')
+    bridge = sub.add_parser('vscode-bridge', help='安装/卸载 VS Code 插件（让 AI 说明走 VS Code 里的 Copilot）')
+    bridge.add_argument('action', choices=['install', 'uninstall', 'status'])
     clean = sub.add_parser('cleanup', help='清理已完成任务的 Git 工作副本（plugin/ gmx/）以释放磁盘；默认只预览')
     clean.add_argument('--apply', action='store_true', help='确认执行删除（不加则只预览）')
     clean.add_argument('--keep-days', type=int, default=7, help='未成功的任务保留多少天以便恢复（默认 7）')
@@ -297,6 +299,10 @@ def main(argv=None):
                       file=sys.stderr, flush=True)
                 raise SystemExit(1)
             raise
+        return
+    if a.command == 'vscode-bridge':
+        from . import vscode_ext
+        print(vscode_ext.run(a.action), flush=True)
         return
     if a.command == 'cleanup':
         from . import cleanup
