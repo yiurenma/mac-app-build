@@ -299,7 +299,7 @@ mac-app-builder/
 
 ## VS Code Copilot 作为 AI 来源
 
-不想下载本地模型时，可让两句英文 AI 说明走 VS Code 里的 Copilot：`./app-build vscode-bridge install`，重启 VS Code，在设置页选择。插件在 `vscode-extension/`，说明见其中的 README。
+不想下载本地模型时，可让两句英文 AI 说明走 VS Code 里的 Copilot：设置页 → AI → 选“VS Code 里的 Copilot”，会自动安装插件并启用；然后重启 VS Code、登录 Copilot、第一次点“允许”。插件在 `vscode-extension/`。
 
 ## 7. 离线测试
 

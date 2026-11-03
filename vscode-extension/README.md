@@ -4,18 +4,15 @@ A tiny VS Code extension. It lets APP Builder (the local console) ask **VS Code'
 two optional one-sentence AI helpers (tester note on PR comments, "Likely cause / Try" in failure
 emails). No build step, no npm dependencies.
 
-## Install (on the Mac)
+## Use it
 
-```bash
-./app-build vscode-bridge install     # copies this folder into ~/.vscode/extensions
-```
+In APP Builder: **Settings → AI → "用哪种 AI" → VS Code 里的 Copilot**. That installs this extension
+into `~/.vscode/extensions` and switches the AI on. Then quit and reopen VS Code, sign in to Copilot,
+and click Allow the first time VS Code asks.
 
-Then **quit and reopen VS Code**, sign in to Copilot, and in APP Builder go to
-Settings → AI → choose "VS Code 里的 Copilot" and turn it on. The first call makes VS Code ask
-for permission once; click Allow.
+Then paste a PR link under "用一个真实 PR 试试" and click the button to see what is sent and what the AI writes.
 
-`./app-build vscode-bridge status` shows whether the extension is installed and reachable;
-`./app-build vscode-bridge uninstall` removes it.
+Terminal alternative: `./app-build vscode-bridge install | status | uninstall`.
 
 ## How it works
 

@@ -44,6 +44,7 @@ MODELS = {
                  'source': 'https://huggingface.co/Qwen/Qwen3-4B'},
 }
 DEFAULT_MODEL = 'phi4-mini'
+_COPILOT_SETUP_ERROR = {'note': ''}
 PROVIDERS = ('local', 'copilot')      # local GGUF model, or VS Code Copilot through the bridge extension
 FEATURES = ('tester_note', 'failure_hint', 'pr_context')
 _JOB_LOCK = threading.Lock()
@@ -141,9 +142,15 @@ def status():
             model_note = str(exc)
     with _JOB_LOCK:
         job = {k: (list(v) if isinstance(v, list) else v) for k, v in _JOB.items()}
-    from . import copilot_bridge
+    from . import copilot_bridge, vscode_ext
+    copilot = copilot_bridge.check()
+    if not copilot['ok']:
+        copilot['installed'] = vscode_ext.is_installed()
+        copilot['note'] = ('插件已装好：请完全退出并重新打开 VS Code，登录 Copilot（第一次调用点“允许”）'
+                           if copilot['installed'] else '插件还没装好：' + _COPILOT_SETUP_ERROR['note'] if _COPILOT_SETUP_ERROR['note']
+                           else '插件还没装（选择“VS Code 里的 Copilot”会自动安装）')
     return {'enabled': bool(page.get('enabled')), 'model': page.get('model', ''), 'model_path': path,
-            'provider': page.get('provider', 'local'), 'copilot': copilot_bridge.check(),
+            'provider': page.get('provider', 'local'), 'copilot': copilot,
             'model_ok': model_ok, 'model_note': model_note, 'runtime': runtime_version(),
             'features': {k: page.get(k, True) for k in FEATURES},
             'models': {k: {'label': v['label'], 'licence': v['licence'], 'source': v['source']} for k, v in MODELS.items()},
@@ -326,3 +333,16 @@ def start(kind, value):
         _JOB.update(running=True, step='开始', progress=None, log=[], error='', finished='')
     threading.Thread(target=_run, args=(kind, value), daemon=True, name='ai-setup').start()
     return status()
+
+
+def setup_copilot():
+    """Choosing VS Code Copilot does everything that can be done here: install the extension
+    and switch the AI on. What is left (reopen VS Code, sign in, click Allow) is shown on the page."""
+    from . import vscode_ext
+    _COPILOT_SETUP_ERROR['note'] = ''
+    if not vscode_ext.is_installed():
+        try:
+            vscode_ext.install()
+        except (RuntimeError, OSError) as exc:
+            _COPILOT_SETUP_ERROR['note'] = safe_text(str(exc))[:200]
+    save({'provider': 'copilot', 'enabled': True})

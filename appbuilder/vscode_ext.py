@@ -30,6 +30,13 @@ def _installed():
     return sorted(extensions_dir().glob(f"{m['publisher']}.{m['name']}-*"))
 
 
+def is_installed():
+    try:
+        return bool(_installed())
+    except OSError:
+        return False
+
+
 def install():
     if not (SOURCE / 'extension.js').is_file():
         raise RuntimeError('找不到 vscode-extension 文件夹')

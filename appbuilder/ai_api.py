@@ -76,6 +76,10 @@ def handle_post(path, body):
             provider = values.get('provider') or S.saved().get('provider', 'local')
             if values.get('enabled') and provider == 'local' and not S.saved().get('model_path'):
                 raise ValueError('请先安装或选择模型文件')
+            if values.get('provider') == 'copilot':
+                S.setup_copilot()               # install the extension and switch on: nothing else to click
+                values.pop('provider')
+                values.pop('enabled', None)
             S.save(values)
             from . import local_llm
             local_llm._CACHE.clear()

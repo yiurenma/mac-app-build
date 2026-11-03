@@ -197,15 +197,15 @@
 <label class="span-2">模型文件位置（.gguf）<input name="path" id="ai-path" maxlength="1024" placeholder="/Users/你/Downloads/microsoft_Phi-4-mini-instruct-Q4_K_M.gguf"><small class="label-help">公司网络打不开下载网站时，换个网络下载上面所选模型的 Q4_K_M.gguf 文件（链接见模型说明），然后把完整路径粘贴到这里。在访达里选中文件，按 ⌥⌘C 可以复制路径。</small></label>
 </div><div class="jira-actions"><button type="button" class="ghost-button" id="ai-use-file">使用这个文件</button></div></div></details>
 </div>
-<p id="ai-copilot-block" class="diag-note" hidden>用法：先在终端执行 <code>./app-build vscode-bridge install</code>，重启 VS Code 并登录 Copilot，第一次调用时点“允许”。发出去的只有英文的 PR 标题/描述和英文失败日志片段，会经过 VS Code 发给公司的 Copilot 服务；请确认公司规定允许。</p>
+<p id="ai-copilot-block" class="diag-note" hidden>选中后会自动安装 VS Code 插件并启用。之后只需：完全退出并重新打开 VS Code → 登录 Copilot → 第一次调用时点“允许”。发出去的是 PR 内容和英文失败日志，会经 VS Code 发给公司的 Copilot 服务，请确认公司规定允许。</p>
 <div class="form-grid">
 <label class="field-toggle span-2">启用离线 AI<input type="checkbox" name="enabled"><small class="label-help">装好后自动打开。</small></label>
 <label class="field-toggle span-2">评论里写一句给测试的说明<input type="checkbox" name="tester_note"><small class="label-help">根据 PR 标题和描述写 “For testers: …”，邮件里也会显示。</small></label>
 <label class="field-toggle span-2">失败邮件里写可能原因和建议<input type="checkbox" name="failure_hint"><small class="label-help">根据失败步骤、原因和英文日志写一句 “Likely cause” 和 “Try”，标明是 AI 建议。</small></label>
 <label class="field-toggle span-2" id="ai-pr-context-row">把 PR 的全部信息发给 AI<input type="checkbox" name="pr_context"><small class="label-help">仅 VS Code Copilot：除标题和描述外，还发提交说明、改动的文件名和裁剪后的代码差异（每个文件最多约 1500 字，总共约 3 万字）。关掉就只发标题和描述。本机离线模型不受影响。</small></label>
 </div><div class="jira-actions"><button type="button" class="ghost-button" id="ai-try">试一下效果</button></div>
-<div class="form-grid"><label class="span-2">用一个真实 PR 试试<input name="pr_url" id="ai-pr-url" maxlength="300" placeholder="https://企业GitHub/组织/仓库/pull/123"><small class="label-help">只读取这个 PR（用已保存的 GitHub Token），不会改任何东西。“预览发送内容”只显示会发出去的文字，不调用 AI。</small></label></div>
-<div class="jira-actions"><button type="button" class="ghost-button" id="ai-pr-preview">预览发送内容</button><button type="button" class="ghost-button" id="ai-pr-try">用这个 PR 试一下</button></div></form>
+<div class="form-grid"><label class="span-2">用一个真实 PR 试试<input name="pr_url" id="ai-pr-url" maxlength="300" placeholder="https://企业GitHub/组织/仓库/pull/123"><small class="label-help">只读取这个 PR（用已保存的 GitHub Token），不会改任何东西。结果里会同时显示 AI 写的句子和发出去的全部内容。</small></label></div>
+<div class="jira-actions"><button type="button" class="ghost-button" id="ai-pr-try">用这个 PR 试一下</button></div></form>
 <progress id="ai-progress" max="100" hidden></progress>
 <pre id="ai-log" class="terminal diagnose-terminal settings-result" role="status">尚未执行</pre></section>
 </section>

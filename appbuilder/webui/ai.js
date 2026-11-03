@@ -79,7 +79,6 @@ function init(){
       el('ai-log').textContent=(send?'For testers:\n  '+r.tester_note+'\n\n':'')+'发给：'+r.to+'；内容：'+scope+'；共约 '+r.chars+' 字'+(r.cut?'（下面只显示前 6000 字）':'')+'\n\n'+r.sent;
     }catch(e){el('ai-log').textContent=e.message;}
   }
-  el('ai-pr-preview').addEventListener('click',()=>tryPr(false));
   el('ai-pr-try').addEventListener('click',()=>tryPr(true));
   el('ai-form').addEventListener('submit',e=>e.preventDefault());
   const wait=setInterval(()=>{if(typeof state!=='undefined'&&state.csrf){clearInterval(wait);load();}},300);

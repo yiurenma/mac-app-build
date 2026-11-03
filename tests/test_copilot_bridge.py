@@ -112,16 +112,31 @@ class SettingsTests(unittest.TestCase):
         ai_setup.save({'provider': 'evil'})
         self.assertEqual(ai_setup.effective({})['provider'], 'local')
 
-    def test_api_switches_provider_and_enables_without_a_model_file(self):
-        code, status = ai_api.handle_post('/api/ai/settings', {'provider': 'copilot', 'enabled': True})
-        self.assertEqual(code, 200)
-        self.assertEqual((status['provider'], status['enabled']), ('copilot', True))
-        self.assertIn('copilot', status)
-        code, _ = ai_api.handle_post('/api/ai/settings', {'provider': 'local', 'enabled': True})
-        self.assertEqual(code, 400)                         # local still requires a model file
-        code, _ = ai_api.handle_post('/api/ai/settings', {'provider': 'nonsense'})
-        self.assertEqual(code, 200)
-        self.assertEqual(ai_setup.saved()['provider'], 'copilot')
+    def test_choosing_copilot_installs_the_extension_and_switches_on_in_one_step(self):
+        exts = Path(self.tmp.name) / 'home' / '.vscode' / 'extensions'
+        exts.mkdir(parents=True)
+        with patch.dict(os.environ, {'APP_BUILDER_VSCODE_EXTENSIONS': str(exts)}), \
+                patch.object(copilot_bridge, 'INFO', Path(self.tmp.name) / 'none.json'):
+            code, status = ai_api.handle_post('/api/ai/settings', {'provider': 'copilot'})
+            self.assertEqual(code, 200)
+            self.assertEqual((status['provider'], status['enabled']), ('copilot', True))
+            self.assertTrue(list(exts.glob('app-builder.copilot-bridge-*')))
+            self.assertTrue(status['copilot']['installed'])
+            self.assertIn('重新打开 VS Code', status['copilot']['note'])
+            code, _ = ai_api.handle_post('/api/ai/settings', {'provider': 'local', 'enabled': True})
+            self.assertEqual(code, 400)                     # local still requires a model file
+            code, status = ai_api.handle_post('/api/ai/settings', {'provider': 'nonsense'})
+            self.assertEqual(code, 200)
+            self.assertEqual(status['provider'], 'copilot')
+
+    def test_without_vscode_the_choice_is_kept_and_the_page_says_what_to_do(self):
+        with patch.dict(os.environ, {'APP_BUILDER_VSCODE_EXTENSIONS': str(Path(self.tmp.name) / 'nope' / 'extensions')}), \
+                patch.object(copilot_bridge, 'INFO', Path(self.tmp.name) / 'none.json'):
+            code, status = ai_api.handle_post('/api/ai/settings', {'provider': 'copilot'})
+            self.assertEqual(code, 200)
+            self.assertEqual(status['provider'], 'copilot')
+            self.assertFalse(status['copilot']['installed'])
+            self.assertIn('VS Code', status['copilot']['note'])
 
     def test_note_and_hint_helpers_work_through_the_bridge(self):
         b = FakeBridge(lambda body: (200, {'text': json.dumps({'note': 'Check the consent screen and a full transfer.'})}))
