@@ -462,7 +462,7 @@ def describe_refs(info, key=''):
             + (f' {i["url"]}' if i['url'] else '') for i in ref_items(info, key)]
 
 
-WIKI_SPECIAL = re.compile(r'([\[\]{}|*_^~+!#])')
+WIKI_SPECIAL = re.compile(r'([\[\]{}|*_^~+!#-])')
 
 
 def wiki_text(text):
@@ -570,7 +570,7 @@ def process_ticket(client, key, info, link, build_label, conf, llm, dry_run, gmx
         from .local_llm import tester_note
         try:
             note = tester_note(llm, _without_key(info.get('subject', ''), key), info.get('pr_body') or info.get('body', ''),
-                               info.get('pr_context', ''))
+                               info.get('pr_context', ''), ticket=result['summary'])
         except Exception:
             note = None
     if note:

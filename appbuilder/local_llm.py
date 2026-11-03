@@ -145,7 +145,7 @@ def clean_sentence(text, source, limit=220):
     return text
 
 
-def tester_note_prompt(title, body='', extra='', rich=False):
+def tester_note_prompt(title, body='', extra='', rich=False, ticket=''):
     """(system, user, source) exactly as sent. `extra` (commits, files, diff) is only used for
     models that can take it (rich); small local models keep the short input."""
     cap = 8000 if rich else 2500
@@ -153,18 +153,22 @@ def tester_note_prompt(title, body='', extra='', rich=False):
     system = ('You help software testers. From a pull request, write ONE plain English sentence (max 30 '
               'words) saying what changed and what a tester should check. Use only facts in the text. '
               'No links, no ticket numbers, no markdown. Output only JSON: {"note": "<sentence>"}.')
-    user = f'Title: {title}\nDescription:\n{(body or "")[:cap]}'
+    if ticket:
+        system = system.replace('Output only JSON:', 'A pull request can cover several tickets: describe ONLY the change that '
+                                'matches the ticket given below. If the pull request has nothing to do with that '
+                                'ticket, output {"note": ""}. Output only JSON:')
+    user = (f'Ticket to test: {ticket}\n' if ticket else '') + f'Title: {title}\nDescription:\n{(body or "")[:cap]}'
     if extra:
         system = system.replace('Use only facts in the text.', 'The text also lists commits, changed files and code changes. Use only facts in the text.')
         user += '\n\n' + extra
     return system, user, f'{title}\n{(body or "")[:cap]}\n{extra}'
 
 
-def tester_note(llm, title, body='', extra=''):
+def tester_note(llm, title, body='', extra='', ticket=''):
     """One sentence for testers: what changed and what to check. None when unsure."""
     if not llm or not (title or '').strip():
         return None
-    system, user, source = tester_note_prompt(title, body, extra, rich=bool(getattr(llm, 'rich', False)))
+    system, user, source = tester_note_prompt(title, body, extra, rich=bool(getattr(llm, 'rich', False)), ticket=ticket)
     data = llm.ask_json(system, user)
     return clean_sentence((data or {}).get('note'), source)
 

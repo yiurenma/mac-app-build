@@ -156,3 +156,21 @@ class TryPrTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+class TicketFocusTests(unittest.TestCase):
+    def test_prompt_names_the_ticket_and_allows_an_empty_note(self):
+        system, user, _ = local_llm.tester_note_prompt('PR', 'body', ticket='Review button is greyed out')
+        self.assertIn('Ticket to test: Review button is greyed out', user)
+        self.assertIn('ONLY the change that matches the ticket', system)
+        plain_system, plain_user, _ = local_llm.tester_note_prompt('PR', 'body')
+        self.assertNotIn('Ticket to test', plain_user)
+
+    def test_unrelated_pr_gives_no_note(self):
+        class LLM:
+            rich = True
+            def ask_json(self, s, u): return {'note': ''}
+        self.assertIsNone(local_llm.tester_note(LLM(), 'PR', 'body', ticket='Review button is greyed out'))
+
+    def test_wiki_text_escapes_hyphen_so_no_strikethrough(self):
+        from appbuilder import jira_notify
+        self.assertEqual(jira_notify.wiki_text('A-1: x - y'), 'A\\-1: x \\- y')
